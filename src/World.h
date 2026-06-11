@@ -68,6 +68,8 @@ public:
     void waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs);
 
     void drawChunks(const Frustum& frustum);
+    // Translucent water pass; call after drawChunks with blending enabled.
+    void drawWater(const Frustum& frustum);
 
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
 

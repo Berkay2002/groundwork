@@ -10,6 +10,11 @@ constexpr float WALK_SPEED = 4.5f;
 constexpr float SPRINT_SPEED = 7.0f;
 constexpr float FLY_SPEED = 12.0f;
 constexpr float TERMINAL = -60.0f;
+// In water: weak gravity, slow sinking, and holding jump swims upward —
+// without this a lake deeper than ~1.5 blocks would be inescapable.
+constexpr float WATER_GRAVITY = -10.0f;
+constexpr float WATER_TERMINAL = -4.0f;
+constexpr float SWIM_SPEED = 4.5f;
 }
 
 glm::vec3 Player::lookDir() const {
@@ -83,14 +88,24 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
         if (in.jump)  vel.y = speed;
         if (in.sneak) vel.y = -speed;
     } else {
+        // Swimming when the body's center is in water.
+        bool inWater = world.getBlock((int)std::floor(pos.x),
+                                      (int)std::floor(pos.y + HEIGHT * 0.5f),
+                                      (int)std::floor(pos.z)) == Block::Water;
         float speed = in.sprint ? SPRINT_SPEED : WALK_SPEED;
+        if (inWater) speed *= 0.6f;
         vel.x = wish.x * speed;
         vel.z = wish.z * speed;
-        vel.y += GRAVITY * dt;
-        if (vel.y < TERMINAL) vel.y = TERMINAL;
-        if (in.jump && onGround) {
-            vel.y = JUMP_SPEED;
-            onGround = false;
+        vel.y += (inWater ? WATER_GRAVITY : GRAVITY) * dt;
+        float terminal = inWater ? WATER_TERMINAL : TERMINAL;
+        if (vel.y < terminal) vel.y = terminal;
+        if (in.jump) {
+            if (inWater) {
+                vel.y = SWIM_SPEED;
+            } else if (onGround) {
+                vel.y = JUMP_SPEED;
+                onGround = false;
+            }
         }
     }
 

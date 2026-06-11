@@ -30,7 +30,7 @@ exits (useful for automated checks).
 | Left Ctrl | Sprint |
 | Left click | Break block |
 | Right click | Place block |
-| 1–7, scroll wheel | Select hotbar slot |
+| 1–8, scroll wheel | Select hotbar slot |
 | F | Toggle fly mode |
 | Esc | Release mouse, then quit |
 
@@ -63,22 +63,34 @@ with the selected block at the bottom.
   and the light level of the cell each face looks into baked into the
   vertices. Chunks are marked dirty on edits (including neighbors across
   borders) and rebuilt with a per-frame budget. Torches are meshed as thin
-  3D posts rather than cubes.
+  3D posts rather than cubes. Water builds a second, translucent mesh per
+  chunk, drawn after all opaque geometry with blending (faces appear only
+  against air, so a lake renders as one surface — visible from below too).
 - **Lighting** — every cell stores 4-bit sunlight + 4-bit block light.
   Sunlight column-fills from the sky (level 15 falls without attenuation)
   and BFS-spreads into overhangs; torches emit block light 14 that fades by
-  one per block. Breaking/placing blocks relights incrementally (flood-fill
-  add, unlight-BFS remove), propagating across chunk borders. Light is never
-  saved — it is recomputed when a chunk is generated or loaded.
+  one per block. Water transmits light but breaks the lossless downward rule,
+  so lakes darken one level per block of depth. Breaking/placing blocks
+  relights incrementally (flood-fill add, unlight-BFS remove), propagating
+  across chunk borders. Light is never saved — it is recomputed when a chunk
+  is generated or loaded.
 - **Terrain** (`src/Terrain.cpp`, `src/Noise.h`) — deterministic and a pure
   function of world coordinates + seed: rolling value-noise plains plus
   occasional hill regions selected by a low-frequency mask; sandy basins below
-  y=21, unbreakable bedrock at y=0. Trees are placed one-candidate-per-8x8-cell
-  by hashing, so chunks generate independently in any order and trees that
-  straddle a chunk border come out identical on both sides.
+  y=21, unbreakable bedrock at y=0. A second low-frequency mask sinks lake
+  basins that fill with water up to y=20 (sandy shores and beds). Underground,
+  "spaghetti" caves are carved where two 3D noise fields are both near zero —
+  they pinch closed near the surface so cave mouths stay occasional, and never
+  open the floor of a lake. Coal and iron veins (coal shallow-to-mid, iron
+  deep) replace stone via one hashed vein candidate per 8³ cell. Trees are
+  placed one-candidate-per-8x8-cell by hashing, so chunks generate
+  independently in any order and trees that straddle a chunk border come out
+  identical on both sides; everything stays order-independent the same way.
 - **Player** (`src/Player.h/.cpp`) — first-person controller with gravity,
   jumping, and swept per-axis AABB collision (sub-stepped so fast movement
-  can't tunnel through blocks). `F` toggles a fly mode for exploring.
+  can't tunnel through blocks). Water is swim-through: gravity weakens, you
+  sink slowly, and holding Space swims up. `F` toggles a fly mode for
+  exploring.
 - **Textures** (`src/Texture.cpp`) — the block atlas is generated procedurally
   at startup (hash-noise grass/dirt/stone tiles), so there are no asset files.
 - **HUD** (`src/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,

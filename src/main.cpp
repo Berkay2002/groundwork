@@ -30,7 +30,8 @@ const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
 
 const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
-                        Block::Wood, Block::Leaves, Block::Sand, Block::Torch};
+                        Block::Wood, Block::Leaves, Block::Sand, Block::Torch,
+                        Block::Water};
 constexpr int HOTBAR_SLOTS = int(sizeof(HOTBAR) / sizeof(HOTBAR[0]));
 
 const char* CHUNK_VS = R"(
@@ -61,10 +62,11 @@ uniform vec3 uSky;
 uniform float uFogStart;
 uniform float uFogEnd;
 out vec4 FragColor;
+uniform float uAlpha;
 void main() {
     vec3 c = texture(uAtlas, vUV).rgb * vLight;
     float fog = clamp((vDist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
-    FragColor = vec4(mix(c, uSky, fog), 1.0);
+    FragColor = vec4(mix(c, uSky, fog), uAlpha);
 }
 )";
 
@@ -171,6 +173,9 @@ const char* blockName(Block b) {
         case Block::Sand:    return "Sand";
         case Block::Bedrock: return "Bedrock";
         case Block::Torch:   return "Torch";
+        case Block::CoalOre: return "Coal Ore";
+        case Block::IronOre: return "Iron Ore";
+        case Block::Water:   return "Water";
         default:             return "Air";
     }
 }
@@ -420,9 +425,21 @@ int main(int argc, char** argv) {
         chunkShader.setFloat("uFogStart", fogEnd * 0.7f);
         chunkShader.setFloat("uFogEnd", fogEnd * 0.98f);
         chunkShader.setInt("uAtlas", 0);
+        chunkShader.setFloat("uAlpha", 1.0f);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, atlas);
-        world.drawChunks(Frustum::fromMatrix(viewProj));
+        Frustum frustum = Frustum::fromMatrix(viewProj);
+        world.drawChunks(frustum);
+
+        // Translucent water pass: after all opaque geometry, blended, with
+        // back faces kept so the surface is visible from underwater.
+        chunkShader.setFloat("uAlpha", 0.65f);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_CULL_FACE);
+        world.drawWater(frustum);
+        glEnable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
 
         // Selected block outline (shrunk to the post for torches)
         if (hit.hit) {

@@ -47,10 +47,15 @@ static void testTerrainShape() {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 for (int x = 0; x < CHUNK_SIZE; ++x) {
                     CHECK(c.get(x, 0, z) == Block::Bedrock);
-                    int h = t.heightAt(ccx * CHUNK_SIZE + x, ccz * CHUNK_SIZE + z);
+                    int wx = ccx * CHUNK_SIZE + x, wz = ccz * CHUNK_SIZE + z;
+                    int h = t.heightAt(wx, wz);
                     Block surf = c.get(x, h, z);
-                    Block expected = h <= Terrain::SAND_LEVEL ? Block::Sand : Block::Grass;
-                    CHECK(surf == expected);
+                    if (t.isCarved(wx, h, wz, h)) {
+                        CHECK(surf == Block::Air); // cave mouth breached the surface
+                    } else {
+                        Block expected = h <= Terrain::SAND_LEVEL ? Block::Sand : Block::Grass;
+                        CHECK(surf == expected);
+                    }
                     for (int y = 0; y < CHUNK_HEIGHT; ++y) {
                         Block b = c.get(x, y, z);
                         if (b == Block::Wood) {
@@ -95,6 +100,64 @@ static void testTreeBorderConsistency() {
             }
         }
     }
+}
+
+static void testCaves() {
+    Terrain t(1337);
+    int carved = 0;
+    for (int ccz = -3; ccz <= 3; ++ccz) {
+        for (int ccx = -3; ccx <= 3; ++ccx) {
+            Chunk c(ccx, ccz);
+            t.generateChunk(c);
+            for (int z = 0; z < CHUNK_SIZE; ++z) {
+                for (int x = 0; x < CHUNK_SIZE; ++x) {
+                    int wx = ccx * CHUNK_SIZE + x, wz = ccz * CHUNK_SIZE + z;
+                    int h = t.heightAt(wx, wz);
+                    CHECK(c.get(x, 0, z) == Block::Bedrock); // never carved
+                    for (int y = 1; y <= h; ++y) {
+                        bool carve = t.isCarved(wx, y, wz, h);
+                        if (carve) {
+                            ++carved;
+                            // The generated chunk agrees with the pure predicate
+                            // (only leaves, which write into air, may fill a
+                            // carved cell near a cave mouth).
+                            if (c.get(x, y, z) != Block::Air &&
+                                c.get(x, y, z) != Block::Leaves) CHECK(false);
+                            // Lake/shore columns keep a solid floor near the surface.
+                            CHECK(!(h < Terrain::SEA_LEVEL + 2 && y > h - 4));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    CHECK(carved > 200); // caves actually exist in a 7x7 chunk area
+}
+
+static void testOres() {
+    Terrain t(1337);
+    int coal = 0, iron = 0;
+    for (int ccz = -3; ccz <= 3; ++ccz) {
+        for (int ccx = -3; ccx <= 3; ++ccx) {
+            Chunk c(ccx, ccz);
+            t.generateChunk(c);
+            for (int z = 0; z < CHUNK_SIZE; ++z)
+                for (int x = 0; x < CHUNK_SIZE; ++x)
+                    for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+                        Block b = c.get(x, y, z);
+                        if (b != Block::CoalOre && b != Block::IronOre) continue;
+                        // Ore replaces stone only, so it stays under the dirt
+                        // cap and respects its depth band (vein center max +1).
+                        int h = t.heightAt(ccx * CHUNK_SIZE + x, ccz * CHUNK_SIZE + z);
+                        CHECK(y < h - 3);
+                        if (b == Block::CoalOre) { ++coal; CHECK(y <= Terrain::COAL_MAX_Y + 1); }
+                        else                     { ++iron; CHECK(y <= Terrain::IRON_MAX_Y + 1); }
+                    }
+        }
+    }
+    CHECK(coal > 100);       // both ores are actually common enough to find
+    CHECK(iron > 50);
+    CHECK(coal > iron);      // coal has the wider band and higher chance
 }
 
 static void testSaveLoadRoundTrip() {
@@ -162,6 +225,62 @@ static void testMeshData() {
     CHECK(md.inds.size() == 5u * 6);
 }
 
+static void testWaterPredicates() {
+    CHECK(!isSolid(Block::Water));      // raycast/placement pass through
+    CHECK(!isCollidable(Block::Water)); // swim-through
+    CHECK(!isOpaque(Block::Water));     // light + lakebed faces pass
+    CHECK(dimsSunlight(Block::Water));
+    CHECK(!dimsSunlight(Block::Air));
+    CHECK(!dimsSunlight(Block::Stone)); // opaque, but not via this predicate
+}
+
+// Find a lake column (height comfortably under SEA_LEVEL) near the origin.
+static bool findLake(const Terrain& t, int& lx, int& lz) {
+    lx = lz = 0;
+    for (int z = -200; z <= 200; z += 2)
+        for (int x = -200; x <= 200; x += 2)
+            if (t.heightAt(x, z) <= Terrain::SEA_LEVEL - 3) { lx = x; lz = z; return true; }
+    return false;
+}
+
+static void testWaterGeneration() {
+    Terrain t(1337);
+    int lx, lz;
+    CHECK(findLake(t, lx, lz));
+    int h = t.heightAt(lx, lz);
+    Chunk c(World::floorDiv(lx, CHUNK_SIZE), World::floorDiv(lz, CHUNK_SIZE));
+    t.generateChunk(c);
+    int x = World::mod(lx, CHUNK_SIZE), z = World::mod(lz, CHUNK_SIZE);
+    CHECK(c.get(x, h, z) == Block::Sand); // sandy lakebed
+    for (int y = h + 1; y <= Terrain::SEA_LEVEL; ++y)
+        CHECK(c.get(x, y, z) == Block::Water);
+    CHECK(c.get(x, Terrain::SEA_LEVEL + 1, z) == Block::Air);
+}
+
+static void testWaterMesh() {
+    // A lone water block: all 6 faces, in the water arrays only.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    s.blocks[at(8, 40, 8)] = Block::Water;
+    MeshData md = buildMeshData(s);
+    CHECK(md.inds.empty());
+    CHECK(md.waterInds.size() == 6u * 6);
+
+    // Water on stone: the shared pair is one stone face (drawn, water is not
+    // opaque) and one water face (culled against opaque).
+    s.blocks[at(8, 39, 8)] = Block::Stone;
+    md = buildMeshData(s);
+    CHECK(md.inds.size() == 6u * 6);      // all stone faces incl. under water
+    CHECK(md.waterInds.size() == 5u * 6); // water bottom culled
+
+    // Stacked water culls the water-water pair.
+    s.blocks[at(8, 39, 8)] = Block::Water;
+    md = buildMeshData(s);
+    CHECK(md.inds.empty());
+    CHECK(md.waterInds.size() == 10u * 6);
+}
+
 static int surfaceY(World& w, int x, int z) {
     for (int y = CHUNK_HEIGHT - 1; y >= 0; --y)
         if (isSolid(w.getBlock(x, y, z))) return y;
@@ -213,6 +332,35 @@ static void testTorchLight() {
     std::filesystem::remove_all(dir);
 }
 
+static void testWaterLight() {
+    Terrain t(1337);
+    int lx, lz;
+    CHECK(findLake(t, lx, lz));
+    const char* dir = "test_saves_water";
+    std::filesystem::remove_all(dir);
+    {
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(lx, 40, lz), 1, 5000);
+    // Open sky above the lake; the top water cell loses the lossless rule.
+    CHECK(w.sunLightAt(lx, Terrain::SEA_LEVEL + 1, lz) == 15);
+    CHECK(w.sunLightAt(lx, Terrain::SEA_LEVEL, lz) == 14);
+    CHECK(w.sunLightAt(lx, Terrain::SEA_LEVEL - 1, lz) == 13);
+    CHECK(w.getBlock(lx, Terrain::SEA_LEVEL - 1, lz) == Block::Water); // depth >= 2
+
+    // Placing water in the open mid-air dims the column the same way, and
+    // removing it restores full sun (incremental relight matches initial).
+    int gy = Terrain::SEA_LEVEL + 5; // open air above the lake surface
+    CHECK(w.getBlock(lx, gy, lz) == Block::Air);
+    w.setBlock(lx, gy, lz, Block::Water);
+    CHECK(w.sunLightAt(lx, gy, lz) == 14);     // inside the water cell
+    CHECK(w.sunLightAt(lx, gy - 1, lz) == 14); // sideways refill from open sky
+    w.setBlock(lx, gy, lz, Block::Air);
+    CHECK(w.sunLightAt(lx, gy, lz) == 15);
+    CHECK(w.sunLightAt(lx, gy - 1, lz) == 15);
+    }
+    std::filesystem::remove_all(dir);
+}
+
 static void testCrossBorderTorch() {
     const char* dir = "test_saves_border";
     std::filesystem::remove_all(dir);
@@ -231,12 +379,18 @@ static void testCrossBorderTorch() {
 int main() {
     testFloorDivMod();
     testMeshData();
+    testWaterPredicates();
+    testWaterGeneration();
+    testWaterMesh();
+    testWaterLight();
     testSunlight();
     testTorchLight();
     testCrossBorderTorch();
     testTerrainDeterminism();
     testTerrainShape();
     testTreeBorderConsistency();
+    testCaves();
+    testOres();
     testSaveLoadRoundTrip();
     testRaycast();
     if (failures == 0) std::printf("all tests passed\n");

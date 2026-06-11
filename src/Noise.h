@@ -19,6 +19,18 @@ public:
         return sum / norm;
     }
 
+    // 3D fBm in roughly [-1, 1] (used for cave carving).
+    float fbm3(float x, float y, float z, int octaves, float baseFreq) const {
+        float sum = 0.0f, amp = 1.0f, norm = 0.0f, freq = baseFreq;
+        for (int i = 0; i < octaves; ++i) {
+            sum += amp * value3(x * freq, y * freq, z * freq, seed_ + uint32_t(i) * 0x9E3779B9u);
+            norm += amp;
+            amp *= 0.5f;
+            freq *= 2.0f;
+        }
+        return sum / norm;
+    }
+
 private:
     uint32_t seed_;
 
@@ -47,5 +59,25 @@ private:
         float top = a + (b - a) * tx;
         float bot = c + (d - c) * tx;
         return top + (bot - top) * tz;
+    }
+
+    // 3D lattice reuses the 2D hash with y folded into the seed.
+    static float lattice3(int32_t x, int32_t y, int32_t z, uint32_t seed) {
+        return lattice(x, z, seed ^ (uint32_t(y) * 0x9E3779B9u));
+    }
+
+    static float value3(float x, float y, float z, uint32_t seed) {
+        int32_t x0 = (int32_t)std::floor(x), y0 = (int32_t)std::floor(y),
+                z0 = (int32_t)std::floor(z);
+        float tx = smooth(x - x0), ty = smooth(y - y0), tz = smooth(z - z0);
+        auto plane = [&](int32_t yy) {
+            float a = lattice3(x0, yy, z0, seed),     b = lattice3(x0 + 1, yy, z0, seed);
+            float c = lattice3(x0, yy, z0 + 1, seed), d = lattice3(x0 + 1, yy, z0 + 1, seed);
+            float top = a + (b - a) * tx;
+            float bot = c + (d - c) * tx;
+            return top + (bot - top) * tz;
+        };
+        float lo = plane(y0), hi = plane(y0 + 1);
+        return lo + (hi - lo) * ty;
     }
 };

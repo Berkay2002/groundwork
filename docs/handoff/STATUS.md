@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11)
+# Status (last updated: 2026-06-11, after Batch E)
 
 ## Where the project stands
 
-All planned batches through D are **done and verified**:
+All planned batches through E are **done and verified**:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -11,6 +11,7 @@ All planned batches through D are **done and verified**:
 | Batch B | Trees, Wood/Leaves/Sand/Bedrock blocks, two-scale terrain (plains + hill mask), sand basins, bedrock floor | done |
 | Batch C | Frustum culling, background generation + meshing on a worker pool, perf counters in overlay | done |
 | Batch D | 4-bit sun + block light per cell, BFS add/unlight relight on edits, cross-border propagation, light baked into mesh verts (0.85^n curve), Torch block as a 3D post (walk-through, non-opaque, emits 14), light readout in overlay | done |
+| Batch E | Spaghetti caves (two 3D noise fields, surface-pinched), Coal/Iron ore veins (depth-banded, per-8³-cell hashing), water (lake basins to SEA_LEVEL 20, translucent second mesh pass, sunlight attenuation, swim physics, hotbar slot 8) | done |
 
 ### Batch D implementation notes
 
@@ -30,12 +31,43 @@ All planned batches through D are **done and verified**:
   against its own emission; the selection outline shrinks to match;
   `isCollidable`/`isOpaque` are now distinct from `isSolid`.
 
+### Batch E implementation notes
+
+- New blocks (append-only, save stays v1): `CoalOre = 9`, `IronOre = 10`,
+  `Water = 11`; atlas grew to 13 tiles. Water's predicate row: not solid
+  (raycast passes through; placing into water replaces it), not collidable,
+  not opaque, and a new `dimsSunlight` predicate breaks the lossless
+  downward-15 rule (lakes darken ~1 level per block of depth; both the chunk
+  BFS and `World::addLight` check the destination block, and the sun column
+  fill stops at water). The water plan is `docs/plans/batch-e-water.md`.
+- Caves: `Terrain::isCarved(wx,wy,wz,height)` — carve where **two** 3D fBm
+  fields are both near zero (|n| < 0.085·taper, freq 1/48, y squashed 1.6×).
+  The taper (clamp(depth/12, 0.3, 1)) pinches tunnels near the surface; lake
+  and shore columns (height < SEA_LEVEL+2) are never carved above height-4.
+  Trees skip candidates whose base column is carved (no floating trees).
+- Lake basins: a third height mask (`basin_`, salt 0x5A17BEEF) sinks terrain
+  up to 12 blocks where fbm > 0.42. **The salt was chosen so the origin area
+  (the user's home chunks) gets zero depression** — terrain there is
+  unchanged from Batch D apart from caves/ores. ~7% of land near origin is
+  lake; the nearest is around (-14,-26), a big one around (-200,-200).
+- Water rendering: `MeshData` gained `waterVerts/waterInds`; water faces are
+  emitted only against air/torch (water-water and water-opaque culled), into
+  a second VAO drawn by `World::drawWater` after all opaque chunks with
+  GL_BLEND on, face culling off (surface visible from underwater), uAlpha
+  0.65, depth writes on.
+- Ore veins: per-(8³ cell, ore type) hash candidate → 3×3×3 clumpy blob that
+  replaces stone only. Cells align with chunks so veins never cross borders.
+  Coal: vein centers ≤ y 44, ~43% of cells; iron: ≤ y 22, ~31%.
+- Swim: in water, gravity -10, terminal -4, Space sets vel.y = 4.5,
+  horizontal speed ×0.6. Without this a deep lake would be inescapable
+  (jump impulse only clears ~1.5 blocks).
+
 ## What's next
 
-**Batch E — Underground & Richer Terrain** (caves, ores, water) is next per
-the agreed order D → E → F → G → H; reasoning at the bottom of `TODO.md`.
-Caves are the natural showcase for the new lighting. See `HANDOFF.md` in
-this directory for session context and Batch E pointers.
+**Batch F — Mesh & Render Optimization** (greedy meshing, vertex packing,
+draw ordering) is next per the agreed order D → E → F → G → H; reasoning at
+the bottom of `TODO.md`. Note water changed the meshing rules (second
+translucent mesh) — greedy meshing must handle both meshes.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -50,11 +82,11 @@ this directory for session context and Batch E pointers.
 
 ## Recent verification snapshot
 
-At Batch D completion: still 120 fps at render distance 6, gen ~0.2 ms/chunk
-(lighting roughly doubled generation cost, still trivial), mesh ~0.2 ms,
-queues empty at steady state. Verified visually inside a sealed stone hut:
-torch light pool with radial falloff into dark corners, sun shaft through the
-doorway, overlay light readout (`sun 5 torch 13`) matching expectations; an
-outdoor run confirmed sunlit terrain and under-canopy shading look right.
-Tests (incl. new sunlight/torch/cross-border/unlight cases) pass repeatedly
-and under ThreadSanitizer.
+At Batch E completion: 120 fps at render distance 6, gen ~0.5 ms/chunk
+(caves + ores + water roughly doubled it again, still trivial), mesh
+~0.2 ms, queues empty at steady state. Verified visually: lake panorama and
+sandy shore with translucent shallows, underwater view up through the
+surface, torch-lit cave (`sun 0 torch 13` readout), sunlight gradient down
+a natural cave shaft, iron vein by torchlight. Tests (incl. new cave/ore/
+water generation, water predicates, water mesh and underwater-sunlight
+cases) pass repeatedly and under ThreadSanitizer (ASLR workaround).

@@ -12,6 +12,9 @@ Chunk::~Chunk() {
     if (vao_) glDeleteVertexArrays(1, &vao_);
     if (vbo_) glDeleteBuffers(1, &vbo_);
     if (ebo_) glDeleteBuffers(1, &ebo_);
+    if (waterVao_) glDeleteVertexArrays(1, &waterVao_);
+    if (waterVbo_) glDeleteBuffers(1, &waterVbo_);
+    if (waterEbo_) glDeleteBuffers(1, &waterEbo_);
 }
 
 namespace {
@@ -51,12 +54,13 @@ void Chunk::computeInitialLight() {
     std::vector<int> sunQ, blkQ;
     sunQ.reserve(8192);
 
-    // Sunlight: each column is 15 from the sky down to the first opaque block.
+    // Sunlight: each column is 15 from the sky down to the first opaque or
+    // dimming (water) block; water then gets attenuated light via the BFS.
     for (int z = 0; z < CS; ++z) {
         for (int x = 0; x < CS; ++x) {
             for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
                 int i = index(x, y, z);
-                if (isOpaque(blocks_[i])) break;
+                if (isOpaque(blocks_[i]) || dimsSunlight(blocks_[i])) break;
                 light_[i] = 15;
                 sunQ.push_back(i);
             }
@@ -81,8 +85,10 @@ void Chunk::computeInitialLight() {
                     ny < 0 || ny >= CHUNK_HEIGHT) continue;
                 int ni = index(nx, ny, nz);
                 if (isOpaque(blocks_[ni])) continue;
-                // Full sunlight keeps level 15 straight down (no attenuation).
-                uint8_t target = (sun && d[1] == -1 && l == 15) ? 15 : l - 1;
+                // Full sunlight keeps level 15 straight down (no attenuation),
+                // unless it enters water, which dims it like a sideways step.
+                uint8_t target = (sun && d[1] == -1 && l == 15 &&
+                                  !dimsSunlight(blocks_[ni])) ? 15 : l - 1;
                 uint8_t nl = sun ? (light_[ni] & 0x0F) : (light_[ni] >> 4);
                 if (nl < target) {
                     if (sun) light_[ni] = (light_[ni] & 0xF0) | target;
@@ -170,27 +176,36 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                     continue;
                 }
 
+                bool water = (b == Block::Water);
+                std::vector<float>& verts = water ? md.waterVerts : md.verts;
+                std::vector<uint32_t>& inds = water ? md.waterInds : md.inds;
                 for (int f = 0; f < 6; ++f) {
                     int nx = x + FACE_DIR[f][0], ny = y + FACE_DIR[f][1], nz = z + FACE_DIR[f][2];
                     Block nb = blockAt(nx, ny, nz);
-                    if (isOpaque(nb)) continue; // non-cubes (torches) don't hide faces
+                    // Water faces show only against air/torch: water-water and
+                    // water-opaque pairs are culled, so a lake is one surface.
+                    if (water) {
+                        if (nb == Block::Water || isOpaque(nb)) continue;
+                    } else if (isOpaque(nb)) {
+                        continue; // non-cubes (torches, water) don't hide faces
+                    }
 
                     int tile = tileFor(b, f);
                     float u0 = tile * tileW;
                     // The face is lit by the cell it looks into.
                     float light = FACES[f].light * LIGHT_CURVE[lightAt(nx, ny, nz)];
-                    uint32_t base = uint32_t(md.verts.size() / 6);
+                    uint32_t base = uint32_t(verts.size() / 6);
                     const FaceDef& fd = FACES[f];
                     for (int v = 0; v < 4; ++v) {
-                        md.verts.push_back(float(bx + x) + fd.corners[v][0]);
-                        md.verts.push_back(float(y)      + fd.corners[v][1]);
-                        md.verts.push_back(float(bz + z) + fd.corners[v][2]);
-                        md.verts.push_back(u0 + FACE_UV[v][0] * tileW);
-                        md.verts.push_back(FACE_UV[v][1]);
-                        md.verts.push_back(light);
+                        verts.push_back(float(bx + x) + fd.corners[v][0]);
+                        verts.push_back(float(y)      + fd.corners[v][1]);
+                        verts.push_back(float(bz + z) + fd.corners[v][2]);
+                        verts.push_back(u0 + FACE_UV[v][0] * tileW);
+                        verts.push_back(FACE_UV[v][1]);
+                        verts.push_back(light);
                     }
-                    md.inds.push_back(base + 0); md.inds.push_back(base + 1); md.inds.push_back(base + 2);
-                    md.inds.push_back(base + 0); md.inds.push_back(base + 2); md.inds.push_back(base + 3);
+                    inds.push_back(base + 0); inds.push_back(base + 1); inds.push_back(base + 2);
+                    inds.push_back(base + 0); inds.push_back(base + 2); inds.push_back(base + 3);
                 }
             }
         }
@@ -198,17 +213,19 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
     return md;
 }
 
-void Chunk::uploadMesh(const MeshData& md) {
-    if (!vao_) {
-        glGenVertexArrays(1, &vao_);
-        glGenBuffers(1, &vbo_);
-        glGenBuffers(1, &ebo_);
+namespace {
+void uploadOne(unsigned& vao, unsigned& vbo, unsigned& ebo,
+               const std::vector<float>& verts, const std::vector<uint32_t>& inds) {
+    if (!vao) {
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glGenBuffers(1, &ebo);
     }
-    glBindVertexArray(vao_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, md.verts.size() * sizeof(float), md.verts.data(), GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, md.inds.size() * sizeof(uint32_t), md.inds.data(), GL_STATIC_DRAW);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, inds.size() * sizeof(uint32_t), inds.data(), GL_STATIC_DRAW);
 
     const GLsizei stride = 6 * sizeof(float);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
@@ -218,12 +235,27 @@ void Chunk::uploadMesh(const MeshData& md) {
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(5 * sizeof(float)));
     glEnableVertexAttribArray(2);
     glBindVertexArray(0);
+}
+}
 
+void Chunk::uploadMesh(const MeshData& md) {
+    uploadOne(vao_, vbo_, ebo_, md.verts, md.inds);
     indexCount_ = (int)md.inds.size();
+    // Most chunks have no water: skip allocating empty GL buffers for them.
+    if (!md.waterInds.empty() || waterVao_) {
+        uploadOne(waterVao_, waterVbo_, waterEbo_, md.waterVerts, md.waterInds);
+    }
+    waterIndexCount_ = (int)md.waterInds.size();
 }
 
 void Chunk::draw() const {
     if (!vao_ || indexCount_ == 0) return;
     glBindVertexArray(vao_);
     glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+}
+
+void Chunk::drawWater() const {
+    if (!waterVao_ || waterIndexCount_ == 0) return;
+    glBindVertexArray(waterVao_);
+    glDrawElements(GL_TRIANGLES, waterIndexCount_, GL_UNSIGNED_INT, nullptr);
 }

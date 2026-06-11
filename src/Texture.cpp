@@ -76,6 +76,30 @@ RGB bedrockPixel(int x, int y) {
     float n = 0.5f + 0.7f * noise01(x / 2, y / 2, 12);
     return shade({80, 80, 84}, n);
 }
+// Ore tiles: the stone texture with embedded mineral blobs. Blobs come from
+// thresholded low-res noise so they cluster into 2-3px nuggets.
+bool oreBlob(int x, int y, uint32_t salt) {
+    return noise01(x / 2, y / 2, salt) > 0.78f;
+}
+RGB coalOrePixel(int x, int y) {
+    if (oreBlob(x, y, 16)) {
+        float n = 0.7f + 0.5f * noise01(x, y, 17);
+        return shade({38, 38, 42}, n);
+    }
+    return stonePixel(x, y);
+}
+RGB ironOrePixel(int x, int y) {
+    if (oreBlob(x, y, 18)) {
+        float n = 0.8f + 0.35f * noise01(x, y, 19);
+        return shade({216, 168, 122}, n);
+    }
+    return stonePixel(x, y);
+}
+RGB waterPixel(int x, int y) {
+    // Deep blue with faint horizontal wave streaks.
+    float n = 0.85f + 0.2f * noise01(x / 3, y, 20) + 0.1f * noise01(x, y, 21);
+    return shade({52, 96, 188}, n);
+}
 RGB torchPixel(int x, int y) {
     // Classic torch: wooden stick up the middle, flame on top. y counts from
     // the bottom of the face (v=0). The torch model samples the central 2px
@@ -110,7 +134,10 @@ unsigned createBlockAtlas() {
                 case 6: c = leavesPixel(tx, y); break;
                 case 7: c = sandPixel(tx, y); break;
                 case 8: c = bedrockPixel(tx, y); break;
-                default: c = torchPixel(tx, y); break;
+                case 9: c = torchPixel(tx, y); break;
+                case 10: c = coalOrePixel(tx, y); break;
+                case 11: c = ironOrePixel(tx, y); break;
+                default: c = waterPixel(tx, y); break;
             }
             size_t i = (size_t(y) * W + x) * 3;
             img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;

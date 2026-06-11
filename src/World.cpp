@@ -77,8 +77,12 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
     } else if (!isOpaque(b)) {
         addLight(LightChan::Block, around);
     }
-    // Sun channel: same shape, but sources are only the sky.
-    if (isOpaque(b) && !isOpaque(old))
+    // Sun channel: same shape, but sources are only the sky. Water counts as
+    // a (partial) blocker: placing it must strip the lossless 15 column below,
+    // after which the re-add seeds give it attenuated light.
+    bool blocksSunNow = isOpaque(b) || dimsSunlight(b);
+    bool blockedSunBefore = isOpaque(old) || dimsSunlight(old);
+    if (blocksSunNow && !blockedSunBefore)
         removeLight(LightChan::Sun, p);
     if (!isOpaque(b))
         addLight(LightChan::Sun, around);
@@ -135,8 +139,10 @@ void World::addLight(LightChan ch, std::vector<glm::ivec3> q) {
             glm::ivec3 n = p + d;
             if (n.y < 0 || n.y >= CHUNK_HEIGHT) continue;
             if (!getChunk(floorDiv(n.x, CHUNK_SIZE), floorDiv(n.z, CHUNK_SIZE))) continue;
-            if (isOpaque(getBlock(n.x, n.y, n.z))) continue;
-            uint8_t target = (ch == LightChan::Sun && d.y == -1 && l == 15) ? 15 : l - 1;
+            Block nb = getBlock(n.x, n.y, n.z);
+            if (isOpaque(nb)) continue;
+            uint8_t target = (ch == LightChan::Sun && d.y == -1 && l == 15 &&
+                              !dimsSunlight(nb)) ? 15 : l - 1;
             if (getLight(ch, n.x, n.y, n.z) < target) {
                 setLight(ch, n.x, n.y, n.z, target);
                 q.push_back(n);
@@ -390,6 +396,15 @@ void World::drawChunks(const Frustum& frustum) {
         if (!frustum.intersectsAABB(mn, mx)) continue;
         chunk->draw();
         ++drawn_;
+    }
+}
+
+void World::drawWater(const Frustum& frustum) {
+    for (auto& [key, chunk] : chunks_) {
+        glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
+        glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
+        if (!frustum.intersectsAABB(mn, mx)) continue;
+        chunk->drawWater();
     }
 }
 

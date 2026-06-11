@@ -7,9 +7,13 @@ constexpr int CHUNK_SIZE = 16;   // X and Z
 constexpr int CHUNK_HEIGHT = 80; // Y
 
 // CPU-side mesh, built on any thread, uploaded on the GL thread.
+// Water lives in its own arrays: it is drawn in a separate translucent pass
+// after all opaque geometry.
 struct MeshData {
     std::vector<float> verts;   // x y z u v light
     std::vector<uint32_t> inds;
+    std::vector<float> waterVerts;
+    std::vector<uint32_t> waterInds;
 };
 
 // Self-contained copy of everything mesh building needs: the chunk's blocks
@@ -88,6 +92,7 @@ public:
 
     void uploadMesh(const MeshData& md); // GL thread only
     void draw() const;
+    void drawWater() const; // translucent pass, after all opaque chunks
     bool hasMesh() const { return vao_ != 0; }
 
     // Persistence: raw block dump.
@@ -106,4 +111,6 @@ private:
 
     unsigned vao_ = 0, vbo_ = 0, ebo_ = 0;
     int indexCount_ = 0;
+    unsigned waterVao_ = 0, waterVbo_ = 0, waterEbo_ = 0;
+    int waterIndexCount_ = 0;
 };
