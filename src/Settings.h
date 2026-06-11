@@ -9,7 +9,7 @@
 struct Settings {
     float mouseSensitivity = 0.12f;
     float fov = 75.0f;
-    int renderDistance = 6;
+    int renderDistance = 64;
     bool vsync = true;
     // Survival-ish mode: block drops, finite stacked placement, E inventory.
     // Off = creative (the original infinite-palette behavior).
@@ -61,7 +61,7 @@ struct Settings {
         if (s.fov < 30.0f) s.fov = 30.0f;
         if (s.fov > 110.0f) s.fov = 110.0f;
         if (s.renderDistance < 2) s.renderDistance = 2;
-        if (s.renderDistance > 16) s.renderDistance = 16;
+        if (s.renderDistance > 64) s.renderDistance = 64;
         if (s.mouseSensitivity <= 0.0f) s.mouseSensitivity = 0.12f;
         if (s.volume < 0.0f) s.volume = 0.0f;
         if (s.volume > 1.0f) s.volume = 1.0f;
