@@ -9,6 +9,9 @@ struct Settings {
     float fov = 75.0f;
     int renderDistance = 6;
     bool vsync = true;
+    // Survival-ish mode: block drops, finite stacked placement, E inventory.
+    // Off = creative (the original infinite-palette behavior).
+    bool survival = false;
 
     static Settings load(const std::string& path) {
         Settings s;
@@ -29,6 +32,7 @@ struct Settings {
                 else if (key == "fov") s.fov = std::stof(val);
                 else if (key == "render_distance") s.renderDistance = std::stoi(val);
                 else if (key == "vsync") s.vsync = std::stoi(val) != 0;
+                else if (key == "survival") s.survival = std::stoi(val) != 0;
                 else std::fprintf(stderr, "settings: unknown key '%s'\n", key.c_str());
             } catch (...) {
                 std::fprintf(stderr, "settings: bad value for '%s'\n", key.c_str());
@@ -50,6 +54,7 @@ struct Settings {
           << "mouse_sensitivity=" << mouseSensitivity << "\n"
           << "fov=" << fov << "\n"
           << "render_distance=" << renderDistance << "\n"
-          << "vsync=" << (vsync ? 1 : 0) << "\n";
+          << "vsync=" << (vsync ? 1 : 0) << "\n"
+          << "survival=" << (survival ? 1 : 0) << "\n";
     }
 };

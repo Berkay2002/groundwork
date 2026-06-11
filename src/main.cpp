@@ -14,8 +14,10 @@
 
 #include "Block.h"
 #include "Chunk.h"
+#include "Entity.h"
 #include "Frustum.h"
 #include "Hud.h"
+#include "Inventory.h"
 #include "Player.h"
 #include "SaveIO.h"
 #include "Settings.h"
@@ -101,6 +103,11 @@ struct App {
     Player player;
     PlayerInput input;
     int hotbarSlot = 0;
+    Inventory inv;          // survival-mode item storage (row 0 = hotbar)
+    ItemStack cursorStack;  // stack carried by the mouse in the inventory UI
+    Entities entities;
+    bool survival = false;
+    bool invOpen = false;
     bool mouseCaptured = true;
     double lastMouseX = 0, lastMouseY = 0;
     bool firstMouse = true;
@@ -109,7 +116,11 @@ struct App {
 
 App app;
 
-Block heldBlock() { return HOTBAR[app.hotbarSlot]; }
+Block heldBlock() {
+    if (!app.survival) return HOTBAR[app.hotbarSlot];
+    const ItemStack& s = app.inv.slots[app.hotbarSlot];
+    return s.empty() ? Block::Air : s.block;
+}
 
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     if (action == GLFW_PRESS) {
@@ -291,15 +302,32 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
         bool sel = (i == app.hotbarSlot);
         if (sel) hud.drawRect(x - 3, y - 3, slot + 6, slot + 6, 1, 1, 1, 0.9f);
         hud.drawRect(x, y, slot, slot, 0.1f, 0.1f, 0.1f, 0.65f);
-        // Icon: the side texture for grass, base tile otherwise.
-        int tile = tileFor(HOTBAR[i], 4);
-        hud.drawTile(x + pad, y + pad, icon, tile, sel ? 1.0f : 0.8f);
+        // Icon: the side texture for grass, base tile otherwise. Survival
+        // shows the inventory's hotbar row with stack counts instead of the
+        // fixed creative palette.
+        if (app.survival) {
+            const ItemStack& s = app.inv.slots[i];
+            if (!s.empty()) {
+                hud.drawTile(x + pad, y + pad, icon, tileFor(s.block, 4), sel ? 1.0f : 0.8f);
+                if (s.count > 1) {
+                    char cnt[4];
+                    std::snprintf(cnt, sizeof(cnt), "%d", s.count);
+                    float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
+                    hud.drawText(x + slot - cw - 4, y + slot - 16, 1.5f, cnt);
+                }
+            }
+        } else {
+            hud.drawTile(x + pad, y + pad, icon, tileFor(HOTBAR[i], 4), sel ? 1.0f : 0.8f);
+        }
         char num[2] = {char('1' + i), 0};
         hud.drawText(x + 4, y + 4, 1.0f, num, 1, 1, 1, 0.8f);
     }
-    const char* name = blockName(heldBlock());
-    float nameW = std::strlen(name) * Hud::GLYPH * 2.0f;
-    hud.drawText((screenW - nameW) * 0.5f, y - 26.0f, 2.0f, name);
+    Block held = heldBlock();
+    if (!(app.survival && held == Block::Air)) { // empty slot: no label
+        const char* name = blockName(held);
+        float nameW = std::strlen(name) * Hud::GLYPH * 2.0f;
+        hud.drawText((screenW - nameW) * 0.5f, y - 26.0f, 2.0f, name);
+    }
 }
 
 void drawCrosshair(Hud& hud, int screenW, int screenH) {
@@ -324,6 +352,7 @@ int main(int argc, char** argv) {
 
     Settings settings = Settings::load("settings.cfg");
     app.player.sensitivity = settings.mouseSensitivity;
+    app.survival = settings.survival;
 
     if (!glfwInit()) {
         std::fprintf(stderr, "failed to init GLFW\n");
@@ -406,6 +435,7 @@ int main(int argc, char** argv) {
             if (++ticksRun > MAX_TICKS_PER_FRAME) { accumulator = 0.0; break; }
             app.player.beginTick();
             app.player.update(world, app.input, TICK_DT);
+            app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
             accumulator -= TICK_DT;
         }
         const float alpha = float(accumulator / TICK_DT);
@@ -440,12 +470,18 @@ int main(int argc, char** argv) {
 
         if (app.breakPressed && hit.hit &&
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
+            Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
+            // Creative destroys outright; survival drops the registry item.
+            if (app.survival) app.entities.spawnBlockDrop(hit.block, broken);
         }
         if (app.placePressed && hit.hit) {
             glm::ivec3 p = hit.adjacent;
-            if (!isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
-                world.setBlock(p.x, p.y, p.z, heldBlock());
+            Block held = heldBlock();
+            if (held != Block::Air &&
+                !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
+                if (!app.survival || app.inv.consumeOne(app.hotbarSlot))
+                    world.setBlock(p.x, p.y, p.z, held);
             }
         }
         app.breakPressed = app.placePressed = false;
