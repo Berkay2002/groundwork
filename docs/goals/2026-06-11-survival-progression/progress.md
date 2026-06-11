@@ -2,10 +2,10 @@
 
 ## STATUS
 
-- Current: M4 / Task 10
-- Last verified: M4/T9 completed (`cmake --build build -j` exit 0,
-  warning-free/no work; `.\build\world_tests.exe` -> `all tests passed`;
-  `--demo-inv --frames 120` screenshot inspected, 2026-06-11)
+- Current: M4 / Task 11
+- Last verified: M4/T10 completed (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`;
+  `--demo-break --frames 120` screenshot inspected, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 5
 
@@ -148,3 +148,13 @@
   temp-dir `.\build\groundwork.exe --demo-inv --frames 120` exit 0 and its
   screenshot was inspected with inventory, crafting grid, recipe reference,
   item counts, and durability bars visible.
+- [2026-06-11] M4/T10 DONE. Added a self-contained break overlay renderer,
+  pure crack-stage/face-selection helpers, generated RGBA crack stages, and
+  `--demo-break` staging for screenshot checks. The overlay draws only the
+  current raycast face from break progress, without rebuilding chunk meshes;
+  existing procedural item icons remain the inventory and item-entity path.
+  Validation: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`; isolated
+  temp-dir `.\build\groundwork.exe --demo-break --frames 120` exit 0 and its
+  screenshot was inspected with the staged Diamond Ore block and visible
+  mid-progress cracks on the targeted face.

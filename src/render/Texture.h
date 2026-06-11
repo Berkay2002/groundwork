@@ -11,6 +11,10 @@ unsigned createBlockAtlas();
 // wrapping, so greedy-merged chunk faces can tile their texture.
 unsigned createBlockTextureArray();
 
+// Procedural RGBA crack stages for the mining overlay. Alpha carries the
+// cracks; RGB is unused by the shader.
+unsigned createBreakTextureArray();
+
 inline bool itemUsesBlockCube(ItemId item) {
     return placeBlockForItem(item) != Block::Air;
 }

@@ -24,6 +24,7 @@
 #include "ui/Hud.h"
 #include "sim/Inventory.h"
 #include "sim/Mining.h"
+#include "render/BreakOverlay.h"
 #include "render/ItemRenderer.h"
 #include "ui/MenuUi.h"
 #include "sim/Player.h"
@@ -137,6 +138,12 @@ struct App {
 };
 
 App app;
+
+float breakOverlayProgress() {
+    if (!app.breakProgress.active || app.breakProgress.requiredTicks <= 0) return 0.0f;
+    return std::min(0.999f, float(app.breakProgress.ticks) /
+                             float(app.breakProgress.requiredTicks));
+}
 
 Block heldBlock() {
     if (!app.survival) return HOTBAR[app.hotbarSlot];
@@ -765,6 +772,7 @@ int main(int argc, char** argv) {
     double benchSecs = 0.0;
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
+    bool demoBreak = false; // survival mining crack overlay for screenshots
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
     float startTime = -1.0f;    // --time <0..1>: day fraction override
     for (int i = 1; i < argc; ++i) {
@@ -776,6 +784,7 @@ int main(int argc, char** argv) {
         }
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
         if (std::strcmp(argv[i], "--demo-inv") == 0) demoInv = true;
+        if (std::strcmp(argv[i], "--demo-break") == 0) demoBreak = true;
         if (std::strcmp(argv[i], "--demo-menu") == 0) demoMenu = Menu::Main;
         if (std::strcmp(argv[i], "--demo-settings") == 0) demoMenu = Menu::Settings;
     }
@@ -840,9 +849,11 @@ int main(int argc, char** argv) {
     Shader lineShader(LINE_VS, LINE_FS);
     GLuint atlas = createBlockAtlas();          // 2D strip for the HUD
     GLuint blockTextures = createBlockTextureArray(); // array for chunks
+    GLuint crackTextures = createBreakTextureArray(); // RGBA mining cracks
     const int originLoc = chunkShader.loc("uOrigin");
     Hud hud(atlas);
     ItemRenderer itemRenderer;
+    BreakOverlay breakOverlay(crackTextures);
 
     GLuint cubeVbo;
     GLuint cubeVao = makeCubeLines(cubeVbo);
@@ -881,6 +892,22 @@ int main(int argc, char** argv) {
         app.invOpen = true;
         app.mouseCaptured = false;
         glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+    if (demoBreak) {
+        app.survival = true;
+        app.player.flying = true;
+        app.player.pitch = 0.0f;
+        glm::vec3 targetPos = app.player.eyePos() + app.player.lookDir() * 3.0f;
+        glm::ivec3 target((int)std::floor(targetPos.x), (int)std::floor(targetPos.y),
+                          (int)std::floor(targetPos.z));
+        world.setBlock(target.x, target.y, target.z, Block::DiamondOre);
+        app.breakHeld = false;
+        app.breakProgress.active = true;
+        app.breakProgress.target = target;
+        app.breakProgress.block = Block::DiamondOre;
+        app.breakProgress.heldItem = ItemId::None;
+        app.breakProgress.ticks = 55;
+        app.breakProgress.requiredTicks = 100;
     }
 
     if (demoMenu != Menu::None) {
@@ -992,6 +1019,14 @@ int main(int argc, char** argv) {
         }
 
         RaycastHit hit = world.raycast(eye, dir, REACH);
+        if (demoBreak && hit.hit) {
+            app.breakProgress.active = true;
+            app.breakProgress.target = hit.block;
+            app.breakProgress.block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+            app.breakProgress.heldItem = ItemId::None;
+            app.breakProgress.ticks = 55;
+            app.breakProgress.requiredTicks = 100;
+        }
         if (app.invOpen && app.invScreen == InventoryScreen::Furnace &&
             world.getBlock(app.openFurnace.x, app.openFurnace.y, app.openFurnace.z) != Block::Furnace) {
             closeInventory(app.window);
@@ -1074,6 +1109,11 @@ int main(int argc, char** argv) {
         glEnable(GL_CULL_FACE);
         glDisable(GL_BLEND);
         benchMark(7);
+
+        if (hit.hit && app.survival && !app.invOpen && app.menu == Menu::None &&
+            app.breakProgress.active && app.breakProgress.target == hit.block) {
+            breakOverlay.draw(viewProj, hit.block, hit.adjacent, breakOverlayProgress());
+        }
 
         // Selected block outline (shrunk to the post for torches)
         if (hit.hit) {
@@ -1193,6 +1233,7 @@ int main(int argc, char** argv) {
     savePlayer();
     glDeleteTextures(1, &atlas);
     glDeleteTextures(1, &blockTextures);
+    glDeleteTextures(1, &crackTextures);
     glDeleteVertexArrays(1, &cubeVao);
     glDeleteBuffers(1, &cubeVbo);
     glfwDestroyWindow(app.window);

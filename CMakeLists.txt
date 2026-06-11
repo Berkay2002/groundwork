@@ -45,6 +45,7 @@ add_executable(groundwork
   src/sim/Mining.cpp
   src/sim/Crafting.cpp
   src/sim/Entity.cpp
+  src/render/BreakOverlay.cpp
   src/render/ItemRenderer.cpp
   src/render/GLCompat.cpp
   src/render/Texture.cpp

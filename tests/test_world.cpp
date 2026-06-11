@@ -18,6 +18,7 @@
 #include "audio/Sounds.h"
 #include "ui/MenuUi.h"
 #include "render/Texture.h"
+#include "render/BreakOverlay.h"
 #include "platform/SaveIO.h"
 #include "sim/TickClock.h"
 #include <algorithm>
@@ -1619,6 +1620,26 @@ static void testNonBlockItemIconMapping() {
     CHECK(itemIconTile(ItemId::WoodPickaxe) != itemIconTile(ItemId::WoodAxe));
 }
 
+static void testBreakOverlayHelpers() {
+    static_assert(BREAK_CRACK_STAGES == 10, "break overlay uses 10 crack stages");
+    CHECK(breakStageForProgress(-1.0f) == 0);
+    CHECK(breakStageForProgress(0.0f) == 0);
+    CHECK(breakStageForProgress(0.099f) == 0);
+    CHECK(breakStageForProgress(0.10f) == 1);
+    CHECK(breakStageForProgress(0.55f) == 5);
+    CHECK(breakStageForProgress(0.999f) == 9);
+    CHECK(breakStageForProgress(1.0f) == 9);
+    CHECK(breakStageForProgress(5.0f) == 9);
+
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {5, 5, 6}) == 0);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {3, 5, 6}) == 1);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {4, 6, 6}) == 2);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {4, 4, 6}) == 3);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {4, 5, 7}) == 4);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {4, 5, 5}) == 5);
+    CHECK(breakFaceForAdjacent({4, 5, 6}, {4, 5, 6}) == -1);
+}
+
 static void testItemEntityStackIngress() {
     Entities ents;
     ents.spawnItem(glm::vec3(0.0f), glm::vec3(0.0f), ItemId(65000), 3);
@@ -2195,6 +2216,7 @@ int main() {
     testItemEntityMerging();
     testEntityBucketsAndDrops();
     testNonBlockItemIconMapping();
+    testBreakOverlayHelpers();
     testItemEntityStackIngress();
     testPlayerSaveV3Roundtrip();
     testPlayerSaveV2BlockInventoryMigrates();

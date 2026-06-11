@@ -1,6 +1,8 @@
 #include "render/Texture.h"
 #include "world/Block.h"
 #include "render/GLCompat.h"
+#include "render/BreakOverlay.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <vector>
@@ -254,6 +256,37 @@ RGB tilePixel(TileId tile, int x, int y) {
     }
     return {255, 0, 255};
 }
+
+float distanceToSegment(float px, float py, float ax, float ay, float bx, float by) {
+    float vx = bx - ax, vy = by - ay;
+    float wx = px - ax, wy = py - ay;
+    float len2 = vx * vx + vy * vy;
+    float t = len2 > 0.0f ? (wx * vx + wy * vy) / len2 : 0.0f;
+    t = std::max(0.0f, std::min(1.0f, t));
+    float dx = px - (ax + vx * t), dy = py - (ay + vy * t);
+    return dx * dx + dy * dy;
+}
+
+uint8_t crackAlphaPixel(int stage, int x, int y) {
+    struct Segment { float ax, ay, bx, by; int unlock; };
+    constexpr Segment segments[] = {
+        {8.0f, 8.0f, 8.0f, 4.0f, 0},  {8.0f, 8.0f, 5.0f, 6.0f, 1},
+        {8.0f, 8.0f, 11.0f, 6.0f, 2}, {8.0f, 4.0f, 6.0f, 2.0f, 3},
+        {5.0f, 6.0f, 3.0f, 9.0f, 4}, {11.0f, 6.0f, 13.0f, 9.0f, 5},
+        {8.0f, 8.0f, 8.0f, 12.0f, 6}, {8.0f, 12.0f, 5.0f, 14.0f, 7},
+        {8.0f, 12.0f, 12.0f, 14.0f, 8}, {3.0f, 9.0f, 1.0f, 12.0f, 9},
+    };
+    float px = float(x) + 0.5f, py = float(y) + 0.5f;
+    float best = 1000.0f;
+    for (const Segment& s : segments) {
+        if (stage < s.unlock) continue;
+        best = std::min(best, distanceToSegment(px, py, s.ax, s.ay, s.bx, s.by));
+    }
+    float width = 0.24f + 0.045f * float(stage);
+    if (best <= width) return uint8_t(225);
+    if (best <= width + 0.9f && stage >= 4) return uint8_t(95);
+    return 0;
+}
 }
 
 unsigned createBlockAtlas() {
@@ -302,5 +335,28 @@ unsigned createBlockTextureArray() {
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    return tex;
+}
+
+unsigned createBreakTextureArray() {
+    std::vector<uint8_t> img(size_t(TILE) * TILE * BREAK_CRACK_STAGES * 4, 0);
+    for (int layer = 0; layer < BREAK_CRACK_STAGES; ++layer)
+        for (int y = 0; y < TILE; ++y)
+            for (int x = 0; x < TILE; ++x) {
+                size_t i = ((size_t(layer) * TILE + y) * TILE + x) * 4;
+                img[i] = img[i + 1] = img[i + 2] = 0;
+                img[i + 3] = crackAlphaPixel(layer, x, y);
+            }
+
+    unsigned tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, TILE, TILE, BREAK_CRACK_STAGES, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, img.data());
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     return tex;
 }
