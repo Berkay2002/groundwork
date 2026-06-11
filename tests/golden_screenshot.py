@@ -50,6 +50,10 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="mc_golden_") as tmp:
         os.makedirs(os.path.join(tmp, "saves", "world1"))
+        # Pin the settings the reference was rendered with, so a change to
+        # the game's *defaults* (e.g. render distance) can't break the test.
+        with open(os.path.join(tmp, "settings.cfg"), "w") as f:
+            f.write("render_distance=6\n")
         player = (b"MCPL" + struct.pack("<I", 1) + struct.pack("<5f", *VIEW)
                   + bytes([1, 0]))  # flying=1, hotbar slot 0
         with open(os.path.join(tmp, "saves", "world1", "player.bin"), "wb") as f:

@@ -2,6 +2,7 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -618,14 +619,45 @@ void drawCrosshair(Hud& hud, int screenW, int screenH) {
     hud.drawRect(cx - th * 0.5f, cy - len, th, len * 2, 1, 1, 1, 0.85f);
 }
 
+// Frame-time statistics for --bench-secs: sorted percentiles plus the
+// "N% low" fps metric (average fps over the worst N% of frames) that
+// benchmarking tools report — it exposes stutter that the average hides.
+void printFrameStats(std::vector<float>& ft, double secs) {
+    std::sort(ft.begin(), ft.end());
+    const size_t n = ft.size();
+    if (n == 0) return;
+    double sum = 0.0;
+    for (float f : ft) sum += f;
+    auto pctMs = [&](double p) {
+        return double(ft[std::min(n - 1, size_t(p * double(n)))]) * 1000.0;
+    };
+    auto lowFps = [&](double frac) { // avg fps across the worst frac of frames
+        size_t k = std::max<size_t>(1, size_t(frac * double(n)));
+        double s = 0.0;
+        for (size_t i = n - k; i < n; ++i) s += ft[i];
+        return double(k) / s;
+    };
+    std::printf(
+        "frames: %zu in %.2f s\n"
+        "fps: avg %.1f | 1%% low %.1f | 0.1%% low %.1f | worst frame %.1f\n"
+        "frame ms: min %.2f | p50 %.2f | p95 %.2f | p99 %.2f | max %.2f\n",
+        n, secs, double(n) / sum, lowFps(0.01), lowFps(0.001),
+        1.0 / double(ft[n - 1]), double(ft[0]) * 1000.0, pctMs(0.50),
+        pctMs(0.95), pctMs(0.99), double(ft[n - 1]) * 1000.0);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     // --frames N : run N frames then exit (with a screenshot) for automated testing.
     // --bench N  : run N frames vsync-off, print perf counters, exit (no screenshot)
     //              — the before/after number for rendering optimization work.
+    // --bench-secs S : warm up until chunk streaming settles, then measure S
+    //              seconds and print frame-time statistics (avg/1% low/0.1%
+    //              low fps, percentiles) — the steady-state stutter check.
     long maxFrames = -1;
     bool bench = false;
+    double benchSecs = 0.0;
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
@@ -634,6 +666,7 @@ int main(int argc, char** argv) {
         if (i < argc - 1) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
             if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
+            if (std::strcmp(argv[i], "--bench-secs") == 0) { benchSecs = std::atof(argv[i + 1]); bench = true; }
             if (std::strcmp(argv[i], "--time") == 0) startTime = float(std::atof(argv[i + 1]));
         }
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
@@ -664,6 +697,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     glfwMakeContextCurrent(app.window);
+    // Say which device the GL context landed on: on multi-GPU systems (or
+    // with a broken driver) this is the difference between the real GPU,
+    // an integrated one, and llvmpipe software rendering.
+    std::printf("renderer: %s (%s)\n", glGetString(GL_RENDERER), glGetString(GL_VENDOR));
     // A benchmark must not be capped by the display's refresh rate.
     glfwSwapInterval(settings.vsync && !bench ? 1 : 0);
 
@@ -747,6 +784,26 @@ int main(int argc, char** argv) {
     // Bench accumulators.
     double benchStart = glfwGetTime();
     long benchDrawn = 0, benchUploads = 0;
+    // --bench-secs: settle streaming first so startup chunk loading doesn't
+    // pollute the steady-state numbers, then time frames swap-to-swap.
+    bool benchWarmup = benchSecs > 0.0;
+    double benchPrevSwap = -1.0;
+    std::vector<float> benchFrames;
+    if (benchSecs > 0.0) benchFrames.reserve(size_t(benchSecs * 2000.0));
+    // Per-section frame breakdown (only accumulated while measuring): shows
+    // where a frame's CPU time goes. "swap" also absorbs GPU sync time.
+    constexpr int BENCH_SECTIONS = 9;
+    const char* const benchSecName[BENCH_SECTIONS] = {
+        "events", "tick", "stream", "mesh", "edit",
+        "opaque", "items", "water", "hud+swap"};
+    double benchSec[BENCH_SECTIONS] = {};
+    double benchSecMark = 0.0;
+    auto benchMark = [&](int i) {
+        if (!bench || benchWarmup) return;
+        double t = glfwGetTime();
+        benchSec[i] += t - benchSecMark;
+        benchSecMark = t;
+    };
 
     while (!glfwWindowShouldClose(app.window)) {
         double now = glfwGetTime();
@@ -754,8 +811,10 @@ int main(int argc, char** argv) {
         lastTime = now;
         if (dt > 0.05f) dt = 0.05f; // avoid huge physics steps after stalls
 
+        benchSecMark = now;
         glfwPollEvents();
         pollMovement();
+        benchMark(0);
 
         // --- Update ---
         // Simulation runs at a fixed 20 TPS (multiplayer insurance: ticks
@@ -786,7 +845,9 @@ int main(int argc, char** argv) {
             accumulator -= TICK_DT;
         }
         const float alpha = float(accumulator / TICK_DT);
+        benchMark(1);
         world.update(app.player.pos, settings.renderDistance);
+        benchMark(2);
 
         // Camera for this frame, computed early: mesh uploads prioritize
         // in-frustum chunks, so processMeshing wants the frustum too.
@@ -802,6 +863,7 @@ int main(int argc, char** argv) {
         // Budgeted mesh uploads (visible/near chunks first), so a streaming
         // burst can't stall a frame on GL transfers.
         world.processMeshing(8, app.player.pos, &frustum, UPLOAD_BUDGET_MS);
+        benchMark(3);
 
         // Periodic autosave so a crash loses at most ~30 s of edits (chunks
         // streaming out and clean exit already save on their own).
@@ -834,6 +896,7 @@ int main(int argc, char** argv) {
             }
         }
         app.breakPressed = app.placePressed = false;
+        benchMark(4);
 
         // --- Render world ---
         // Day/night: the sky (and the fog, which fades into it) follows the
@@ -858,10 +921,12 @@ int main(int argc, char** argv) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures);
         world.drawChunks(frustum, eye, originLoc);
+        benchMark(5);
 
         // Item entities: after opaque (normal depth test), before water so
         // submerged drops blend correctly under the surface.
         itemRenderer.draw(world, app.entities, viewProj, alpha, float(gameTime), sunLevel);
+        benchMark(6);
 
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.
@@ -873,6 +938,7 @@ int main(int argc, char** argv) {
         world.drawWater(frustum, eye, originLoc);
         glEnable(GL_CULL_FACE);
         glDisable(GL_BLEND);
+        benchMark(7);
 
         // Selected block outline (shrunk to the post for torches)
         if (hit.hit) {
@@ -908,6 +974,7 @@ int main(int argc, char** argv) {
         hud.end();
 
         glfwSwapBuffers(app.window);
+        benchMark(8);
 
         // Frame limiter: with vsync off, pace frames to fps_max (0 =
         // unlimited; vsync already paces when on). Sleep most of the wait,
@@ -928,6 +995,44 @@ int main(int argc, char** argv) {
             WorldStats st = world.stats();
             benchDrawn += st.drawn;
             benchUploads += st.uploads;
+        }
+        if (benchSecs > 0.0) {
+            const double t = glfwGetTime();
+            WorldStats st = world.stats();
+            if (benchWarmup) {
+                // Settled = every pipeline empty; cap the wait so a bench in
+                // a huge-render-distance world still starts eventually.
+                bool settled = st.genQueued == 0 && st.meshQueued == 0 &&
+                               st.uploadQueued == 0;
+                if ((settled && t - benchStart > 2.0) || t - benchStart > 120.0) {
+                    benchWarmup = false;
+                    std::printf("bench: warmed up in %.1f s (%d chunks loaded), "
+                                "measuring %.0f s...\n",
+                                t - benchStart, st.loaded, benchSecs);
+                    benchStart = t;
+                    benchPrevSwap = t;
+                    benchDrawn = benchUploads = 0;
+                }
+            } else {
+                benchFrames.push_back(float(t - benchPrevSwap));
+                benchPrevSwap = t;
+                if (t - benchStart >= benchSecs) {
+                    printFrameStats(benchFrames, t - benchStart);
+                    std::printf("sections (ms/frame avg):");
+                    for (int i = 0; i < BENCH_SECTIONS; ++i)
+                        std::printf(" %s %.2f", benchSecName[i],
+                                    benchSec[i] * 1000.0 / double(benchFrames.size()));
+                    std::printf("\n");
+                    std::printf(
+                        "chunks: %d loaded, %.1f drawn/frame avg, %ld mesh uploads\n"
+                        "workers: gen %.2f ms/chunk, mesh %.2f ms/chunk (moving avg), "
+                        "queues gen %d mesh %d upload %d\n",
+                        st.loaded, double(benchDrawn) / double(benchFrames.size()),
+                        benchUploads, st.genMs, st.meshMs, st.genQueued,
+                        st.meshQueued, st.uploadQueued);
+                    break;
+                }
+            }
         }
         ++frameCount;
         if (maxFrames >= 0 && frameCount >= maxFrames) {

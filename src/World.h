@@ -4,6 +4,7 @@
 #include "JobQueue.h"
 #include "Terrain.h"
 #include <atomic>
+#include <climits>
 #include <glm/glm.hpp>
 #include <memory>
 #include <mutex>
@@ -74,10 +75,11 @@ public:
     void waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs);
 
     // Opaque pass, front-to-back for early-z. Vertices are chunk-local, so
-    // each draw sets the chunk origin via the given uniform location.
+    // each draw sets the chunk origin via the given uniform location. Also
+    // builds the frame's visible-chunk list that drawWater reuses.
     void drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc);
-    // Translucent water pass, back-to-front; call after drawChunks with
-    // blending enabled.
+    // Translucent water pass; call after drawChunks with blending enabled.
+    // Walks drawChunks' visible list in reverse (back-to-front).
     void drawWater(const Frustum& frustum, const glm::vec3& eye, int originLoc);
 
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
@@ -108,6 +110,9 @@ private:
     std::string chunkPath(int cx, int cz) const;
     void markNeighborsDirty(int cx, int cz);
     void markBorderDirty(int cx, int cz, int lx, int lz);
+    // The single way a chunk becomes dirty: sets the flag and registers the
+    // chunk in dirtyQueue_ so processMeshing never scans the whole map.
+    void markDirty(Chunk& c);
     ChunkSnapshot snapshot(const Chunk& c) const;
 
     // Cross-chunk light BFS (main thread only: walks live chunks, marks them
@@ -138,6 +143,22 @@ private:
     // Finished meshes waiting for their budgeted GL upload (main thread
     // only). At most one entry per chunk: a newer result replaces the old.
     std::vector<std::pair<ChunkKey, MeshData>> uploadQueue_;
+    // Chunks whose dirty flag is set (one entry per chunk, guarded by
+    // Chunk::queuedDirty). Lets processMeshing touch only dirty chunks
+    // instead of scanning all loaded ones every frame.
+    std::vector<ChunkKey> dirtyQueue_;
+
+    // Streaming-scan memo: the ring scan and unload sweep in update() are
+    // O(renderDistance²); they only need to re-run when the player crosses
+    // a chunk boundary, the distance changes, chunks were integrated, or
+    // the last scan couldn't cover everything (request budget ran out).
+    int lastPcx_ = INT_MIN, lastPcz_ = INT_MIN, lastRd_ = -1;
+    bool streamScanClean_ = false;
+
+    // Frame-visible chunks, front-to-back: built by drawChunks, reused
+    // (reversed) by drawWater so the map is culled and sorted only once.
+    struct DrawItem { float dist2; Chunk* chunk; float ox, oz; };
+    std::vector<DrawItem> visible_;
 
     // Perf counters (workers store, main thread reads).
     std::atomic<float> genMs_{0.0f}, meshMs_{0.0f};

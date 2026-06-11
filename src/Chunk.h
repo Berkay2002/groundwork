@@ -116,6 +116,7 @@ public:
 
     // Lifecycle flags (all owned by the main thread).
     bool dirty = true;          // blocks changed since last mesh enqueue
+    bool queuedDirty = false;   // already registered in World's dirty queue
     bool meshInFlight = false;  // a mesh job for this chunk is in the pipeline
     bool modified = false;      // player changed blocks -> needs saving
 
@@ -123,6 +124,10 @@ public:
     void draw() const;
     void drawWater() const; // translucent pass, after all opaque chunks
     bool hasMesh() const { return vao_ != 0; }
+    // Anything to draw in each pass? Lets the draw loops skip empty chunks
+    // (most chunks have no water) without binding/setting uniforms.
+    bool hasOpaque() const { return vao_ != 0 && indexCount_ > 0; }
+    bool hasWater() const { return waterVao_ != 0 && waterIndexCount_ > 0; }
 
     // Persistence: raw block dump.
     const uint8_t* rawData() const { return reinterpret_cast<const uint8_t*>(blocks_.data()); }

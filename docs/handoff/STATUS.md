@@ -17,6 +17,56 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 | Batch G | Fixed 20 TPS simulation tick + interpolated rendering, shared `Body` AABB physics, item entities (drops, magnetized pickup, bob/spin rendering), survival mode (finite stacked placement, hotbar counts), 4×8 inventory UI, player save v2 with inventory | done |
 | Batch H | Procedural audio (miniaudio, optional), pause menu with live-editable settings, key rebinding, day/night cycle (split sun/block vertex light channels, level.bin v2), release packaging (stripped 449 KB binary, clean-container build verified) | done |
 
+### Perf-bench session notes (2026-06-11, after Batch H)
+
+- **`--bench-secs S`** (main.cpp): warms up until streaming settles (all
+  queues empty, ≥2 s, capped at 120 s), then measures S seconds and prints
+  avg/1%-low/0.1%-low fps, frame-time percentiles, and a per-section
+  ms/frame breakdown (events/tick/stream/mesh/edit/opaque/items/water/
+  hud+swap; "hud+swap" absorbs GPU sync). The old `--bench N` is unchanged.
+- **O(loaded-chunks) per-frame work removed** — at render distance 64
+  (16.6k chunks) these cost ~2.2 ms of a 4.3 ms frame:
+  - `World::update` skips the ring scan + unload sweep unless the player
+    chunk / render distance changed, chunks were integrated, or the last
+    scan ran out of request budget (`streamScanClean_` memo).
+  - `processMeshing` pulls candidates from `dirtyQueue_` instead of
+    scanning every chunk. All dirty marking goes through `World::markDirty`
+    (guarded by `Chunk::queuedDirty`, one queue entry per chunk) — keep it
+    that way; a raw `chunk->dirty = true` would mesh late or never.
+  - `drawChunks` builds the frustum-culled, front-to-back `visible_` list
+    once; `drawWater` walks it in reverse. Chunks empty in both passes are
+    dropped before the sort.
+  - Measured (fresh world, spawn viewpoint, 1280×720): rd 64 234→282 avg
+    fps, 1% low 121→139; rd 32 ~300 avg (was 314; run-to-run ±5%, now
+    swap/GPU-bound, sections near zero). Remaining frame: ~1.1 ms
+    glfwPollEvents (X11-side) + ~1.8 ms swap/GPU.
+- **The default GL device on this machine is the Ryzen 7800X3D's iGPU**, not
+  the RTX 3090 (X server's primary GPU is AMD; `glxinfo` renderer says
+  "AMD Ryzen 7 7800X3D ... radeonsi"). All historical bench numbers in this
+  file are iGPU numbers. On the 3090 via PRIME offload
+  (`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`), after
+  the optimizations above: rd 64 = 691 avg / 200 1%-low fps, rd 32 = 1612
+  avg / 236 1%-low; the ~1.1 ms glfwPollEvents cost also disappears (~0.04
+  ms — it was Mesa/X11 sync, not GLFW). The game now prints
+  `renderer: ...` at startup so the active device is always visible.
+  Compare benches only against the same device.
+  **Resolved same day**: the user switched the system to
+  `prime-select nvidia` (NVIDIA primary, monitor already on the 3090).
+  Native numbers: rd 64 = 724 avg / 537 1%-low fps (worst frame 1.94 ms),
+  rd 32 = 805 avg / 579 1%-low. The old bimodal frame times were the
+  iGPU→3090 PCIe copy. All future benches are NVIDIA-native numbers.
+- **golden_screenshot.py now pins `render_distance=6`** in its temp
+  settings.cfg — commit 28ff29d raised the *default* to 64, which made the
+  test render 10× more terrain than its reference (31% pixel diff). Pinning
+  matches the reference and decouples the test from default changes.
+- **Open issue**: the projection far plane is fixed at 600 (main.cpp,
+  `glm::perspective`), but fog at render distance 64 spans 717–1004. Past
+  ~37 chunks nothing is drawn and the world ends in a hard, un-fogged edge,
+  so distances >37 only cost memory/streaming without showing more terrain.
+  Raising the far plane to cover fogEnd would fix the visuals but draw more
+  chunks (fps cost); capping the setting at ~37 is the cheap alternative.
+  Needs a user decision.
+
 ### Batch H implementation notes (2026-06-11)
 
 - **Audio** (reworked twice on user feedback — synthesis was rejected by

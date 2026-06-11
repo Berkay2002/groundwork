@@ -122,7 +122,7 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
     Block old = c->get(lx, wy, lz);
     if (old == b) return;
     c->set(lx, wy, lz, b);
-    c->dirty = true;
+    markDirty(*c);
     c->modified = true;
     // Border block changes affect the neighbor's mesh too.
     markBorderDirty(cx, cz, lx, lz);
@@ -180,7 +180,7 @@ void World::setLight(LightChan ch, int wx, int wy, int wz, uint8_t v) {
     if (cur == v) return;
     if (ch == LightChan::Sun) c->setSunLight(lx, wy, lz, v);
     else                      c->setBlockLight(lx, wy, lz, v);
-    c->dirty = true;
+    markDirty(*c);
     // Border cells light the neighbor chunk's faces, so its mesh is stale too.
     markBorderDirty(cx, cz, lx, lz);
 }
@@ -192,7 +192,7 @@ void World::markBorderDirty(int cx, int cz, int lx, int lz) {
     bool xn = lx == 0, xp = lx == CHUNK_SIZE - 1;
     bool zn = lz == 0, zp = lz == CHUNK_SIZE - 1;
     auto mark = [&](int dx, int dz) {
-        if (Chunk* n = getChunk(cx + dx, cz + dz)) n->dirty = true;
+        if (Chunk* n = getChunk(cx + dx, cz + dz)) markDirty(*n);
     };
     if (xn) mark(-1, 0);
     if (xp) mark(1, 0);
@@ -293,7 +293,15 @@ void World::markNeighborsDirty(int cx, int cz) {
     static const int d[8][2] = {{1,0},{-1,0},{0,1},{0,-1},
                                 {1,1},{1,-1},{-1,1},{-1,-1}};
     for (auto& o : d)
-        if (Chunk* n = getChunk(cx + o[0], cz + o[1])) n->dirty = true;
+        if (Chunk* n = getChunk(cx + o[0], cz + o[1])) markDirty(*n);
+}
+
+void World::markDirty(Chunk& c) {
+    c.dirty = true;
+    if (!c.queuedDirty) {
+        c.queuedDirty = true;
+        dirtyQueue_.push_back({c.cx(), c.cz()});
+    }
 }
 
 std::string World::chunkPath(int cx, int cz) const {
@@ -347,46 +355,63 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
     }
     for (auto& [key, chunk] : done) {
         pendingGen_.erase(key);
-        chunk->dirty = true;
         markNeighborsDirty(key.x, key.z); // their border faces may now be hidden
+        Chunk* c = chunk.get();
         chunks_[key] = std::move(chunk);
+        markDirty(*c); // fresh chunks arrive dirty; register them in the queue
         seedChunkBorderLight(key.x, key.z); // exchange light with neighbors
     }
 
     int pcx = floorDiv((int)std::floor(playerPos.x), CHUNK_SIZE);
     int pcz = floorDiv((int)std::floor(playerPos.z), CHUNK_SIZE);
 
+    // Both sweeps below are O(renderDistance²); at large distances they cost
+    // more than the rest of the frame, so they only re-run when something
+    // they depend on changed (player chunk, distance, or the chunk set).
+    const bool moved = pcx != lastPcx_ || pcz != lastPcz_ || renderDistance != lastRd_;
+    lastPcx_ = pcx; lastPcz_ = pcz; lastRd_ = renderDistance;
+    if (moved || !done.empty()) streamScanClean_ = false;
+
     // 2. Request missing chunks nearest-first, keeping a bounded backlog.
-    int budget = 8 - (int)pendingGen_.size();
-    for (int r = 0; r <= renderDistance && budget > 0; ++r) {
-        for (int dz = -r; dz <= r && budget > 0; ++dz) {
-            for (int dx = -r; dx <= r && budget > 0; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
-                ChunkKey key{pcx + dx, pcz + dz};
-                if (chunks_.count(key) || pendingGen_.count(key)) continue;
-                pendingGen_.insert(key);
-                --budget;
-                pool_.push([this, key] {
-                    auto t0 = Clock::now();
-                    auto c = std::make_unique<Chunk>(key.x, key.z);
-                    if (!loadChunkFromDisk(*c)) terrain_.generateChunk(*c);
-                    c->computeInitialLight(); // light is never saved; rebuild it
-                    ema(genMs_, msSince(t0));
-                    std::lock_guard<std::mutex> l(genM_);
-                    genDone_.emplace_back(key, std::move(c));
-                });
+    if (!streamScanClean_) {
+        int budget = 8 - (int)pendingGen_.size();
+        for (int r = 0; r <= renderDistance && budget > 0; ++r) {
+            for (int dz = -r; dz <= r && budget > 0; ++dz) {
+                for (int dx = -r; dx <= r && budget > 0; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    ChunkKey key{pcx + dx, pcz + dz};
+                    if (chunks_.count(key) || pendingGen_.count(key)) continue;
+                    pendingGen_.insert(key);
+                    --budget;
+                    pool_.push([this, key] {
+                        auto t0 = Clock::now();
+                        auto c = std::make_unique<Chunk>(key.x, key.z);
+                        if (!loadChunkFromDisk(*c)) terrain_.generateChunk(*c);
+                        c->computeInitialLight(); // light is never saved; rebuild it
+                        ema(genMs_, msSince(t0));
+                        std::lock_guard<std::mutex> l(genM_);
+                        genDone_.emplace_back(key, std::move(c));
+                    });
+                }
             }
         }
+        // Budget left over ⇒ the ring loop ran to completion, so every cell
+        // in range is now loaded or pending; nothing to find until the
+        // player moves or a pending chunk arrives (both clear the flag).
+        streamScanClean_ = budget > 0;
     }
 
-    // 3. Unload far chunks (save modified ones first).
-    for (auto it = chunks_.begin(); it != chunks_.end();) {
-        int dx = std::abs(it->first.x - pcx), dz = std::abs(it->first.z - pcz);
-        if (std::max(dx, dz) > renderDistance + 2) {
-            if (it->second->modified) saveChunk(*it->second);
-            it = chunks_.erase(it);
-        } else {
-            ++it;
+    // 3. Unload far chunks (save modified ones first). The far set only
+    //    changes when the player moves or a chunk arrives.
+    if (moved || !done.empty()) {
+        for (auto it = chunks_.begin(); it != chunks_.end();) {
+            int dx = std::abs(it->first.x - pcx), dz = std::abs(it->first.z - pcz);
+            if (std::max(dx, dz) > renderDistance + 2) {
+                if (it->second->modified) saveChunk(*it->second);
+                it = chunks_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 }
@@ -502,16 +527,27 @@ void World::processMeshing(int enqueueBudget, const glm::vec3& playerPos,
 
     // 3. Enqueue dirty chunks for the workers, best priority first, so an
     //    edit or light change next to the player never waits behind far
-    //    chunks streaming in.
+    //    chunks streaming in. Candidates come from dirtyQueue_ (every
+    //    markDirty registers there once), not a scan of all loaded chunks.
     std::vector<std::pair<int, Chunk*>> dirty;
-    for (auto& [key, chunk] : chunks_)
-        if (chunk->dirty && !chunk->meshInFlight)
-            dirty.push_back({priority(key), chunk.get()});
+    std::vector<ChunkKey> keep; // still dirty but not dispatchable this frame
+    for (const ChunkKey& key : dirtyQueue_) {
+        auto it = chunks_.find(key);
+        if (it == chunks_.end()) continue;        // unloaded while queued
+        Chunk* chunk = it->second.get();
+        if (!chunk->dirty) { chunk->queuedDirty = false; continue; }
+        if (chunk->meshInFlight) { keep.push_back(key); continue; }
+        dirty.push_back({priority(key), chunk});
+    }
     if ((int)dirty.size() > enqueueBudget)
         std::partial_sort(dirty.begin(), dirty.begin() + enqueueBudget, dirty.end());
+    for (int i = enqueueBudget; i < (int)dirty.size(); ++i) // over budget: retry next frame
+        keep.push_back({dirty[i].second->cx(), dirty[i].second->cz()});
+    dirtyQueue_.swap(keep);
     for (int i = 0; i < (int)dirty.size() && i < enqueueBudget; ++i) {
         Chunk* chunk = dirty[i].second;
         chunk->dirty = false;
+        chunk->queuedDirty = false;
         chunk->meshInFlight = true;
         ++meshInFlight_;
         auto snap = std::make_shared<ChunkSnapshot>(snapshot(*chunk));
@@ -547,45 +583,39 @@ void World::waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs) {
     }
 }
 
-namespace {
-// Visible chunks ordered by distance to the eye: front-to-back for the
-// opaque pass (early-z rejects hidden fragments), back-to-front for the
-// translucent water pass (correct blending).
-struct DrawItem { float dist2; Chunk* chunk; float ox, oz; };
-
-std::vector<DrawItem> visibleSorted(
-    const std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash>& chunks,
-    const Frustum& frustum, const glm::vec3& eye, bool frontToBack) {
-    std::vector<DrawItem> items;
-    items.reserve(chunks.size());
-    for (auto& [key, chunk] : chunks) {
+// Cull + sort the chunk map once per frame: front-to-back for the opaque
+// pass (early-z rejects hidden fragments); drawWater walks the same list in
+// reverse for back-to-front blending. Chunks with nothing in either pass are
+// dropped here so the draw loops never bind or set uniforms for them.
+void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
+    visible_.clear();
+    visible_.reserve(chunks_.size() / 4);
+    for (auto& [key, chunk] : chunks_) {
+        if (!chunk->hasOpaque() && !chunk->hasWater()) continue;
         glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
         glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
         if (!frustum.intersectsAABB(mn, mx)) continue;
         glm::vec2 center(mn.x + CHUNK_SIZE * 0.5f, mn.z + CHUNK_SIZE * 0.5f);
         glm::vec2 d = center - glm::vec2(eye.x, eye.z);
-        items.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
+        visible_.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
     }
-    std::sort(items.begin(), items.end(), [&](const DrawItem& a, const DrawItem& b) {
-        return frontToBack ? a.dist2 < b.dist2 : a.dist2 > b.dist2;
-    });
-    return items;
-}
-}
+    std::sort(visible_.begin(), visible_.end(),
+              [](const DrawItem& a, const DrawItem& b) { return a.dist2 < b.dist2; });
 
-void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
     drawn_ = 0;
-    for (const DrawItem& it : visibleSorted(chunks_, frustum, eye, true)) {
+    for (const DrawItem& it : visible_) {
+        if (!it.chunk->hasOpaque()) continue;
         glUniform3f(originLoc, it.ox, 0.0f, it.oz);
         it.chunk->draw();
         ++drawn_;
     }
 }
 
-void World::drawWater(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
-    for (const DrawItem& it : visibleSorted(chunks_, frustum, eye, false)) {
-        glUniform3f(originLoc, it.ox, 0.0f, it.oz);
-        it.chunk->drawWater();
+void World::drawWater(const Frustum&, const glm::vec3&, int originLoc) {
+    for (auto it = visible_.rbegin(); it != visible_.rend(); ++it) {
+        if (!it->chunk->hasWater()) continue;
+        glUniform3f(originLoc, it->ox, 0.0f, it->oz);
+        it->chunk->drawWater();
     }
 }
 
