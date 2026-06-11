@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11, after Batch H)
+# Status (last updated: 2026-06-11, after Batch I)
 
 ## Where the project stands
 
-All planned batches through H **plus all A–D addenda** are done and verified:
+All planned batches through I **plus all A–D addenda** are done and verified:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -16,6 +16,7 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 | Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices (14 since Batch H's light-channel split) + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
 | Batch G | Fixed 20 TPS simulation tick + interpolated rendering, shared `Body` AABB physics, item entities (drops, magnetized pickup, bob/spin rendering), survival mode (finite stacked placement, hotbar counts), 4×8 inventory UI, player save v2 with inventory | done |
 | Batch H | Procedural audio (miniaudio, optional), pause menu with live-editable settings, key rebinding, day/night cycle (split sun/block vertex light channels, level.bin v2), release packaging (stripped 449 KB binary, clean-container build verified) | done |
+| Batch I | Item registry + save v3, timed Minecraft-like survival mining, tool tiers/durability, cobblestone/planks/crafting table/furnace/diamond ore, 2x2/3x3 crafting, furnace block entities, recipe/furnace UI, procedural item icons and crack overlay, survival default with `M` mode toggle | done |
 
 ### Perf-bench session notes (2026-06-11, after Batch H)
 
@@ -304,13 +305,42 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   horizontal speed ×0.6. Without this a deep lake would be inescapable
   (jump impulse only clears ~1.5 blocks).
 
+### Batch I implementation notes (2026-06-11)
+
+- **Item model and saves**: survival inventory is item-based rather than
+  block-based. Player saves are `MCPL` v3 (`u16 item`, `u8 count`,
+  `u16 durability` per slot); v1 still migrates to empty inventory, v2
+  block stacks migrate slot-for-slot to item stacks. Item ids are append-only
+  saved data.
+- **Mining progression**: `src/sim/Mining.*` owns pure hardness/tool/tier
+  math. Survival breaking advances at 20 TPS, uses registry hardness,
+  preferred tool speed, harvest tier, correct/wrong drops, and durability.
+  Bedrock never progresses. Creative remains instant destroy/no-drop.
+- **Resources and tools**: existing `Wood` is treated as Log. New blocks/items
+  cover Cobblestone, Planks, Crafting Table, Furnace, Diamond Ore, Raw Iron,
+  Iron Ingot, Diamond, and wood/stone/iron/diamond pickaxe/axe/shovel.
+  Diamond Ore requires an iron pickaxe for a useful drop.
+- **Crafting and furnace**: `src/sim/Crafting.*` has data-shaped 2x2/3x3
+  recipes for the core progression. Furnaces are world-owned block entities
+  persisted in `block_entities.bin` (`MCBE` v1), smelt Raw Iron to Iron Ingot
+  with Coal fuel, and drop their contents when broken.
+- **UI and rendering**: inventory UI now routes through reusable slot helpers
+  for inventory, crafting, craft output, and furnace slots. Left/right click,
+  right-click splitting, and shift-click quick moves are tested. Non-block
+  item icons and mining crack stages are procedurally generated; cracks render
+  as a separate targeted-face overlay, never by remeshing chunks.
+- **Modes and demos**: fresh settings default to survival. `M` toggles
+  survival/creative and writes `settings.cfg`; an explicit old `survival=0`
+  remains creative. Screenshot flags: `--demo-items`, `--demo-inv`,
+  `--demo-break`, and `--demo-survival`.
+
 ## What's next
 
-All planned batches (A–H) are **done**. The active future-batch list now lives
-in `ROADMAP.md` starting at Batch I: survival progression, entity persistence,
-small mobs, crafting/recipes, world variety, structures, chests/containers,
-block state, interaction feel, save slots, render-distance/far-plane cleanup,
-and later data-file/modding work. Each is a major, user-approved undertaking.
+All planned batches (A–I) are **done**. The active future-batch list now lives
+in `ROADMAP.md` starting at Batch J: entity persistence, small mobs, advanced
+recipe data, world variety, structures, chests/containers, block state,
+interaction feel, save slots, render-distance/far-plane cleanup, and later
+data-file/modding work. Each is a major, user-approved undertaking.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -328,7 +358,21 @@ and later data-file/modding work. Each is a major, user-approved undertaking.
   `src/render/GLCompat.{h,cpp}` loads OpenGL 3.3 functions on Windows after GLFW
   creates the context.
 
-## Recent verification snapshot (Batch H)
+## Recent verification snapshot (Batch I)
+
+Warning-free MSVC build; `world_tests` (new: item-stack save v3 migration,
+mining tick/drop/durability contracts, crafting recipes/consumption,
+furnace smelting/persistence/content drops, UI slot helpers, item icon
+mapping, crack-stage helpers, survival-default settings and `M` mode-toggle
+roundtrip) passes with `all tests passed`. Verified visually from isolated
+temp dirs: `--demo-inv --frames 120` shows the inventory/crafting UI,
+recipe reference, item counts, and durability bars; `--demo-break --frames
+120` shows a targeted Diamond Ore crack overlay; `--demo-survival --frames
+300` shows the survival hotbar with progression resources/tools/counts,
+staged Crafting Table and Furnace, targeted Diamond Ore, and visible mining
+cracks. Temp render dirs were cleaned after inspection.
+
+## Older verification snapshot (Batch H)
 
 Warning-free build with audio ON and OFF; `world_tests` (new: sound
 synthesis bounds/determinism, key-bind parsing + roundtrip, day-cycle

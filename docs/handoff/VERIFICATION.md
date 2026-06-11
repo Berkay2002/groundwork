@@ -77,17 +77,19 @@ Two caveats learned the hard way:
 To inspect detail in a screenshot, crop+upscale with PIL
 (`im.crop(...).resize(..., Image.NEAREST)`) before Reading it.
 
-## Batch G demo flags (items, inventory)
+## Batch G/I demo flags (items, inventory, survival, cracks)
 
-Breaking blocks can't be scripted in a `--frames` run, so two debug flags
-stage the Batch G features for screenshots:
+Breaking blocks can't be scripted in a `--frames` run, so debug flags stage
+item, inventory, and survival-progression visuals for screenshots:
 
 ```sh
 ./build/groundwork --demo-items --frames 300   # 3 item cubes 3m ahead of the viewpoint
 ./build/groundwork --demo-inv --frames 120     # survival + stocked inventory, UI open
+./build/groundwork --demo-break --frames 120   # staged mining target + crack overlay
+./build/groundwork --demo-survival --frames 300 # stocked survival hotbar + crack overlay
 ```
 
-Run both from a temp dir (fresh world spawns on land; the real save's
+Run them from a temp dir (fresh world spawns on land; the real save's
 viewpoint may be over a lake where drops sink out of sight). For live
 input tests, `xdotool` works — but `windowactivate` the window first and
 use `mousemove --window <id> x y` (window coords); clicks silently go

@@ -81,18 +81,19 @@ On Windows, use `python` and the `.exe` path:
 | Left Shift | Fly down (fly mode) |
 | Left Ctrl | Sprint |
 | Left click | Break block |
-| Right click | Place block |
+| Right click | Place block, or open a crafting table/furnace in survival |
 | 1–8, scroll wheel | Select hotbar slot |
 | E | Open/close inventory (survival mode) |
 | F | Toggle fly mode |
+| M | Toggle survival/creative mode |
 | F3 | Toggle the debug overlay |
 | Esc | Pause menu — resume / settings / quit (closes the inventory first) |
 
-Movement, jump, sneak, sprint, fly, and inventory are rebindable through the
-`key_*` entries in `settings.cfg` (single letters/digits or names like
-`SPACE`, `TAB`, `LSHIFT`, `LCTRL`, `CAPSLOCK`). The pause menu's Settings
-page edits render distance, FOV, mouse sensitivity, volume, and vsync live
-and writes them back to `settings.cfg`.
+Movement, jump, sneak, sprint, fly, inventory, and mode toggle are rebindable
+through the `key_*` entries in `settings.cfg` (single letters/digits or names
+like `SPACE`, `TAB`, `LSHIFT`, `LCTRL`, `CAPSLOCK`). The pause menu's Settings
+page edits render distance, FOV, mouse sensitivity, volume, and vsync live and
+writes them back to `settings.cfg`.
 
 A debug overlay (FPS, position, current chunk, drawn/loaded chunk counts,
 generation and meshing timings with queue depths, targeted block and the
@@ -106,12 +107,18 @@ with the selected block at the bottom.
 `volume` (0–1), and the `key_*` bindings listed above. Most of these are
 also editable in-game from the pause menu (Esc → Settings).
 
-`survival=0` (the default) is creative mode: the hotbar is a fixed palette of
-infinite blocks and breaking destroys blocks outright. `survival=1` makes
-blocks finite: breaking spawns a dropped item that you walk near to collect,
-the hotbar shows your actual stacks with counts, placing consumes from the
-selected stack, and `E` opens a 4×8 inventory grid (click to pick up, drop,
-swap, or merge stacks; the hotbar is the bottom row).
+`survival=1` is the default. Fresh worlds use timed block breaking, finite
+hotbar stacks, item drops, crafting, furnace smelting, tool durability, and
+Minecraft-like harvest tiers. An old settings file with `survival=0` still
+loads in creative mode: the hotbar is a fixed infinite palette and breaking
+destroys blocks outright. Press `M` to switch modes at runtime; the setting is
+written back to `settings.cfg`.
+
+Survival progression starts from logs: craft planks, sticks, a crafting table,
+wooden tools, stone tools and furnace, coal/torches, raw iron/iron ingots, and
+finally iron-tier diamond mining. Right-click a crafting table for 3×3 recipes
+and a furnace for input/fuel/output slots. Shift-click quick-moves supported
+stacks; right-click splits or places one item.
 
 ## How it works
 
@@ -207,14 +214,19 @@ swap, or merge stacks; the hotbar is the bottom row).
   player within ~2 blocks, and stacks into the inventory on contact. Entities
   are bucketed per chunk for proximity queries, freeze while their chunk is
   unloaded, and despawn after 5 minutes; they are not saved across runs.
-- **Inventory** (`src/sim/Inventory.h`) — 4 rows × 8 columns of stacks (max 64),
-  row 0 doubling as the hotbar. Pure logic, exercised headlessly by the
-  tests; the grid UI is drawn entirely with the HUD primitives.
-- **Textures** (`src/render/Texture.cpp`) — all block tiles are generated
-  procedurally at startup (hash-noise grass/dirt/stone art), so there are no
-  asset files. The same tile functions fill both a texture array (chunk
-  rendering, repeat wrapping for merged faces) and a 2D atlas strip (HUD
-  hotbar icons).
+- **Survival loop** (`src/sim/Mining.*`, `src/sim/Crafting.*`,
+  `src/world/BlockEntity.*`) — registry-driven hardness, tool class, harvest
+  tier, drops, and durability feed timed mining. Crafting recipes are pure
+  logic for 2×2 inventory and 3×3 table surfaces. Furnaces are world-owned
+  block entities with persisted input/fuel/output and raw-iron smelting.
+- **Inventory** (`src/sim/Inventory.h`) — 4 rows × 8 columns of item stacks
+  (max 64), row 0 doubling as the hotbar. Pure logic, exercised headlessly by
+  the tests; the inventory/crafting/furnace UI is drawn with HUD primitives.
+- **Textures** (`src/render/Texture.cpp`, `src/render/BreakOverlay.cpp`) — all
+  block tiles, item icons, and mining crack stages are generated procedurally
+  at startup, so there are no asset files. The same tile functions fill both a
+  texture array (chunk rendering, repeat wrapping for merged faces) and a 2D
+  atlas strip (HUD icons).
 - **HUD** (`src/ui/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,
   crosshair) using the public-domain `font8x8` bitmap font baked into a
   texture at startup.
@@ -225,7 +237,8 @@ swap, or merge stacks; the hotbar is the bottom row).
   (alongside the day clock) so the world survives changes to the built-in
   default seed. Player position, look
   direction, fly mode, hotbar slot, and the survival inventory persist in
-  `saves/world1/player.bin` (format v2; v1 files load with an empty
-  inventory so old saves keep their position). All save files are written
-  atomically (temp file + rename), and files with a bad/old header are
-  rejected and regenerated rather than crashing.
+  `saves/world1/player.bin` (format v3; v1 files load with an empty inventory
+  and v2 block stacks migrate to item stacks). Furnace block entities persist
+  in `saves/world1/block_entities.bin`. All save files are written atomically
+  (temp file + rename), and files with a bad/old header are rejected and
+  regenerated rather than crashing.

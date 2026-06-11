@@ -14,15 +14,15 @@ struct Settings {
     // Frame cap used when vsync is off; 0 = unlimited. The pause menu offers
     // steps up to the monitor's refresh rate.
     int fpsMax = 0;
-    // Survival-ish mode: block drops, finite stacked placement, E inventory.
-    // Off = creative (the original infinite-palette behavior).
-    bool survival = false;
+    // Survival mode is the default now. Explicit survival=0 in old settings
+    // files keeps creative mode.
+    bool survival = true;
     float volume = 0.8f; // master sound volume, 0..1
     // Rebindable keys (key_* entries, names per KeyBinds.h). Esc, the
     // hotbar digits, and the mouse buttons are fixed.
     int keyForward = 'W', keyBack = 'S', keyLeft = 'A', keyRight = 'D';
     int keyJump = keys::SPACE, keySneak = keys::LSHIFT, keySprint = keys::LCTRL;
-    int keyFly = 'F', keyInventory = 'E';
+    int keyFly = 'F', keyInventory = 'E', keyModeToggle = 'M';
 
     static Settings load(const std::string& path) {
         Settings s;
@@ -95,7 +95,8 @@ struct Settings {
           << "key_sneak=" << keys::toName(keySneak) << "\n"
           << "key_sprint=" << keys::toName(keySprint) << "\n"
           << "key_fly=" << keys::toName(keyFly) << "\n"
-          << "key_inventory=" << keys::toName(keyInventory) << "\n";
+          << "key_inventory=" << keys::toName(keyInventory) << "\n"
+          << "key_mode_toggle=" << keys::toName(keyModeToggle) << "\n";
     }
 
     // Maps the suffix of a key_* settings entry to its bind; null if unknown.
@@ -109,6 +110,7 @@ struct Settings {
         if (action == "sprint") return &keySprint;
         if (action == "fly") return &keyFly;
         if (action == "inventory") return &keyInventory;
+        if (action == "mode_toggle") return &keyModeToggle;
         return nullptr;
     }
 };

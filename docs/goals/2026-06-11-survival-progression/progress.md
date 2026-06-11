@@ -2,10 +2,10 @@
 
 ## STATUS
 
-- Current: M4 / Task 11
-- Last verified: M4/T10 completed (`cmake --build build -j` exit 0,
+- Current: M4 milestone review
+- Last verified: M4/T11 completed (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`;
-  `--demo-break --frames 120` screenshot inspected, 2026-06-11)
+  `--demo-survival --frames 300` screenshot inspected, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 5
 
@@ -158,3 +158,15 @@
   temp-dir `.\build\groundwork.exe --demo-break --frames 120` exit 0 and its
   screenshot was inspected with the staged Diamond Ore block and visible
   mid-progress cracks on the targeted face.
+- [2026-06-11] M4/T11 DONE. Fresh settings now default to survival while old
+  explicit `survival=0` settings remain creative; `key_mode_toggle` defaults
+  to `M`, round-trips through settings, and toggles survival/creative at
+  runtime while saving `settings.cfg`. Added `--demo-survival` for final
+  screenshot staging, and updated README, ROADMAP, STATUS, and VERIFICATION
+  docs for the Batch I controls, loop, saves, demo flags, and next roadmap
+  pointer. Validation: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`; isolated
+  temp-dir `.\build\groundwork.exe --demo-survival --frames 300` exit 0 and
+  its screenshot was inspected with survival hotbar resources/tools/counts,
+  staged Crafting Table and Furnace, targeted Diamond Ore, and visible mining
+  cracks.

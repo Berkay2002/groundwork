@@ -127,7 +127,7 @@ the current code and the current model/tooling context.
       `src/ItemRenderer.cpp`, magnetized pickup within ~2 blocks). Survival
       mode only; creative keeps destroy-outright.
 - Item counts in hotbar slots + finite placement (`survival=1` in
-      settings.cfg; the default stays the original infinite creative mode)
+      settings.cfg; creative remains available with `survival=0` or `M`)
 - Full inventory grid UI (open/close with E, click to move/swap/merge
       stacks, Hud-based, 4×8 with the hotbar as row 0)
 - Inventory persistence in player.bin (save bumped to v2; v1 files
@@ -153,14 +153,25 @@ the current code and the current model/tooling context.
       (449 KB self-contained binary), README quickstart, verified from
       scratch in a clean ubuntu:24.04 container
 
-## Batch I — Survival Progression
+## Batch I — Survival Progression — DONE
 
-Goal: make survival mode produce a meaningful resource loop.
+Survival is now the default for fresh settings, with `M` toggling back to
+creative and saving the choice. The loop is Minecraft-like and item-based:
+logs -> planks/sticks -> crafting table -> wooden tools -> cobblestone ->
+stone tools/furnace -> coal/torches -> raw iron -> iron ingot -> iron tools ->
+diamond ore -> diamond tools.
 
-The player should have reasons to mine, carry, craft, and use resources instead
-of treating survival as creative mode with stack counts. Existing registry
-fields such as `hardness` and `drop` are likely inputs, but the batch plan owns
-the exact tool, timing, durability, drop, and recipe decisions.
+- Item registry + player save v3 item stacks, with old v1/v2 migration.
+- Block registry mining metadata: hardness, preferred tool, harvest tier,
+      correct/wrong drops, and durability use.
+- Timed 20 TPS survival mining with crack overlay; creative remains instant
+      destroy/no-drop.
+- New blocks/items: cobblestone, planks, crafting table, furnace, diamond ore,
+      raw iron, ingots, diamond, and wood/stone/iron/diamond pickaxe/axe/shovel.
+- 2x2 inventory crafting, 3x3 crafting table UI, recipe reference icons,
+      right-click/shift-click stack behavior, and furnace input/fuel/output UI.
+- Furnace block entities persist input/fuel/output and smelt Raw Iron with Coal.
+- Procedural block/item/crack art; no asset files.
 
 ## Batch J — Entity Persistence & Item Cleanup
 
@@ -179,13 +190,14 @@ without pretending to solve all mob AI. The fixed tick, AABB physics,
 per-chunk buckets, and item entities are enough foundation; complex pathfinding
 should wait until a concrete need appears.
 
-## Batch L — Crafting & Recipes
+## Batch L — Advanced Crafting & Recipe Data
 
-Goal: turn crafting into a tested progression system.
+Goal: move beyond the base survival recipes without locking the recipe system
+into C++ forever.
 
-Crafting should support the survival loop without becoming UI-only code. The
-inventory is pure logic and already testable, so recipes should be data-shaped
-enough to move out of C++ later even if they start in code.
+Batch I added the core tested recipes and crafting surfaces. A later recipe
+batch should focus on data-file recipes, unlock/search UX, and recipe expansion
+when there are enough blocks, mobs, or structures to justify it.
 
 ## Batch M — World Variety Without Overcommitting
 

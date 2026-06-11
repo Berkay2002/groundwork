@@ -329,7 +329,7 @@ void drawPauseMenu(Hud& hud, GLFWwindow* w, int sw, int sh) {
 
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     if (action != GLFW_PRESS) return;
-    // if/else rather than switch: inventory and fly are rebindable.
+    // if/else rather than switch: inventory, fly, and mode are rebindable.
     if (key == GLFW_KEY_F3) { // fixed, like Esc
         app.showDebug = !app.showDebug;
     } else if (key == GLFW_KEY_ESCAPE) {
@@ -344,6 +344,13 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
         } else {
             openInventoryScreen(w, InventoryScreen::Inventory);
         }
+    } else if (key == app.settings.keyModeToggle) {
+        if (app.menu != Menu::None) return;
+        if (app.invOpen) closeInventory(w);
+        resetBreakProgress();
+        app.survival = !app.survival;
+        app.settings.survival = app.survival;
+        app.settings.save("settings.cfg");
     } else if (key == app.settings.keyFly) {
         if (app.menu == Menu::None) app.player.flying = !app.player.flying;
     } else if (app.menu == Menu::None &&
@@ -773,6 +780,7 @@ int main(int argc, char** argv) {
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
     bool demoBreak = false; // survival mining crack overlay for screenshots
+    bool demoSurvival = false; // survival loop hotbar + break feedback
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
     float startTime = -1.0f;    // --time <0..1>: day fraction override
     for (int i = 1; i < argc; ++i) {
@@ -785,6 +793,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
         if (std::strcmp(argv[i], "--demo-inv") == 0) demoInv = true;
         if (std::strcmp(argv[i], "--demo-break") == 0) demoBreak = true;
+        if (std::strcmp(argv[i], "--demo-survival") == 0) demoSurvival = true;
         if (std::strcmp(argv[i], "--demo-menu") == 0) demoMenu = Menu::Main;
         if (std::strcmp(argv[i], "--demo-settings") == 0) demoMenu = Menu::Settings;
     }
@@ -893,7 +902,7 @@ int main(int argc, char** argv) {
         app.mouseCaptured = false;
         glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
-    if (demoBreak) {
+    if (demoBreak || demoSurvival) {
         app.survival = true;
         app.player.flying = true;
         app.player.pitch = 0.0f;
@@ -901,6 +910,19 @@ int main(int argc, char** argv) {
         glm::ivec3 target((int)std::floor(targetPos.x), (int)std::floor(targetPos.y),
                           (int)std::floor(targetPos.z));
         world.setBlock(target.x, target.y, target.z, Block::DiamondOre);
+        if (demoSurvival) {
+            world.setBlock(target.x - 2, target.y, target.z, Block::CraftingTable);
+            world.setBlock(target.x + 2, target.y, target.z, Block::Furnace);
+            app.inv.slots[0] = makeItemStack(ItemId::LogBlock, 16);
+            app.inv.slots[1] = makeItemStack(ItemId::PlanksBlock, 32);
+            app.inv.slots[2] = makeToolStack(ItemId::StonePickaxe);
+            app.inv.slots[3] = makeItemStack(ItemId::Coal, 8);
+            app.inv.slots[4] = makeItemStack(ItemId::TorchBlock, 16);
+            app.inv.slots[5] = makeItemStack(ItemId::RawIron, 3);
+            app.inv.slots[6] = makeItemStack(ItemId::IronIngot, 2);
+            app.inv.slots[7] = makeToolStack(ItemId::IronPickaxe);
+            app.hotbarSlot = 7;
+        }
         app.breakHeld = false;
         app.breakProgress.active = true;
         app.breakProgress.target = target;
@@ -1019,7 +1041,7 @@ int main(int argc, char** argv) {
         }
 
         RaycastHit hit = world.raycast(eye, dir, REACH);
-        if (demoBreak && hit.hit) {
+        if ((demoBreak || demoSurvival) && hit.hit) {
             app.breakProgress.active = true;
             app.breakProgress.target = hit.block;
             app.breakProgress.block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);

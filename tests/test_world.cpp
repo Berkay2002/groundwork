@@ -1856,24 +1856,36 @@ static void testKeyBinds() {
     CHECK(keys::fromName("lshift") == keys::LSHIFT);
     CHECK(keys::fromName("nosuchkey") == -1);
     CHECK(keys::toName('W') == "W");
+    CHECK(keys::toName('M') == "M");
     CHECK(keys::toName(keys::LCTRL) == "LCTRL");
+
+    std::filesystem::remove("test_settings.cfg");
+    Settings defaults = Settings::load("test_settings.cfg");
+    CHECK(defaults.survival);
+    CHECK(defaults.keyModeToggle == 'M');
 
     // Custom binds parse; bad names/actions warn and keep the default.
     {
         std::ofstream f("test_settings.cfg");
-        f << "key_forward=Z\nkey_jump=TAB\nkey_back=NOSUCH\nkey_dance=Q\n";
+        f << "survival=0\nkey_forward=Z\nkey_jump=TAB\n"
+          << "key_mode_toggle=N\nkey_back=NOSUCH\nkey_dance=Q\n";
     }
     Settings s = Settings::load("test_settings.cfg");
+    CHECK(!s.survival);
     CHECK(s.keyForward == 'Z');
     CHECK(s.keyJump == keys::TAB);
+    CHECK(s.keyModeToggle == 'N');
     CHECK(s.keyBack == 'S');
 
     // Save/load round-trips every bind.
     s.keySneak = keys::CAPSLOCK;
+    s.survival = true;
     s.save("test_settings.cfg");
     Settings t = Settings::load("test_settings.cfg");
+    CHECK(t.survival);
     CHECK(t.keyForward == 'Z' && t.keyJump == keys::TAB);
     CHECK(t.keySneak == keys::CAPSLOCK && t.keyInventory == 'E');
+    CHECK(t.keyModeToggle == 'N');
     std::filesystem::remove("test_settings.cfg");
 }
 
