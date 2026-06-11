@@ -18,6 +18,7 @@ add_executable(minecraft
   src/Player.cpp
   src/Physics.cpp
   src/Entity.cpp
+  src/ItemRenderer.cpp
   src/Texture.cpp
   src/Hud.cpp
   src/Terrain.cpp

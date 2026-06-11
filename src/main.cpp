@@ -18,6 +18,7 @@
 #include "Frustum.h"
 #include "Hud.h"
 #include "Inventory.h"
+#include "ItemRenderer.h"
 #include "Player.h"
 #include "SaveIO.h"
 #include "Settings.h"
@@ -345,9 +346,13 @@ int main(int argc, char** argv) {
     //              — the before/after number for rendering optimization work.
     long maxFrames = -1;
     bool bench = false;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
-        if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
+    bool demoItems = false; // spawn a few item entities for screenshot checks
+    for (int i = 1; i < argc; ++i) {
+        if (i < argc - 1) {
+            if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
+            if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
+        }
+        if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
     }
 
     Settings settings = Settings::load("settings.cfg");
@@ -391,6 +396,7 @@ int main(int argc, char** argv) {
     GLuint blockTextures = createBlockTextureArray(); // array for chunks
     const int originLoc = chunkShader.loc("uOrigin");
     Hud hud(atlas);
+    ItemRenderer itemRenderer;
 
     GLuint cubeVbo;
     GLuint cubeVao = makeCubeLines(cubeVbo);
@@ -402,6 +408,13 @@ int main(int argc, char** argv) {
     world.waitUntilLoaded(app.player.pos, 2, 10000);
     if (!restored) app.player.spawn(world);
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
+
+    if (demoItems) { // a small row of drops in front of the viewpoint
+        glm::vec3 base = app.player.eyePos() + app.player.lookDir() * 3.0f;
+        app.entities.spawnItem(base, glm::vec3(0.0f), Block::Dirt, 1);
+        app.entities.spawnItem(base + glm::vec3(1, 0, 0), glm::vec3(0.0f), Block::Stone, 1);
+        app.entities.spawnItem(base + glm::vec3(-1, 0, 0), glm::vec3(0.0f), Block::Wood, 1);
+    }
 
     double lastTime = glfwGetTime();
     double accumulator = 0.0; // fixed-timestep simulation accumulator
@@ -439,7 +452,6 @@ int main(int argc, char** argv) {
             accumulator -= TICK_DT;
         }
         const float alpha = float(accumulator / TICK_DT);
-        (void)gameTime; // used once item entities render (Batch G Task 6)
         world.update(app.player.pos, settings.renderDistance);
 
         // Camera for this frame, computed early: mesh uploads prioritize
@@ -503,8 +515,13 @@ int main(int argc, char** argv) {
         glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures);
         world.drawChunks(frustum, eye, originLoc);
 
+        // Item entities: after opaque (normal depth test), before water so
+        // submerged drops blend correctly under the surface.
+        itemRenderer.draw(world, app.entities, viewProj, alpha, float(gameTime));
+
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.
+        chunkShader.use();
         chunkShader.setFloat("uAlpha", 0.65f);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
