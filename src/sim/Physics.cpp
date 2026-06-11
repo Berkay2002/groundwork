@@ -1,5 +1,5 @@
-#include "Physics.h"
-#include "World.h"
+#include "sim/Physics.h"
+#include "world/World.h"
 #include <cmath>
 
 bool bodyCollidesAt(const World& world, const Body& b, const glm::vec3& p) {

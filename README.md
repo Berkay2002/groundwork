@@ -115,12 +115,12 @@ swap, or merge stacks; the hotbar is the bottom row).
 
 ## How it works
 
-- **World** (`src/World.h/.cpp`) — owns chunks in a hash map keyed by chunk
+- **World** (`src/world/World.h/.cpp`) — owns chunks in a hash map keyed by chunk
   coordinates. Streams chunks in around the player (nearest first) and unloads
   distant ones, saving any the player modified. Also does the voxel raycast
   (Amanatides & Woo) used for block targeting. Chunks outside the camera
-  frustum are culled per frame (`src/Frustum.h`).
-- **Background work** (`src/JobQueue.h`) — terrain generation and chunk mesh
+  frustum are culled per frame (`src/render/Frustum.h`).
+- **Background work** (`src/platform/JobQueue.h`) — terrain generation and chunk mesh
   building run on a small worker pool so the frame loop never stalls.
   Workers only ever see freshly created chunks or immutable snapshots
   (chunk blocks + neighbor edge slices); all chunk-map mutation and GL
@@ -129,12 +129,12 @@ swap, or merge stacks; the hotbar is the bottom row).
   meshing → uploaded; edits set dirty again. Finished meshes upload within
   a 3 ms/frame budget — visible and nearby chunks first — so a streaming
   burst never stalls a frame, and dirty chunks re-mesh nearest-first.
-- **Blocks** (`src/Block.h`) — a single constexpr registry table holds every
+- **Blocks** (`src/world/Block.h`) — a single constexpr registry table holds every
   per-block property (name, solidity, collision, opacity, light emission,
   hardness, drop, per-face atlas tiles); the gameplay code only reads it
   through small predicate helpers, and saved chunk bytes are the enum values
   (append-only).
-- **Chunk** (`src/Chunk.h/.cpp`) — 16×80×16 block storage plus mesh building:
+- **Chunk** (`src/world/Chunk.h/.cpp`) — 16×80×16 block storage plus mesh building:
   only faces adjacent to non-opaque cells are emitted, with per-face shading
   and per-vertex smooth lighting + ambient occlusion baked into the
   vertices: each corner averages the light of the open cells around it and
@@ -161,7 +161,7 @@ swap, or merge stacks; the hotbar is the bottom row).
   relights incrementally (flood-fill add, unlight-BFS remove), propagating
   across chunk borders. Light is never saved — it is recomputed when a chunk
   is generated or loaded.
-- **Day/night cycle** (`src/DayCycle.h`) — a 10-minute world day drives the
+- **Day/night cycle** (`src/world/DayCycle.h`) — a 10-minute world day drives the
   sky/fog color (blue noon, orange dusk and dawn, near-black night) and a
   sun-level factor. Sun and block light are baked into the mesh as separate
   channels, and the shader takes `max(sun × sunLevel, block)` — so night
@@ -169,7 +169,7 @@ swap, or merge stacks; the hotbar is the bottom row).
   and torches keep their full glow after dark. Moonlight keeps night terrain
   barely readable instead of pitch black. The day clock persists in
   `level.bin`, so a save resumes at the time of day you left it.
-- **Audio** (`src/Audio.cpp`, `src/Sounds.h`, `src/SoundData.h`) — block
+- **Audio** (`src/audio/Audio.cpp`, `src/audio/Sounds.h`, `src/audio/SoundData.h`) — block
   break/place sounds and footsteps are real recordings from
   [Kenney's CC0 "Impact Sounds" pack](https://kenney.nl/assets/impact-sounds),
   embedded in the binary as raw PCM (regenerate with
@@ -178,7 +178,7 @@ swap, or merge stacks; the hotbar is the bottom row).
   (vendored single header) with a soft limiter; each play picks a random
   recorded variant plus a light pitch jitter so repeats don't sound
   mechanical. `volume` in settings.cfg (or the pause menu) scales everything.
-- **Terrain** (`src/Terrain.cpp`, `src/Noise.h`) — deterministic and a pure
+- **Terrain** (`src/world/Terrain.cpp`, `src/world/Noise.h`) — deterministic and a pure
   function of world coordinates + seed: rolling value-noise plains plus
   occasional hill regions selected by a low-frequency mask; sandy basins below
   y=21, unbreakable bedrock at y=0. A second low-frequency mask sinks lake
@@ -190,32 +190,32 @@ swap, or merge stacks; the hotbar is the bottom row).
   placed one-candidate-per-8x8-cell by hashing, so chunks generate
   independently in any order and trees that straddle a chunk border come out
   identical on both sides; everything stays order-independent the same way.
-- **Player** (`src/Player.h/.cpp`) — first-person controller with gravity,
+- **Player** (`src/sim/Player.h/.cpp`) — first-person controller with gravity,
   jumping, and swept per-axis AABB collision (sub-stepped so fast movement
   can't tunnel through blocks). Water is swim-through: gravity weakens, you
   sink slowly, and holding Space swims up. `F` toggles a fly mode for
-  exploring. The collision itself lives in `src/Physics.h/.cpp` as a reusable
+  exploring. The collision itself lives in `src/sim/Physics.h/.cpp` as a reusable
   `Body`/`moveBody`, shared with entities.
 - **Simulation tick** — all gameplay simulation (player physics, entities)
   runs at a fixed 20 ticks per second, decoupled from the frame rate;
   rendering interpolates positions between the last two ticks. This keeps
   physics deterministic across machines and is the groundwork a future
   multiplayer mode would need.
-- **Entities** (`src/Entity.h/.cpp`) — a minimal entity layer whose first
-  citizen is the dropped item: a small textured cube (`src/ItemRenderer.cpp`)
+- **Entities** (`src/sim/Entity.h/.cpp`) — a minimal entity layer whose first
+  citizen is the dropped item: a small textured cube (`src/render/ItemRenderer.cpp`)
   that bobs and spins, falls with the shared AABB physics, magnetizes to the
   player within ~2 blocks, and stacks into the inventory on contact. Entities
   are bucketed per chunk for proximity queries, freeze while their chunk is
   unloaded, and despawn after 5 minutes; they are not saved across runs.
-- **Inventory** (`src/Inventory.h`) — 4 rows × 8 columns of stacks (max 64),
+- **Inventory** (`src/sim/Inventory.h`) — 4 rows × 8 columns of stacks (max 64),
   row 0 doubling as the hotbar. Pure logic, exercised headlessly by the
   tests; the grid UI is drawn entirely with the HUD primitives.
-- **Textures** (`src/Texture.cpp`) — all block tiles are generated
+- **Textures** (`src/render/Texture.cpp`) — all block tiles are generated
   procedurally at startup (hash-noise grass/dirt/stone art), so there are no
   asset files. The same tile functions fill both a texture array (chunk
   rendering, repeat wrapping for merged faces) and a 2D atlas strip (HUD
   hotbar icons).
-- **HUD** (`src/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,
+- **HUD** (`src/ui/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,
   crosshair) using the public-domain `font8x8` bitmap font baked into a
   texture at startup.
 - **Saving** — modified chunks are written as versioned block dumps

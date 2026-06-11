@@ -1,8 +1,8 @@
 #pragma once
-#include "Chunk.h"
-#include "Frustum.h"
-#include "JobQueue.h"
-#include "Terrain.h"
+#include "world/Chunk.h"
+#include "render/Frustum.h"
+#include "platform/JobQueue.h"
+#include "world/Terrain.h"
 #include <atomic>
 #include <climits>
 #include <glm/glm.hpp>

@@ -1,6 +1,6 @@
-#include "Player.h"
-#include "Physics.h"
-#include "World.h"
+#include "sim/Player.h"
+#include "sim/Physics.h"
+#include "world/World.h"
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 

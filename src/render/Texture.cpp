@@ -1,6 +1,6 @@
-#include "Texture.h"
-#include "Block.h"
-#include "GLCompat.h"
+#include "render/Texture.h"
+#include "world/Block.h"
+#include "render/GLCompat.h"
 #include <cstdint>
 #include <vector>
 

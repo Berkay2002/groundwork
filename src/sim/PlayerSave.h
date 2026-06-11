@@ -1,6 +1,6 @@
 #pragma once
-#include "Inventory.h"
-#include "SaveIO.h"
+#include "sim/Inventory.h"
+#include "platform/SaveIO.h"
 #include <cstring>
 #include <fstream>
 #include <glm/glm.hpp>

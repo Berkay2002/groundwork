@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Block.h" // SoundMat: blocks pick their sound family in the registry
+#include "world/Block.h" // SoundMat: blocks pick their sound family in the registry
 
 // Tiny sound-effect player over miniaudio's low-level device API: a fixed
 // pool of voices mixed in the device callback, fed by the embedded

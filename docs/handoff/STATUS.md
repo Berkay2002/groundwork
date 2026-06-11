@@ -72,12 +72,12 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 - **Audio** (reworked twice on user feedback — synthesis was rejected by
   ear, then one-sound-for-all-blocks): real recordings from Kenney's CC0
   "Impact Sounds" pack, embedded as raw 22 kHz mono s16 PCM in
-  `src/SoundData.h` (regenerate via `tools/make_sounddata.sh`; needs
+  `src/audio/SoundData.h` (regenerate via `tools/make_sounddata.sh`; needs
   curl/ffmpeg/xxd, normal builds don't). Three **material banks** (Soft/
   Stone/Wood) + footsteps; blocks pick theirs via the registry's `SoundMat
   sound` column (`soundMaterial(b)`; None = silent, e.g. water). Breaking
   plays the bank at pitch ~1.0; placing reuses it at pitch ~1.3, gain 0.65.
-  Random variant + pitch jitter per play (LCG). `src/Audio.cpp` mixes a
+  Random variant + pitch jitter per play (LCG). `src/audio/Audio.cpp` mixes a
   16-voice pool in a miniaudio device callback (mutex-guarded voices,
   linear-interpolated resampling, tanh soft limiter, atomic master volume).
   miniaudio 0.11.21 vendored in `third_party/` (SYSTEM include; MA_NO_*
@@ -137,13 +137,13 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   worlds; bench numbers depend heavily on viewpoint, so compare binaries in
   the same CWD, not against historical logs.
 - **Physics extraction**: the player's collidesAt/moveAxis became
-  `Body`/`bodyCollidesAt`/`moveBody` in `src/Physics.{h,cpp}`. One behavior
+  `Body`/`bodyCollidesAt`/`moveBody` in `src/sim/Physics.{h,cpp}`. One behavior
   change, deliberate: on collision a body now **snaps flush** to the
   obstacle plane instead of stopping at the last 0.45-block sub-step
   (a step is < 1 block, so the leading face crossed exactly one cell
   boundary). Without this, item cubes visibly hovered above the ground;
   it also pins the player exactly to surfaces. Tests assert exact landing.
-- **Entities** (`src/Entity.{h,cpp}`, main thread only like the chunk map):
+- **Entities** (`src/sim/Entity.{h,cpp}`, main thread only like the chunk map):
   `ItemEntity` = Body (0.25×0.25 cube) + block + count + age. Tick order:
   magnet (inside 2.0 of the player torso, velocity 8 m/s toward it,
   overrides gravity) else gravity −22/friction; then moveBody; then pickup
@@ -160,7 +160,7 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   feedback: a hidden "1" reads as a broken counter), E opens the 4×8 grid
   (click = pick up / put down / swap / merge; Esc or E closes; a held
   cursor stack is re-added on close, overflow dropped as an item).
-- **Item rendering** (`src/ItemRenderer.{h,cpp}`): own tiny shader, one
+- **Item rendering** (`src/render/ItemRenderer.{h,cpp}`): own tiny shader, one
   static unit-cube VBO, per-item model matrix (bob = sin on `gameTime`,
   spin, ×0.25 scale), per-face texture layers via a `uLayers[6]` uniform +
   face-index attrib, lit by `0.85^(15−max(sun,block))` at the item's cell.
@@ -168,7 +168,7 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   NOTE: drawChunks no longer leaves the chunk shader as the implicit
   current program — main.cpp re-binds `chunkShader.use()` before the water
   pass.
-- **Save v2** (`src/PlayerSave.h`, logic out of main.cpp so it's testable):
+- **Save v2** (`src/sim/PlayerSave.h`, logic out of main.cpp so it's testable):
   v1 fields + 32 × (block byte, count byte). v1 files **migrate** (position
   kept, empty inventory) rather than being rejected; unknown block bytes
   clamp to Air like chunk loading. The user's real player.bin was verified
@@ -222,7 +222,7 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 - **Save safety (A)**: `World::loadOrCreateSeed` reads/writes
   `saves/world1/level.bin` (`MCLV` + u32 version + u32 seed); a caller seed
   only matters for brand-new worlds. All save files (chunk/player/level) go
-  through `atomicSave` in `src/SaveIO.h` (write `.tmp`, `rename()`). A 30 s
+  through `atomicSave` in `src/platform/SaveIO.h` (write `.tmp`, `rename()`). A 30 s
   autosave timer in main.cpp saves modified chunks + player; unload-time
   saving already existed and is now pinned by `testUnloadSaves`.
 - **Block registry (B)**: `BLOCK_DEFS` constexpr table in `Block.h`; the
@@ -325,7 +325,7 @@ and later data-file/modding work. Each is a major, user-approved undertaking.
 - Windows 11 is a first-class native target as of the
   `docs/goals/2026-06-11-native-windows-support/` goal: MSVC + CMake + vcpkg
   packages `glfw3`/`glm`, no external GL loader dependency. The in-tree
-  `src/GLCompat.{h,cpp}` loads OpenGL 3.3 functions on Windows after GLFW
+  `src/render/GLCompat.{h,cpp}` loads OpenGL 3.3 functions on Windows after GLFW
   creates the context.
 
 ## Recent verification snapshot (Batch H)

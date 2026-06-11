@@ -1,5 +1,5 @@
-#include "Terrain.h"
-#include "Chunk.h"
+#include "world/Terrain.h"
+#include "world/Chunk.h"
 #include <algorithm>
 #include <cmath>
 

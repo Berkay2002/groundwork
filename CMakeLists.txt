@@ -34,20 +34,20 @@ endif()
 option(ENABLE_AUDIO "Build with sound effects (miniaudio)" ON)
 
 add_executable(groundwork
-  src/main.cpp
-  src/Chunk.cpp
-  src/Lighting.cpp
-  src/World.cpp
-  src/WorldSave.cpp
-  src/Player.cpp
-  src/Physics.cpp
-  src/Entity.cpp
-  src/ItemRenderer.cpp
-  src/GLCompat.cpp
-  src/Texture.cpp
-  src/Hud.cpp
-  src/Terrain.cpp
-  src/Audio.cpp
+  src/app/main.cpp
+  src/world/Chunk.cpp
+  src/world/Lighting.cpp
+  src/world/World.cpp
+  src/world/WorldSave.cpp
+  src/sim/Player.cpp
+  src/sim/Physics.cpp
+  src/sim/Entity.cpp
+  src/render/ItemRenderer.cpp
+  src/render/GLCompat.cpp
+  src/render/Texture.cpp
+  src/ui/Hud.cpp
+  src/world/Terrain.cpp
+  src/audio/Audio.cpp
 )
 
 target_link_libraries(groundwork PRIVATE
@@ -55,6 +55,7 @@ target_link_libraries(groundwork PRIVATE
   ${GROUNDWORK_GLM_TARGET}
   OpenGL::GL
   Threads::Threads)
+target_include_directories(groundwork PRIVATE src)
 if(NOT WIN32)
   target_compile_definitions(groundwork PRIVATE GL_GLEXT_PROTOTYPES)
 endif()
@@ -83,17 +84,18 @@ endif()
 enable_testing()
 add_executable(world_tests
   tests/test_world.cpp
-  src/Chunk.cpp
-  src/Lighting.cpp
-  src/World.cpp
-  src/WorldSave.cpp
-  src/Terrain.cpp
-  src/Player.cpp
-  src/Physics.cpp
-  src/Entity.cpp
-  src/GLCompat.cpp
+  src/world/Chunk.cpp
+  src/world/Lighting.cpp
+  src/world/World.cpp
+  src/world/WorldSave.cpp
+  src/world/Terrain.cpp
+  src/sim/Player.cpp
+  src/sim/Physics.cpp
+  src/sim/Entity.cpp
+  src/render/GLCompat.cpp
 )
 target_link_libraries(world_tests PRIVATE OpenGL::GL Threads::Threads ${GROUNDWORK_GLM_TARGET})
+target_include_directories(world_tests PRIVATE src)
 if(NOT WIN32)
   target_compile_definitions(world_tests PRIVATE GL_GLEXT_PROTOTYPES)
 endif()

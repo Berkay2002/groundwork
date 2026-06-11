@@ -6,8 +6,8 @@
 #include <utility>
 #include <vector>
 
-#include "Inventory.h"
-#include "Settings.h"
+#include "sim/Inventory.h"
+#include "platform/Settings.h"
 
 namespace ui {
 

@@ -1,6 +1,6 @@
 #pragma once
-#include "Block.h"
-#include "Chunk.h"
+#include "world/Block.h"
+#include "world/Chunk.h"
 #include <cstdint>
 #include <glm/glm.hpp>
 

@@ -98,7 +98,7 @@
 
 ## Misc
 
-- `src/font8x8_basic.h` is fetched from dhepper/font8x8 (public domain) and
+- `src/ui/font8x8_basic.h` is fetched from dhepper/font8x8 (public domain) and
   locally patched: declaration changed to `const unsigned char` to fix
   `-Wnarrowing`. Re-fetching it verbatim will reintroduce the build error.
 - ESC behaves in two stages (release cursor → quit on second press) — easy to

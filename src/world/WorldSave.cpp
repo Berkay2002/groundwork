@@ -1,6 +1,6 @@
-#include "WorldSave.h"
-#include "Block.h"
-#include "SaveIO.h"
+#include "world/WorldSave.h"
+#include "world/Block.h"
+#include "platform/SaveIO.h"
 #include <cstring>
 #include <fstream>
 

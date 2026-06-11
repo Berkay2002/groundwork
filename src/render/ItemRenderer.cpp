@@ -1,7 +1,7 @@
-#include "ItemRenderer.h"
-#include "Block.h"
-#include "Entity.h"
-#include "World.h"
+#include "render/ItemRenderer.h"
+#include "world/Block.h"
+#include "sim/Entity.h"
+#include "world/World.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>

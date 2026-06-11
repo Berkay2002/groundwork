@@ -1,5 +1,5 @@
 #pragma once
-#include "Noise.h"
+#include "world/Noise.h"
 #include <cstdint>
 
 class Chunk;

@@ -1,5 +1,5 @@
 #pragma once
-#include "GLCompat.h"
+#include "render/GLCompat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <glm/glm.hpp>

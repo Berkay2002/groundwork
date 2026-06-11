@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "SoundData.h"
+#include "audio/SoundData.h"
 
 // Sound effects: real recordings (Kenney's CC0 "Impact Sounds" pack)
 // embedded as raw PCM in SoundData.h — regenerate with

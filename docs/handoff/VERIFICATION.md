@@ -101,8 +101,8 @@ and do a ThreadSanitizer pass. TSAN crashes at startup on this kernel
 
 ```sh
 g++ -std=c++17 -fsanitize=thread -g -O1 -DGL_GLEXT_PROTOTYPES \
-    tests/test_world.cpp src/Chunk.cpp src/World.cpp src/Terrain.cpp \
-    src/Player.cpp src/Physics.cpp src/Entity.cpp \
+    tests/test_world.cpp src/world/Chunk.cpp src/world/World.cpp src/world/Terrain.cpp \
+    src/sim/Player.cpp src/sim/Physics.cpp src/sim/Entity.cpp \
     -o /tmp/tsan_tests -lGL -lpthread
 setarch $(uname -m) -R /tmp/tsan_tests        # <- the ASLR workaround
 ```
@@ -118,6 +118,6 @@ and still do the Linux TSAN pass before closing the work.
 ## Terrain inspection without the game
 
 `Terrain` compiles standalone — for heightmap/feature debugging, build a tiny
-probe against `src/Terrain.cpp` (no GL define needed) and print `heightAt`
+probe against `src/world/Terrain.cpp` (no GL define needed) and print `heightAt`
 over a grid. This caught the `int()` truncation bias; a wide min/max scan
 (±400, step 4) is how hill/sand ranges were validated (19..51 for seed 1337).

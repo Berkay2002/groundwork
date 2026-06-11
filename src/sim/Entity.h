@@ -1,8 +1,8 @@
 #pragma once
-#include "Block.h"
-#include "Inventory.h"
-#include "Physics.h"
-#include "World.h" // ChunkKey/ChunkKeyHash; World is GL-free until upload
+#include "world/Block.h"
+#include "sim/Inventory.h"
+#include "sim/Physics.h"
+#include "world/World.h" // ChunkKey/ChunkKeyHash; World is GL-free until upload
 #include <glm/glm.hpp>
 #include <memory>
 #include <unordered_map>

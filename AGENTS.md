@@ -52,7 +52,7 @@ one test, comment out calls in its `main()` or just run the whole binary
 Linux dependencies are system packages only: `libglfw3-dev`, `libglm-dev`,
 OpenGL via Mesa (`GL_GLEXT_PROTOTYPES` + OpenGL::GL). Windows uses vcpkg
 packages `glfw3` and `glm`, MSVC, and the platform OpenGL library. There is no
-loader library dependency like GLAD/GLEW; `src/GLCompat.{h,cpp}` is the in-tree
+loader library dependency like GLAD/GLEW; `src/render/GLCompat.{h,cpp}` is the in-tree
 Windows OpenGL function loader. There are **zero asset files** — block textures
 and the HUD font are generated/embedded at startup. Keep that property.
 
@@ -62,7 +62,7 @@ Two-thread-pool game with a strict ownership rule:
 
 **The main thread owns the chunk map and all GL. Workers never touch either.**
 
-- `src/World.{h,cpp}` is the hub: a hash map `ChunkKey → unique_ptr<Chunk>`,
+- `src/world/World.{h,cpp}` is the hub: a hash map `ChunkKey → unique_ptr<Chunk>`,
   chunk streaming around the player, the voxel raycast, save/load, and the two
   async pipelines. Generation jobs build a *fresh* `Chunk` off-thread and hand
   it back through the mutex-guarded `genDone_` queue; mesh jobs consume an
@@ -75,27 +75,28 @@ Two-thread-pool game with a strict ownership rule:
   uploaded. Edits set `dirty` again; a chunk edited while meshing is simply
   re-enqueued when the stale result returns. Border edits also dirty the
   neighbor chunk (both in `setBlock` and when a new chunk arrives).
-- `src/Chunk.{h,cpp}`: 16×80×16 block storage (`CHUNK_SIZE`, `CHUNK_HEIGHT`).
+- `src/world/Chunk.{h,cpp}`: 16×80×16 block storage (`CHUNK_SIZE`, `CHUNK_HEIGHT`).
   `buildMeshData(snapshot)` is a pure function (thread-safe, GL-free,
   face-culling mesher with per-face brightness baked into vertices);
   `Chunk::uploadMesh` is the GL half. Keep that split — it is what makes
   meshing background-safe and testable headless.
-- `src/Terrain.{h,cpp}`: generation is a **pure function of world coordinates
+- `src/world/Terrain.{h,cpp}`: generation is a **pure function of world coordinates
   + seed** — never of chunk load order. This is why trees that straddle chunk
   borders come out identical from either side (one tree candidate per 8×8 cell
   via hashing, each chunk writes whatever overlaps it). Any new feature
   (caves, ores) must preserve this invariant. `Noise.h` is value-noise fBm.
-- `src/main.cpp`: GLFW window/input, the frame loop (player update → world
+- `src/app/main.cpp`: GLFW window/input, the frame loop (player update → world
   update → meshing → render → HUD), shaders as embedded strings, hotbar state,
   player save/load, and the `--frames` self-test flag.
-- `src/Hud.{h,cpp}`: pixel-space 2D overlay batching solid rects, block-atlas
+- `src/ui/Hud.{h,cpp}`: pixel-space 2D overlay batching solid rects, block-atlas
   tiles, and bitmap-font text into three draws. Extend this for any new UI
   instead of ad-hoc GL.
-- Support headers: `Frustum.h` (AABB culling, used in `World::drawChunks`),
-  `JobQueue.h` (worker pool), `Settings.h` (`settings.cfg`), `Shader.h`,
-  `Player.{h,cpp}` (per-axis sub-stepped AABB collision — no tunneling),
-  `Block.h` (block enum, `tileFor(block, face)` atlas mapping),
-  `Texture.cpp` (procedural atlas).
+- Support headers: `src/render/Frustum.h` (AABB culling, used in
+  `World::drawChunks`), `src/platform/JobQueue.h` (worker pool),
+  `src/platform/Settings.h` (`settings.cfg`), `src/render/Shader.h`,
+  `src/sim/Player.{h,cpp}` (per-axis sub-stepped AABB collision — no
+  tunneling), `src/world/Block.h` (block enum, `tileFor(block, face)` atlas
+  mapping), `src/render/Texture.cpp` (procedural atlas).
 
 ## Save format rules
 

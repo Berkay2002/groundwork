@@ -1,6 +1,6 @@
-#include "Chunk.h"
-#include "Lighting.h"
-#include "GLCompat.h"
+#include "world/Chunk.h"
+#include "world/Lighting.h"
+#include "render/GLCompat.h"
 #include <algorithm>
 #include <cmath>
 

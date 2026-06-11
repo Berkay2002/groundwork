@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates src/SoundData.h from Kenney's CC0 "Impact Sounds" pack
+# Regenerates src/audio/SoundData.h from Kenney's CC0 "Impact Sounds" pack
 # (https://kenney.nl/assets/impact-sounds). The generated header is committed
 # so normal builds need neither network nor ffmpeg — rerun this only to
 # change which samples are embedded.
@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 
 PACK_URL="https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip"
 RATE=22050   # mono s16le; dull impact sounds don't benefit from 44.1k
-OUT=src/SoundData.h
+OUT=src/audio/SoundData.h
 
 # Sound-material banks (order matches SoundMat in Block.h, minus None) plus
 # footsteps. Break and place share a bank: placing plays the same family at

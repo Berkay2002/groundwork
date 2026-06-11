@@ -1,4 +1,4 @@
-#include "GLCompat.h"
+#include "render/GLCompat.h"
 
 #if defined(_WIN32)
 #include <cstdint>

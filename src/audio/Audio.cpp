@@ -1,4 +1,4 @@
-#include "Audio.h"
+#include "audio/Audio.h"
 
 #ifdef AUDIO_ENABLED
 
@@ -20,7 +20,7 @@
 #include <mutex>
 #include <vector>
 
-#include "Sounds.h"
+#include "audio/Sounds.h"
 
 namespace {
 constexpr int MAX_VOICES = 16;

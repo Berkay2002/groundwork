@@ -4,7 +4,7 @@
 #include <sstream>
 #include <string>
 
-#include "KeyBinds.h"
+#include "platform/KeyBinds.h"
 
 struct Settings {
     float mouseSensitivity = 0.12f;
