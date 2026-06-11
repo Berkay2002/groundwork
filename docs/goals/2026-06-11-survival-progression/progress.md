@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M1 code-quality review recheck
-- Last verified: M1 code-quality fixes validation green (`cmake --build build -j` exit 0;
+- Current: M2 / Task 3
+- Last verified: M1 milestone reviews approved after fixes (`cmake --build build -j` exit 0;
   `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -61,3 +61,5 @@
   clamping, and explicit item enum ordinals. Validation rerun:
   `cmake --build build -j && .\build\world_tests.exe` exit 0; build was
   warning-free and tests printed `all tests passed`.
+- [2026-06-11] M1 code-quality re-review round 2: APPROVED. All prior
+  quality findings resolved; M1 milestone gate cleared.
