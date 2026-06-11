@@ -7,6 +7,7 @@
 #include "../src/Inventory.h"
 #include "../src/Entity.h"
 #include "../src/PlayerSave.h"
+#include "../src/Sounds.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -835,6 +836,24 @@ static void testPlayerSaveV1Migrates() {
     std::filesystem::remove_all("test_psave1");
 }
 
+static void testSoundSynthesis() {
+    // The procedural effects must be bounded, non-silent, deterministic,
+    // and end near silence (no click on cutoff).
+    for (auto make : {makeBreakSound, makePlaceSound, makeFootstepSound}) {
+        std::vector<float> s = make();
+        CHECK(!s.empty());
+        float peak = 0.0f;
+        for (float v : s) peak = std::max(peak, std::fabs(v));
+        CHECK(peak > 0.05f && peak <= 1.0f);
+        float tail = 0.0f; // last 5 ms
+        for (size_t i = s.size() - SOUND_RATE / 200; i < s.size(); ++i)
+            tail = std::max(tail, std::fabs(s[i]));
+        CHECK(tail < 0.1f);
+        std::vector<float> again = make();
+        CHECK(again == s);
+    }
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -869,6 +888,7 @@ int main() {
     testEntityBucketsAndDrops();
     testPlayerSaveV2Roundtrip();
     testPlayerSaveV1Migrates();
+    testSoundSynthesis();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }

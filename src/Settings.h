@@ -12,6 +12,7 @@ struct Settings {
     // Survival-ish mode: block drops, finite stacked placement, E inventory.
     // Off = creative (the original infinite-palette behavior).
     bool survival = false;
+    float volume = 0.8f; // master sound volume, 0..1
 
     static Settings load(const std::string& path) {
         Settings s;
@@ -33,6 +34,7 @@ struct Settings {
                 else if (key == "render_distance") s.renderDistance = std::stoi(val);
                 else if (key == "vsync") s.vsync = std::stoi(val) != 0;
                 else if (key == "survival") s.survival = std::stoi(val) != 0;
+                else if (key == "volume") s.volume = std::stof(val);
                 else std::fprintf(stderr, "settings: unknown key '%s'\n", key.c_str());
             } catch (...) {
                 std::fprintf(stderr, "settings: bad value for '%s'\n", key.c_str());
@@ -44,6 +46,8 @@ struct Settings {
         if (s.renderDistance < 2) s.renderDistance = 2;
         if (s.renderDistance > 16) s.renderDistance = 16;
         if (s.mouseSensitivity <= 0.0f) s.mouseSensitivity = 0.12f;
+        if (s.volume < 0.0f) s.volume = 0.0f;
+        if (s.volume > 1.0f) s.volume = 1.0f;
         return s;
     }
 
@@ -55,6 +59,7 @@ struct Settings {
           << "fov=" << fov << "\n"
           << "render_distance=" << renderDistance << "\n"
           << "vsync=" << (vsync ? 1 : 0) << "\n"
-          << "survival=" << (survival ? 1 : 0) << "\n";
+          << "survival=" << (survival ? 1 : 0) << "\n"
+          << "volume=" << volume << "\n";
     }
 };

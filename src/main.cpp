@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "Audio.h"
 #include "Block.h"
 #include "Chunk.h"
 #include "Entity.h"
@@ -505,6 +506,10 @@ int main(int argc, char** argv) {
 
     World world(WORLD_SEED, SAVE_DIR);
 
+    Audio audio; // stays silent if disabled at build time or no device opens
+    audio.init();
+    audio.setVolume(settings.volume);
+
     bool restored = loadPlayer();
     // Pre-load the area around the player so they don't fall through.
     world.waitUntilLoaded(app.player.pos, 2, 10000);
@@ -529,6 +534,7 @@ int main(int argc, char** argv) {
     }
 
     double lastTime = glfwGetTime();
+    float stepDist = 0.0f;    // ground distance walked since the last footstep
     double accumulator = 0.0; // fixed-timestep simulation accumulator
     double gameTime = 0.0;    // sim-side clock (drives item bob/spin)
     double autosaveTimer = 0.0;
@@ -561,6 +567,14 @@ int main(int argc, char** argv) {
             app.player.beginTick();
             // Inventory open: keep simulating (gravity), drop movement intent.
             app.player.update(world, app.invOpen ? PlayerInput{} : app.input, TICK_DT);
+            if (app.player.onGround && !app.player.flying) {
+                glm::vec3 d = app.player.pos - app.player.prevPos;
+                stepDist += std::sqrt(d.x * d.x + d.z * d.z);
+                if (stepDist > 2.2f) { // roughly one stride
+                    stepDist = 0.0f;
+                    audio.playVaried(Sound::Footstep, 0.6f);
+                }
+            }
             app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
             accumulator -= TICK_DT;
         }
@@ -597,6 +611,7 @@ int main(int argc, char** argv) {
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
             Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
+            audio.playVaried(Sound::Break);
             // Creative destroys outright; survival drops the registry item.
             if (app.survival) app.entities.spawnBlockDrop(hit.block, broken);
         }
@@ -605,8 +620,10 @@ int main(int argc, char** argv) {
             Block held = heldBlock();
             if (held != Block::Air &&
                 !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
-                if (!app.survival || app.inv.consumeOne(app.hotbarSlot))
+                if (!app.survival || app.inv.consumeOne(app.hotbarSlot)) {
                     world.setBlock(p.x, p.y, p.z, held);
+                    audio.playVaried(Sound::Place, 0.8f);
+                }
             }
         }
         app.breakPressed = app.placePressed = false;

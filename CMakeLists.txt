@@ -11,6 +11,10 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(GLFW REQUIRED glfw3)
 
+# Sound effects via the vendored miniaudio header (no system package). OFF
+# builds the same game with silent audio stubs.
+option(ENABLE_AUDIO "Build with sound effects (miniaudio)" ON)
+
 add_executable(minecraft
   src/main.cpp
   src/Chunk.cpp
@@ -22,12 +26,19 @@ add_executable(minecraft
   src/Texture.cpp
   src/Hud.cpp
   src/Terrain.cpp
+  src/Audio.cpp
 )
 
 target_compile_definitions(minecraft PRIVATE GL_GLEXT_PROTOTYPES)
 target_include_directories(minecraft PRIVATE ${GLFW_INCLUDE_DIRS})
 target_link_libraries(minecraft PRIVATE ${GLFW_LIBRARIES} GL Threads::Threads)
 target_compile_options(minecraft PRIVATE -Wall -O2)
+if(ENABLE_AUDIO)
+  target_compile_definitions(minecraft PRIVATE AUDIO_ENABLED)
+  # SYSTEM: miniaudio is not ours to keep -Wall-clean.
+  target_include_directories(minecraft SYSTEM PRIVATE third_party)
+  target_link_libraries(minecraft PRIVATE ${CMAKE_DL_LIBS} m)
+endif()
 
 enable_testing()
 add_executable(world_tests
