@@ -33,6 +33,28 @@ open('saves/world1/player.bin','wb').write(d)"
 timeout 90 ./build/minecraft --frames 600      # 600 frames lets chunks stream in
 ```
 
+## Staged screenshot scenes (lighting, structures)
+
+When raw terrain can't show a feature (e.g. torch light needs darkness),
+build the scene headlessly: compile a one-off probe against
+`src/{World,Chunk,Terrain}.cpp` (same g++ line as the TSAN recipe, minus
+TSAN) that opens `World(1337, "saves/world1")`, edits blocks, calls
+`saveAllModified()`, and prints light values / surface heights for camera
+placement. Then craft `player.bin` and run `--frames`. Terrain is NOT flat:
+a "sealed" carved room can breach the surface — build above ground from a
+solid box (fill stone, carve interior) instead of carving downward blind.
+
+Two caveats learned the hard way:
+- The game window grabs real mouse/keyboard during a `--frames` run. If the
+  user touches anything, the crafted viewpoint is ruined **and** the run
+  overwrites `player.bin` on exit — re-craft it and re-run; warn the user
+  to keep hands off for ~10 s.
+- If the user's `saves/` exists, `mv` it aside first and restore it after
+  (never delete it); the probe's saves are yours to clean up.
+
+To inspect detail in a screenshot, crop+upscale with PIL
+(`im.crop(...).resize(..., Image.NEAREST)`) before Reading it.
+
 ## Threading changes
 
 Rerun `world_tests` several times (`for i in 1 2 3; do ./build/world_tests; done`)

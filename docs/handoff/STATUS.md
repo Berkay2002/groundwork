@@ -34,7 +34,8 @@ All planned batches through D are **done and verified**:
 
 **Batch E — Underground & Richer Terrain** (caves, ores, water) is next per
 the agreed order D → E → F → G → H; reasoning at the bottom of `TODO.md`.
-Caves are the natural showcase for the new lighting.
+Caves are the natural showcase for the new lighting. See `HANDOFF.md` in
+this directory for session context and Batch E pointers.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 

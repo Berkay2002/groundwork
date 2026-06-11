@@ -33,6 +33,32 @@
 - Tree trunks overwrite leaves (`overwrite=true`); leaves never overwrite
   terrain or trunk (`overwrite=false`). Order matters: leaves first, trunk last.
 
+## Lighting (Batch D)
+
+- Three distinct block predicates now — don't conflate them again:
+  `isSolid` (raycast target / placement occupancy), `isOpaque` (stops light
+  AND culls neighbor faces in the mesher), `isCollidable` (player movement).
+  Torch is solid but neither opaque nor collidable. Water in Batch E will
+  need its own row in this matrix — decide per predicate, not "is it air".
+- Sunlight level 15 propagates downward with **no attenuation**. Both the add
+  BFS and the unlight BFS special-case this (`d.y == -1 && level == 15`);
+  forgetting it in one of the two leaves stale bright columns under new blocks.
+- Light is never saved. `Chunk::computeInitialLight()` runs on the gen worker
+  (fresh chunk only); ALL cross-chunk light work (`World::addLight/
+  removeLight/seedChunkBorderLight`) is main-thread. Keep that split or TSAN
+  will find you.
+- `World::setLight` marks the owning chunk dirty and, for border cells, the
+  adjacent chunk too — neighbor faces sample this cell's light. Mesh light
+  bugs at chunk seams usually mean this marking was skipped.
+- In `ChunkSnapshot`, an **empty light vector means fully sunlit (15)** —
+  this keeps hand-built test snapshots and missing-neighbor edges bright.
+  Don't "fix" it to 0; outdoor borders would flash dark while streaming.
+- Emitter blocks light their own faces with at least their emission, and the
+  torch mesh skips directional face shading — otherwise the flame looks dim.
+- The torch is custom geometry (2/16 × 10/16 post) in `buildMeshData`, the
+  selection outline in main.cpp shrinks to match, and its tile's central 2px
+  strip is what the model samples — redraw the tile art with that in mind.
+
 ## Persistence
 
 - Block enum values are the bytes on disk: append, never renumber.
