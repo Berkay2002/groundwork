@@ -597,6 +597,45 @@ static void testBlockRegistry() {
     CHECK(tileFor(Block::CraftingTable, 2) < ATLAS_TILES);
     CHECK(tileFor(Block::Furnace, 4) < ATLAS_TILES);
     CHECK(tileFor(Block::DiamondOre, 0) < ATLAS_TILES);
+
+    struct ExpectedHarvestRow {
+        Block block;
+        float hardness;
+        ToolClass preferredTool;
+        ToolTier minTier;
+        ItemId drop;
+        uint8_t dropCount;
+        ItemId wrongDrop;
+        uint8_t wrongDropCount;
+    };
+    const ExpectedHarvestRow rows[] = {
+        {Block::Grass, 0.6f, ToolClass::Shovel, ToolTier::Hand, ItemId::DirtBlock, 1, ItemId::DirtBlock, 1},
+        {Block::Dirt, 0.5f, ToolClass::Shovel, ToolTier::Hand, ItemId::DirtBlock, 1, ItemId::DirtBlock, 1},
+        {Block::Sand, 0.5f, ToolClass::Shovel, ToolTier::Hand, ItemId::SandBlock, 1, ItemId::SandBlock, 1},
+        {Block::Wood, 2.0f, ToolClass::Axe, ToolTier::Hand, ItemId::LogBlock, 1, ItemId::LogBlock, 1},
+        {Block::Leaves, 0.2f, ToolClass::None, ToolTier::Hand, ItemId::None, 0, ItemId::None, 0},
+        {Block::Torch, 0.0f, ToolClass::None, ToolTier::Hand, ItemId::TorchBlock, 1, ItemId::TorchBlock, 1},
+        {Block::Planks, 2.0f, ToolClass::Axe, ToolTier::Hand, ItemId::PlanksBlock, 1, ItemId::PlanksBlock, 1},
+        {Block::CraftingTable, 2.5f, ToolClass::Axe, ToolTier::Hand, ItemId::CraftingTableBlock, 1, ItemId::CraftingTableBlock, 1},
+        {Block::Stone, 1.5f, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1, ItemId::None, 0},
+        {Block::Cobblestone, 2.0f, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1, ItemId::None, 0},
+        {Block::CoalOre, 3.0f, ToolClass::Pickaxe, ToolTier::Wood, ItemId::Coal, 1, ItemId::None, 0},
+        {Block::IronOre, 3.0f, ToolClass::Pickaxe, ToolTier::Stone, ItemId::RawIron, 1, ItemId::None, 0},
+        {Block::DiamondOre, 3.0f, ToolClass::Pickaxe, ToolTier::Iron, ItemId::Diamond, 1, ItemId::None, 0},
+        {Block::Furnace, 3.5f, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1, ItemId::None, 0},
+        {Block::Bedrock, UNBREAKABLE, ToolClass::None, ToolTier::Hand, ItemId::None, 0, ItemId::None, 0},
+        {Block::Water, 0.0f, ToolClass::None, ToolTier::Hand, ItemId::None, 0, ItemId::None, 0},
+    };
+    for (const ExpectedHarvestRow& row : rows) {
+        const BlockDef& d = blockDef(row.block);
+        CHECK(std::fabs(d.hardness - row.hardness) < 0.001f);
+        CHECK(d.preferredTool == row.preferredTool);
+        CHECK(d.minHarvestTier == row.minTier);
+        CHECK(d.dropItem == row.drop);
+        CHECK(d.dropCount == row.dropCount);
+        CHECK(d.wrongToolDropItem == row.wrongDrop);
+        CHECK(d.wrongToolDropCount == row.wrongDropCount);
+    }
 }
 
 static void testWaterPredicates() {
@@ -1037,6 +1076,10 @@ static void testMiningRequiredTicksAndDrops() {
     CHECK(miningDrop(Block::Stone, miningToolForStack(woodPick)).item == ItemId::CobblestoneBlock);
 
     CHECK(requiredBreakTicks(Block::Cobblestone, miningToolForStack(stonePick)) == 15);
+    CHECK(requiredBreakTicks(Block::CoalOre, miningToolForStack(hand)) == 300);
+    CHECK(miningDrop(Block::CoalOre, miningToolForStack(hand)).empty());
+    CHECK(requiredBreakTicks(Block::CoalOre, miningToolForStack(woodPick)) == 45);
+    CHECK(miningDrop(Block::CoalOre, miningToolForStack(woodPick)).item == ItemId::Coal);
     CHECK(requiredBreakTicks(Block::IronOre, miningToolForStack(woodPick)) == 300);
     CHECK(miningDrop(Block::IronOre, miningToolForStack(woodPick)).empty());
     CHECK(requiredBreakTicks(Block::IronOre, miningToolForStack(stonePick)) == 23);
@@ -1045,6 +1088,10 @@ static void testMiningRequiredTicksAndDrops() {
     CHECK(miningDrop(Block::DiamondOre, miningToolForStack(stonePick)).empty());
     CHECK(requiredBreakTicks(Block::DiamondOre, miningToolForStack(ironPick)) == 15);
     CHECK(miningDrop(Block::DiamondOre, miningToolForStack(ironPick)).item == ItemId::Diamond);
+    CHECK(requiredBreakTicks(Block::Furnace, miningToolForStack(hand)) == 350);
+    CHECK(miningDrop(Block::Furnace, miningToolForStack(hand)).empty());
+    CHECK(requiredBreakTicks(Block::Furnace, miningToolForStack(woodPick)) == 53);
+    CHECK(miningDrop(Block::Furnace, miningToolForStack(woodPick)).item == ItemId::FurnaceBlock);
 
     CHECK(requiredBreakTicks(Block::Bedrock, miningToolForStack(ironPick)) == NEVER_BREAKS);
     CHECK(requiredBreakTicks(Block::Torch, miningToolForStack(hand)) == INSTANT_BREAK);
