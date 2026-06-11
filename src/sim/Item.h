@@ -1,6 +1,7 @@
 #pragma once
 
 #include "world/Block.h"
+#include <algorithm>
 #include <cstdint>
 
 enum class ToolClass : uint8_t { None, Pickaxe, Axe, Shovel };
@@ -17,41 +18,43 @@ inline int tierLevel(ToolTier t) {
     return 0;
 }
 
+// Item ids are saved in player/block-entity files: append only, never
+// renumber. Block ids remain separate terrain save bytes.
 enum class ItemId : uint16_t {
     None = 0,
-    GrassBlock,
-    DirtBlock,
-    StoneBlock,
-    LogBlock,
-    LeavesBlock,
-    SandBlock,
-    BedrockBlock,
-    TorchBlock,
-    CoalOreBlock,
-    IronOreBlock,
-    WaterBlock,
-    Stick,
-    Coal,
-    RawIron,
-    IronIngot,
-    Diamond,
-    WoodPickaxe,
-    WoodAxe,
-    WoodShovel,
-    StonePickaxe,
-    StoneAxe,
-    StoneShovel,
-    IronPickaxe,
-    IronAxe,
-    IronShovel,
-    DiamondPickaxe,
-    DiamondAxe,
-    DiamondShovel,
-    CobblestoneBlock,
-    PlanksBlock,
-    CraftingTableBlock,
-    FurnaceBlock,
-    DiamondOreBlock,
+    GrassBlock = 1,
+    DirtBlock = 2,
+    StoneBlock = 3,
+    LogBlock = 4,
+    LeavesBlock = 5,
+    SandBlock = 6,
+    BedrockBlock = 7,
+    TorchBlock = 8,
+    CoalOreBlock = 9,
+    IronOreBlock = 10,
+    WaterBlock = 11,
+    Stick = 12,
+    Coal = 13,
+    RawIron = 14,
+    IronIngot = 15,
+    Diamond = 16,
+    WoodPickaxe = 17,
+    WoodAxe = 18,
+    WoodShovel = 19,
+    StonePickaxe = 20,
+    StoneAxe = 21,
+    StoneShovel = 22,
+    IronPickaxe = 23,
+    IronAxe = 24,
+    IronShovel = 25,
+    DiamondPickaxe = 26,
+    DiamondAxe = 27,
+    DiamondShovel = 28,
+    CobblestoneBlock = 29,
+    PlanksBlock = 30,
+    CraftingTableBlock = 31,
+    FurnaceBlock = 32,
+    DiamondOreBlock = 33,
     Count
 };
 
@@ -127,6 +130,11 @@ inline const ItemDef& itemDef(ItemId id) {
     return ITEM_DEFS[i < ITEM_TYPES ? i : 0];
 }
 
+inline bool isValidItemId(ItemId id) {
+    uint16_t i = uint16_t(id);
+    return i < ITEM_TYPES && id != ItemId::None;
+}
+
 inline Block placeBlockForItem(ItemId id) {
     return itemDef(id).placeBlock;
 }
@@ -156,9 +164,32 @@ struct ItemStack {
     bool empty() const { return count == 0 || item == ItemId::None; }
 };
 
-inline ItemStack makeToolStack(ItemId id) {
+inline ItemStack makeItemStack(ItemId id, int count, uint16_t durability = 0) {
+    if (!isValidItemId(id) || count <= 0) return {};
     const ItemDef& d = itemDef(id);
-    return {id, uint8_t(d.maxDurability > 0 ? 1 : 0), d.maxDurability};
+    if (d.maxDurability > 0) {
+        uint16_t dur = durability == 0 ? d.maxDurability
+                                       : std::min(durability, d.maxDurability);
+        return {id, 1, dur};
+    }
+    return {id, uint8_t(std::min(count, int(d.stackMax))), 0};
+}
+
+inline ItemStack sanitizeLoadedItemStack(uint16_t rawId, uint8_t count,
+                                         uint16_t durability) {
+    if (rawId >= ITEM_TYPES || rawId == 0 || count == 0) return {};
+    ItemId id = ItemId(rawId);
+    const ItemDef& d = itemDef(id);
+    if (d.maxDurability > 0 && durability == 0) return {};
+    return makeItemStack(id, count, durability);
+}
+
+inline ItemStack normalizeItemStack(ItemStack s) {
+    return makeItemStack(s.item, s.count, s.durability);
+}
+
+inline ItemStack makeToolStack(ItemId id) {
+    return makeItemStack(id, 1);
 }
 
 inline bool stacksCompatible(const ItemStack& a, const ItemStack& b) {

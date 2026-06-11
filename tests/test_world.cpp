@@ -29,6 +29,8 @@ static int failures = 0;
     if (!(cond)) { std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++failures; } \
 } while (0)
 
+static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
+
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
     CHECK(World::floorDiv(-1, 16) == -1);
@@ -920,6 +922,16 @@ static void testInventory() {
     Inventory full;
     for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(full.add(ItemId::StoneBlock, 64) == 0);
     CHECK(full.add(ItemId::StoneBlock, 10) == 10);
+
+    // Invalid ids are rejected instead of being stored with clamped metadata.
+    CHECK(inv.add(ItemId(65000), 5) == 5);
+    for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(inv.slots[i].item != ItemId(65000));
+
+    Inventory split;
+    CHECK(split.addStack({ItemId::Coal, 130, 0}) == 0);
+    CHECK(split.slots[0].item == ItemId::Coal && split.slots[0].count == 64);
+    CHECK(split.slots[1].item == ItemId::Coal && split.slots[1].count == 64);
+    CHECK(split.slots[2].item == ItemId::Coal && split.slots[2].count == 2);
 }
 
 static void testItemRegistry() {
@@ -955,6 +967,9 @@ static void testItemRegistry() {
     --b.durability;
     CHECK(!stacksCompatible(a, b));
     CHECK(stacksCompatible({ItemId::Coal, 3, 0}, {ItemId::Coal, 4, 0}));
+    CHECK(makeItemStack(ItemId(65000), 1).empty());
+    CHECK(makeItemStack(ItemId::Coal, 999).count == 64);
+    CHECK(makeItemStack(ItemId::WoodPickaxe, 99).count == 1);
 }
 
 static void testItemEntityFallsAndLands() {
@@ -1019,6 +1034,18 @@ static void testEntityBucketsAndDrops() {
     std::filesystem::remove_all("test_ent_save4");
 }
 
+static void testItemEntityStackIngress() {
+    Entities ents;
+    ents.spawnItem(glm::vec3(0.0f), glm::vec3(0.0f), ItemId(65000), 3);
+    ents.spawnItem(glm::vec3(0.0f), glm::vec3(0.0f), ItemId::Coal, -1);
+    CHECK(ents.items().empty());
+    ents.spawnItem(glm::vec3(0.0f), glm::vec3(0.0f), ItemId::Coal, 130);
+    CHECK(ents.items().size() == 3);
+    CHECK(ents.items()[0]->stack.count == 64);
+    CHECK(ents.items()[1]->stack.count == 64);
+    CHECK(ents.items()[2]->stack.count == 2);
+}
+
 static void testPlayerSaveV3Roundtrip() {
     std::filesystem::create_directories("test_psave");
     PlayerState a;
@@ -1063,7 +1090,7 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
         for (int i = 0; i < Inventory::SLOTS; ++i) {
             uint8_t b = 0, c = 0;
             if (i == 0) { b = uint8_t(Block::Stone); c = 3; }
-            if (i == 1) { b = uint8_t(Block::Dirt); c = 2; }
+            if (i == 1) { b = uint8_t(Block::Dirt); c = 250; }
             if (i == 2) { b = uint8_t(Block::CoalOre); c = 1; }
             if (i == 3) { b = 250; c = 9; }
             f.write(reinterpret_cast<const char*>(&b), 1);
@@ -1075,7 +1102,7 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
     CHECK(s.pos == glm::vec3(4.0f, 5.0f, 6.0f));
     CHECK(s.hotbarSlot == 5);
     CHECK(s.inv.slots[0].item == ItemId::CobblestoneBlock && s.inv.slots[0].count == 3);
-    CHECK(s.inv.slots[1].item == ItemId::DirtBlock && s.inv.slots[1].count == 2);
+    CHECK(s.inv.slots[1].item == ItemId::DirtBlock && s.inv.slots[1].count == 64);
     CHECK(s.inv.slots[2].item == ItemId::CoalOreBlock && s.inv.slots[2].count == 1);
     CHECK(s.inv.slots[3].empty());
     std::filesystem::remove_all("test_psave2");
@@ -1478,6 +1505,7 @@ int main() {
     testItemPickup();
     testItemFrozenInUnloadedChunk();
     testEntityBucketsAndDrops();
+    testItemEntityStackIngress();
     testPlayerSaveV3Roundtrip();
     testPlayerSaveV2BlockInventoryMigrates();
     testPlayerSaveV3UnknownItemSanitizes();

@@ -19,20 +19,36 @@ float Entities::rand01() {
 }
 
 void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemId item, int count) {
-    spawnItem(pos, vel, ItemStack{item, uint8_t(count), itemDef(item).maxDurability});
+    if (!isValidItemId(item) || count <= 0) return;
+    const ItemDef& d = itemDef(item);
+    while (count > 0) {
+        int take = std::min(count, int(d.stackMax));
+        spawnItem(pos, vel, makeItemStack(item, take));
+        count -= take;
+        if (d.stackMax <= 0) break;
+    }
 }
 
 void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack stack) {
+    int count = stack.count;
+    stack = makeItemStack(stack.item, 1, stack.durability);
     if (stack.empty()) return;
-    auto e = std::make_unique<ItemEntity>();
-    e->body.pos = pos;
-    e->body.vel = vel;
-    e->body.halfWidth = 0.125f;
-    e->body.height = 0.25f;
-    e->prevPos = pos;
-    e->stack = stack;
-    e->spinSeed = rng_;
-    items_.push_back(std::move(e));
+    const ItemDef& d = itemDef(stack.item);
+    while (count > 0) {
+        int take = std::min(count, int(d.stackMax));
+        ItemStack part = makeItemStack(stack.item, take, stack.durability);
+        if (part.empty()) return;
+        auto e = std::make_unique<ItemEntity>();
+        e->body.pos = pos;
+        e->body.vel = vel;
+        e->body.halfWidth = 0.125f;
+        e->body.height = 0.25f;
+        e->prevPos = pos;
+        e->stack = part;
+        e->spinSeed = rng_;
+        items_.push_back(std::move(e));
+        count -= take;
+    }
 }
 
 void Entities::spawnBlockDrop(const glm::ivec3& blockPos, Block broken) {

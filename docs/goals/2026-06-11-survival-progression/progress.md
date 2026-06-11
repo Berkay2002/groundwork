@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M1 code-quality review
-- Last verified: M1 spec-compliance review approved after fix (`cmake --build build -j` exit 0;
+- Current: M1 code-quality review recheck
+- Last verified: M1 code-quality fixes validation green (`cmake --build build -j` exit 0;
   `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -51,3 +51,13 @@
   0; tests printed `all tests passed`.
 - [2026-06-11] M1 spec-compliance re-review round 2: APPROVED. Prior issue
   M1-SPEC-001 resolved; no findings.
+- [2026-06-11] M1 code-quality review round 1: REJECTED. Important findings:
+  runtime stack ingress could store invalid ids/overflowed counts, and v2
+  migration bypassed stack sanitization. Minor findings: item ids needed an
+  explicit append-only save-format warning and item-stack save encoding should
+  be reusable before furnace persistence. Fixed by adding canonical
+  `makeItemStack`/`sanitizeLoadedItemStack`/`normalizeItemStack`, reusable
+  `ItemSave.h` read/write helpers, invalid/oversized ingress tests, v2 count
+  clamping, and explicit item enum ordinals. Validation rerun:
+  `cmake --build build -j && .\build\world_tests.exe` exit 0; build was
+  warning-free and tests printed `all tests passed`.

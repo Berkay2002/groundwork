@@ -15,12 +15,11 @@ public:
     // empty slots. Returns how many didn't fit. Durable items occupy one slot
     // each and are created at full durability.
     int add(ItemId item, int n) {
-        if (item == ItemId::None || n <= 0) return n < 0 ? 0 : n;
+        if (!isValidItemId(item) || n <= 0) return n < 0 ? 0 : n;
         const ItemDef& d = itemDef(item);
-        uint16_t durability = d.maxDurability;
+        ItemStack incoming = makeItemStack(item, 1);
         for (int i = 0; i < SLOTS && n > 0; ++i) {
             ItemStack& s = slots[i];
-            ItemStack incoming{item, 1, durability};
             if (!s.empty() && stacksCompatible(s, incoming) && s.count < d.stackMax) {
                 int take = std::min(n, int(d.stackMax) - int(s.count));
                 s.count = uint8_t(s.count + take);
@@ -31,7 +30,7 @@ public:
             ItemStack& s = slots[i];
             if (s.empty()) {
                 int take = std::min(n, int(d.stackMax));
-                s = {item, uint8_t(take), durability};
+                s = makeItemStack(item, take);
                 n -= take;
             }
         }
@@ -41,8 +40,9 @@ public:
     int add(Block b, int n) { return add(itemForBlock(b), n); }
 
     int addStack(ItemStack stack) {
-        if (stack.empty()) return 0;
         int n = stack.count;
+        stack = makeItemStack(stack.item, 1, stack.durability);
+        if (stack.empty()) return n;
         const ItemDef& d = itemDef(stack.item);
         for (int i = 0; i < SLOTS && n > 0; ++i) {
             ItemStack& s = slots[i];

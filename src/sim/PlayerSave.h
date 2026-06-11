@@ -1,7 +1,7 @@
 #pragma once
 #include "sim/Inventory.h"
+#include "sim/ItemSave.h"
 #include "platform/SaveIO.h"
-#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <glm/glm.hpp>
@@ -28,20 +28,6 @@ inline ItemId migrateV2BlockItem(uint8_t b) {
     return itemForBlock(block);
 }
 
-inline ItemStack sanitizeLoadedStack(uint16_t rawId, uint8_t count,
-                                     uint16_t durability) {
-    if (rawId >= ITEM_TYPES || count == 0) return {};
-    ItemId id = ItemId(rawId);
-    if (id == ItemId::None) return {};
-    const ItemDef& d = itemDef(id);
-    if (d.maxDurability > 0) {
-        if (durability == 0) return {};
-        if (durability > d.maxDurability) durability = d.maxDurability;
-        return {id, 1, durability};
-    }
-    return {id, uint8_t(std::min<int>(count, d.stackMax)), 0};
-}
-
 inline bool savePlayerFile(const std::string& path, const PlayerState& s) {
     return atomicSave(path, [&](std::ofstream& f) {
         f.write(PLAYER_MAGIC, 4);
@@ -52,14 +38,8 @@ inline bool savePlayerFile(const std::string& path, const PlayerState& s) {
         uint8_t flying = s.flying ? 1 : 0;
         f.write(reinterpret_cast<const char*>(&flying), 1);
         f.write(reinterpret_cast<const char*>(&s.hotbarSlot), 1);
-        for (int i = 0; i < Inventory::SLOTS; ++i) {
-            uint16_t item = uint16_t(s.inv.slots[i].item);
-            uint8_t c = s.inv.slots[i].count;
-            uint16_t durability = s.inv.slots[i].durability;
-            f.write(reinterpret_cast<const char*>(&item), 2);
-            f.write(reinterpret_cast<const char*>(&c), 1);
-            f.write(reinterpret_cast<const char*>(&durability), 2);
-        }
+        for (int i = 0; i < Inventory::SLOTS; ++i)
+            writeItemStack(f, s.inv.slots[i]);
     });
 }
 
@@ -90,17 +70,11 @@ inline bool loadPlayerFile(const std::string& path, PlayerState& s) {
             f.read(reinterpret_cast<char*>(&c), 1);
             if (!f) return false;
             ItemId item = migrateV2BlockItem(b);
-            s.inv.slots[i] = item == ItemId::None ? ItemStack{} : ItemStack{item, c, 0};
+            s.inv.slots[i] = sanitizeLoadedItemStack(uint16_t(item), c, 0);
         }
     } else if (version == 3) {
         for (int i = 0; i < Inventory::SLOTS; ++i) {
-            uint16_t item = 0, durability = 0;
-            uint8_t c = 0;
-            f.read(reinterpret_cast<char*>(&item), 2);
-            f.read(reinterpret_cast<char*>(&c), 1);
-            f.read(reinterpret_cast<char*>(&durability), 2);
-            if (!f) return false;
-            s.inv.slots[i] = sanitizeLoadedStack(item, c, durability);
+            if (!readItemStack(f, s.inv.slots[i])) return false;
         }
     }
     return true;
