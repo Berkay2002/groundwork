@@ -2008,6 +2008,97 @@ static void testMenuUiInventoryHelpers() {
     CHECK(cursor.item == ItemId::StoneBlock && cursor.count == 3);
 }
 
+static void testMenuUiStackClickHelpers() {
+    ItemStack slot = makeItemStack(ItemId::Coal, 9);
+    ItemStack cursor;
+    ui::clickStack(slot, cursor, ui::ClickButton::Right);
+    CHECK(cursor.item == ItemId::Coal && cursor.count == 5);
+    CHECK(slot.item == ItemId::Coal && slot.count == 4);
+
+    ui::clickStack(slot, cursor, ui::ClickButton::Right);
+    CHECK(slot.count == 5);
+    CHECK(cursor.count == 4);
+
+    ItemStack other = makeItemStack(ItemId::IronIngot, 1);
+    ui::clickStack(other, cursor, ui::ClickButton::Right);
+    CHECK(other.item == ItemId::IronIngot && other.count == 1);
+    CHECK(cursor.item == ItemId::Coal && cursor.count == 4);
+
+    ui::clickStack(slot, cursor, ui::ClickButton::Left);
+    CHECK(slot.item == ItemId::Coal && slot.count == 9);
+    CHECK(cursor.empty());
+}
+
+static void testMenuUiCraftingSlotsAndOutput() {
+    ui::CraftingUiState state(2);
+    CHECK(ui::craftingSlotAt(state, 0, 0) == ui::UiSlot::craft(0));
+    CHECK(ui::craftingSlotAt(state, 1, 1) == ui::UiSlot::craft(3));
+    CHECK(ui::craftingOutputSlot() == ui::UiSlot::craftOutput());
+
+    state.grid.at(0, 0) = makeItemStack(ItemId::LogBlock, 2);
+    ItemStack cursor;
+    CHECK(ui::clickCraftingOutput(state, cursor, ui::ClickButton::Left));
+    CHECK(cursor.item == ItemId::PlanksBlock && cursor.count == 4);
+    CHECK(state.grid.at(0, 0).count == 1);
+
+    cursor = makeItemStack(ItemId::Coal, 1);
+    CHECK(!ui::clickCraftingOutput(state, cursor, ui::ClickButton::Right));
+    CHECK(cursor.item == ItemId::Coal && cursor.count == 1);
+    CHECK(state.grid.at(0, 0).count == 1);
+}
+
+static void testMenuUiShiftClickDestinations() {
+    Inventory inv;
+    crafting::CraftingGrid craftGrid = grid(2);
+    craftGrid.at(0, 0) = makeItemStack(ItemId::Coal, 3);
+    CHECK(ui::quickMoveFromCraftingGrid(craftGrid, 0, inv));
+    CHECK(craftGrid.at(0, 0).empty());
+    CHECK(inv.slots[0].item == ItemId::Coal && inv.slots[0].count == 3);
+
+    ui::CraftingUiState craftOut(2);
+    craftOut.grid.at(0, 0) = makeItemStack(ItemId::LogBlock, 1);
+    CHECK(ui::quickMoveCraftingOutput(craftOut, inv));
+    CHECK(craftOut.grid.at(0, 0).empty());
+    CHECK(inv.slots[1].item == ItemId::PlanksBlock && inv.slots[1].count == 4);
+
+    ui::CraftingUiState blockedOut(2);
+    blockedOut.grid.at(0, 0) = makeItemStack(ItemId::LogBlock, 1);
+    Inventory fullInv;
+    for (int i = 0; i < Inventory::SLOTS; ++i)
+        fullInv.slots[i] = makeItemStack(ItemId::StoneBlock, 64);
+    CHECK(!ui::quickMoveCraftingOutput(blockedOut, fullInv));
+    CHECK(blockedOut.grid.at(0, 0).item == ItemId::LogBlock);
+
+    FurnaceState furnace;
+    furnace.input = makeItemStack(ItemId::RawIron, 2);
+    furnace.fuel = makeItemStack(ItemId::Coal, 2);
+    furnace.output = makeItemStack(ItemId::IronIngot, 2);
+    CHECK(ui::quickMoveFromFurnace(furnace, ui::FurnaceSlot::Output, inv));
+    CHECK(furnace.output.empty());
+    bool sawIngot = false;
+    for (const ItemStack& s : inv.slots)
+        if (s.item == ItemId::IronIngot && s.count == 2) sawIngot = true;
+    CHECK(sawIngot);
+
+    Inventory fuelInv;
+    fuelInv.slots[0] = makeItemStack(ItemId::Coal, 1);
+    CHECK(ui::quickMoveInventoryToFurnace(fuelInv, 0, furnace));
+    CHECK(furnace.fuel.item == ItemId::Coal && furnace.fuel.count == 3);
+    CHECK(fuelInv.slots[0].empty());
+}
+
+static void testMenuUiRecipeReferenceEnumeratesCraftingTable() {
+    std::vector<ItemStack> outputs = ui::recipeReferenceOutputs();
+    bool sawPick = false, sawFurnace = false, sawTorch = false;
+    for (ItemStack out : outputs) {
+        if (out.item == ItemId::IronPickaxe) sawPick = true;
+        if (out.item == ItemId::FurnaceBlock) sawFurnace = true;
+        if (out.item == ItemId::TorchBlock) sawTorch = true;
+    }
+    CHECK(sawPick && sawFurnace && sawTorch);
+    CHECK(outputs.size() == crafting::recipeCount());
+}
+
 static void testTickClockRunsFixedTicksAndAlpha() {
     TickClock clock;
 
@@ -2114,6 +2205,10 @@ int main() {
     testMenuUiHitTesting();
     testMenuUiAdjustSettings();
     testMenuUiInventoryHelpers();
+    testMenuUiStackClickHelpers();
+    testMenuUiCraftingSlotsAndOutput();
+    testMenuUiShiftClickDestinations();
+    testMenuUiRecipeReferenceEnumeratesCraftingTable();
     testTickClockRunsFixedTicksAndAlpha();
     testTickClockCapsStallsAndDropsRemainder();
     testTickClockPauseFreezesAccumulatedTime();

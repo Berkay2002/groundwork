@@ -2,9 +2,10 @@
 
 ## STATUS
 
-- Current: M4 / Task 9
-- Last verified: M3 milestone reviews approved after fixes (`cmake --build build -j` exit 0,
-  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M4 / Task 10
+- Last verified: M4/T9 completed (`cmake --build build -j` exit 0,
+  warning-free/no work; `.\build\world_tests.exe` -> `all tests passed`;
+  `--demo-inv --frames 120` screenshot inspected, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 5
 
@@ -135,3 +136,15 @@
   out-of-range indices instead of exposing caller bugs; M4 furnace UI should
   use a checked World-level furnace accessor to avoid accidentally creating
   persistent orphan block entities. M3 milestone gate cleared.
+- [2026-06-11] M4/T9 DONE. Inventory UI now has a reusable slot abstraction
+  for inventory, crafting, craft output, and furnace slots; left/right click,
+  half-stack splitting, output taking, shift-click crafting, and furnace
+  quick-move are covered by headless helper tests. Survival players can open
+  the 2x2 inventory craft surface, right-click crafting tables for 3x3
+  recipes, right-click furnaces for input/fuel/output management, see recipe
+  reference icons, and see item icons plus tool durability bars. Validation:
+  `cmake --build build -j` exit 0 warning-free/no work;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`; isolated
+  temp-dir `.\build\groundwork.exe --demo-inv --frames 120` exit 0 and its
+  screenshot was inspected with inventory, crafting grid, recipe reference,
+  item counts, and durability bars visible.

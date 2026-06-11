@@ -6,13 +6,17 @@
 #include <utility>
 #include <vector>
 
+#include "sim/Crafting.h"
 #include "sim/Inventory.h"
 #include "platform/Settings.h"
+#include "world/BlockEntity.h"
 
 namespace ui {
 
 enum class MenuPage { None, Main, Settings };
 enum class MenuAction { None, Resume, OpenSettings, Quit, Back, AdjustSetting };
+enum class ClickButton { Left, Right };
+enum class FurnaceSlot { Input, Fuel, Output };
 enum class SettingId {
     RenderDistance = 0,
     Fov,
@@ -48,6 +52,28 @@ struct InventoryLayout {
     float pad = 4.0f;
     float x0 = 0;
     float y0 = 0;
+};
+
+struct UiSlot {
+    enum class Kind { None, Inventory, Craft, CraftOutput, Furnace };
+    Kind kind = Kind::None;
+    int index = -1;
+
+    static UiSlot none() { return {}; }
+    static UiSlot inventory(int slot) { return {Kind::Inventory, slot}; }
+    static UiSlot craft(int slot) { return {Kind::Craft, slot}; }
+    static UiSlot craftOutput() { return {Kind::CraftOutput, 0}; }
+    static UiSlot furnace(FurnaceSlot slot) { return {Kind::Furnace, int(slot)}; }
+    bool operator==(const UiSlot& o) const { return kind == o.kind && index == o.index; }
+    bool operator!=(const UiSlot& o) const { return !(*this == o); }
+};
+
+struct CraftingUiState {
+    explicit CraftingUiState(int surface = 2) {
+        grid.width = surface;
+        grid.height = surface;
+    }
+    crafting::CraftingGrid grid;
 };
 
 inline constexpr const char* MENU_BUTTONS[] = {"Resume", "Settings", "Quit"};
@@ -204,21 +230,130 @@ inline int inventorySlotAt(int w, int h, float mx, float my) {
     return -1;
 }
 
-inline void clickInventorySlot(Inventory& inv, ItemStack& cursor, int slot) {
-    if (slot < 0 || slot >= Inventory::SLOTS) return;
-    ItemStack& s = inv.slots[slot];
-    if (cursor.empty()) {
-        cursor = s;
-        s = {};
-    } else if (s.empty() || !stacksCompatible(s, cursor)) {
-        std::swap(s, cursor);
-    } else {
-        int space = int(itemDef(s.item).stackMax) - int(s.count);
-        int moved = std::min(space, int(cursor.count));
-        s.count = uint8_t(s.count + moved);
-        cursor.count = uint8_t(cursor.count - moved);
-        if (cursor.count == 0) cursor = {};
+inline void clickStack(ItemStack& slot, ItemStack& cursor, ClickButton button) {
+    if (button == ClickButton::Left) {
+        if (cursor.empty()) {
+            cursor = slot;
+            slot = {};
+        } else if (slot.empty() || !stacksCompatible(slot, cursor)) {
+            std::swap(slot, cursor);
+        } else {
+            int space = int(itemDef(slot.item).stackMax) - int(slot.count);
+            int moved = std::min(space, int(cursor.count));
+            slot.count = uint8_t(slot.count + moved);
+            cursor.count = uint8_t(cursor.count - moved);
+            if (cursor.count == 0) cursor = {};
+        }
+        return;
     }
+
+    if (cursor.empty()) {
+        if (slot.empty()) return;
+        int take = (int(slot.count) + 1) / 2;
+        cursor = slot;
+        cursor.count = uint8_t(take);
+        slot.count = uint8_t(slot.count - take);
+        if (slot.count == 0) slot = {};
+    } else if (slot.empty()) {
+        slot = cursor;
+        slot.count = 1;
+        if (--cursor.count == 0) cursor = {};
+    } else if (stacksCompatible(slot, cursor) && slot.count < itemDef(slot.item).stackMax) {
+        ++slot.count;
+        if (--cursor.count == 0) cursor = {};
+    }
+}
+
+inline void clickInventorySlot(Inventory& inv, ItemStack& cursor, int slot,
+                               ClickButton button = ClickButton::Left) {
+    if (slot < 0 || slot >= Inventory::SLOTS) return;
+    clickStack(inv.slots[slot], cursor, button);
+}
+
+inline UiSlot craftingSlotAt(const CraftingUiState& state, int x, int y) {
+    if (x < 0 || y < 0 || x >= state.grid.width || y >= state.grid.height)
+        return UiSlot::none();
+    return UiSlot::craft(y * state.grid.width + x);
+}
+
+inline UiSlot craftingOutputSlot() { return UiSlot::craftOutput(); }
+
+inline bool clickCraftingOutput(CraftingUiState& state, ItemStack& cursor,
+                                ClickButton) {
+    return crafting::craftToCursor(state.grid, cursor);
+}
+
+inline bool quickMoveCraftingOutput(CraftingUiState& state, Inventory& inv) {
+    ItemStack out = crafting::craftingOutput(state.grid);
+    if (out.empty()) return false;
+    Inventory trial = inv;
+    if (trial.addStack(out) != 0) return false;
+    ItemStack cursor;
+    if (!crafting::craftToCursor(state.grid, cursor)) return false;
+    inv = trial;
+    return true;
+}
+
+inline bool quickMoveFromCraftingGrid(crafting::CraftingGrid& grid, int slot,
+                                      Inventory& inv) {
+    if (slot < 0 || slot >= grid.width * grid.height) return false;
+    int x = slot % grid.width, y = slot / grid.width;
+    ItemStack& s = grid.at(x, y);
+    if (s.empty()) return false;
+    int leftover = inv.addStack(s);
+    if (leftover == s.count) return false;
+    if (leftover == 0) s = {};
+    else s.count = uint8_t(leftover);
+    return true;
+}
+
+inline ItemStack& furnaceSlotRef(FurnaceState& furnace, FurnaceSlot slot) {
+    if (slot == FurnaceSlot::Input) return furnace.input;
+    if (slot == FurnaceSlot::Fuel) return furnace.fuel;
+    return furnace.output;
+}
+
+inline bool quickMoveFromFurnace(FurnaceState& furnace, FurnaceSlot slot,
+                                 Inventory& inv) {
+    ItemStack& s = furnaceSlotRef(furnace, slot);
+    if (s.empty()) return false;
+    int leftover = inv.addStack(s);
+    if (leftover == s.count) return false;
+    if (leftover == 0) s = {};
+    else s.count = uint8_t(leftover);
+    return true;
+}
+
+inline bool quickMoveInventoryToFurnace(Inventory& inv, int invSlot,
+                                        FurnaceState& furnace) {
+    if (invSlot < 0 || invSlot >= Inventory::SLOTS) return false;
+    ItemStack& s = inv.slots[invSlot];
+    if (s.empty()) return false;
+    FurnaceSlot dest = itemDef(s.item).fuelTicks > 0 ? FurnaceSlot::Fuel
+                                                     : FurnaceSlot::Input;
+    ItemStack& target = furnaceSlotRef(furnace, dest);
+    if (!target.empty() && !stacksCompatible(target, s)) return false;
+    int max = itemDef(s.item).stackMax;
+    int space = target.empty() ? max : max - int(target.count);
+    if (space <= 0) return false;
+    int moved = std::min(space, int(s.count));
+    if (target.empty()) {
+        target = s;
+        target.count = uint8_t(moved);
+    } else {
+        target.count = uint8_t(target.count + moved);
+    }
+    s.count = uint8_t(s.count - moved);
+    if (s.count == 0) s = {};
+    return true;
+}
+
+inline std::vector<ItemStack> recipeReferenceOutputs() {
+    std::vector<ItemStack> out;
+    out.reserve(crafting::recipeCount());
+    for (size_t i = 0; i < crafting::recipeCount(); ++i)
+        out.push_back(crafting::recipeAt(i).output);
+    return out;
 }
 
 } // namespace ui

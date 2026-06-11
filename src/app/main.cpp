@@ -108,6 +108,7 @@ void main() { FragColor = vec4(uColor, 1.0); }
 )";
 
 using Menu = ui::MenuPage; // pause-menu state
+enum class InventoryScreen { Inventory, CraftingTable, Furnace };
 
 struct App {
     GLFWwindow* window = nullptr;
@@ -116,6 +117,10 @@ struct App {
     int hotbarSlot = 0;
     Inventory inv;          // survival-mode item storage (row 0 = hotbar)
     ItemStack cursorStack;  // stack carried by the mouse in the inventory UI
+    ui::CraftingUiState crafting{2};
+    InventoryScreen invScreen = InventoryScreen::Inventory;
+    glm::ivec3 openFurnace{0};
+    World* world = nullptr;
     Entities entities;
     Settings settings;
     Audio audio;
@@ -141,6 +146,30 @@ Block heldBlock() {
 
 void resetBreakProgress() {
     app.breakProgress = {};
+}
+
+void returnCraftingGridToInventory() {
+    for (ItemStack& stack : app.crafting.grid.cells) {
+        if (stack.empty()) continue;
+        int leftover = app.inv.addStack(stack);
+        if (leftover > 0) {
+            app.entities.spawnItem(app.player.eyePos(), app.player.lookDir() * 3.0f,
+                                   ItemStack{stack.item, uint8_t(leftover),
+                                             stack.durability});
+        }
+        stack = {};
+    }
+}
+
+void openInventoryScreen(GLFWwindow* w, InventoryScreen screen, glm::ivec3 pos = {}) {
+    resetBreakProgress();
+    if (app.invOpen) returnCraftingGridToInventory();
+    app.invOpen = true;
+    app.invScreen = screen;
+    app.openFurnace = pos;
+    app.crafting = ui::CraftingUiState(screen == InventoryScreen::CraftingTable ? 3 : 2);
+    app.mouseCaptured = false;
+    glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 }
 
 void survivalMiningTick(World& world) {
@@ -178,7 +207,10 @@ void survivalMiningTick(World& world) {
 
 void closeInventory(GLFWwindow* w) {
     resetBreakProgress();
+    returnCraftingGridToInventory();
     app.invOpen = false;
+    app.invScreen = InventoryScreen::Inventory;
+    app.crafting = ui::CraftingUiState(2);
     if (!app.cursorStack.empty()) { // never destroy items on close
         int leftover = app.inv.addStack(app.cursorStack);
         if (leftover > 0)
@@ -303,10 +335,7 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
         if (app.invOpen) {
             closeInventory(w);
         } else {
-            resetBreakProgress();
-            app.invOpen = true;
-            app.mouseCaptured = false;
-            glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            openInventoryScreen(w, InventoryScreen::Inventory);
         }
     } else if (key == app.settings.keyFly) {
         if (app.menu == Menu::None) app.player.flying = !app.player.flying;
@@ -316,7 +345,102 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     }
 }
 
-void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
+ui::Rect craftSlotRect(const ui::InventoryLayout& L, int surface, int x, int y) {
+    float panelW = surface * L.slot + (surface - 1) * L.pad;
+    float x0 = L.x0 - panelW - 86.0f;
+    return {x0 + x * (L.slot + L.pad), L.y0 + y * (L.slot + L.pad), L.slot, L.slot};
+}
+
+ui::Rect craftOutputRect(const ui::InventoryLayout& L, int surface) {
+    ui::Rect last = craftSlotRect(L, surface, surface - 1, surface / 2);
+    return {last.x + L.slot + 20.0f, last.y, L.slot, L.slot};
+}
+
+ui::Rect furnaceSlotRect(const ui::InventoryLayout& L, ui::FurnaceSlot slot) {
+    float x0 = L.x0 - 210.0f;
+    float y0 = L.y0 + 20.0f;
+    if (slot == ui::FurnaceSlot::Input) return {x0, y0, L.slot, L.slot};
+    if (slot == ui::FurnaceSlot::Fuel) return {x0, y0 + L.slot + 18.0f, L.slot, L.slot};
+    return {x0 + L.slot + 56.0f, y0 + (L.slot + 18.0f) * 0.5f, L.slot, L.slot};
+}
+
+ui::UiSlot uiSlotAt(int w, int h, float mx, float my) {
+    ui::InventoryLayout L = ui::inventoryLayout(w, h);
+    int invSlot = ui::inventorySlotAt(w, h, mx, my);
+    if (invSlot >= 0) return ui::UiSlot::inventory(invSlot);
+    if (app.invScreen == InventoryScreen::Furnace) {
+        for (ui::FurnaceSlot s : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
+                                  ui::FurnaceSlot::Output})
+            if (furnaceSlotRect(L, s).contains(mx, my)) return ui::UiSlot::furnace(s);
+        return ui::UiSlot::none();
+    }
+    int surface = app.crafting.grid.width;
+    for (int y = 0; y < surface; ++y)
+        for (int x = 0; x < surface; ++x)
+            if (craftSlotRect(L, surface, x, y).contains(mx, my))
+                return ui::UiSlot::craft(y * surface + x);
+    if (craftOutputRect(L, surface).contains(mx, my)) return ui::UiSlot::craftOutput();
+    return ui::UiSlot::none();
+}
+
+FurnaceState* openFurnaceState() {
+    if (!app.world || app.invScreen != InventoryScreen::Furnace) return nullptr;
+    return app.world->furnaceAt(app.openFurnace);
+}
+
+bool canCursorUseFurnaceSlot(const ItemStack& cursor, ui::FurnaceSlot slot) {
+    if (cursor.empty()) return true;
+    if (slot == ui::FurnaceSlot::Input) return cursor.item == ItemId::RawIron;
+    if (slot == ui::FurnaceSlot::Fuel) return itemDef(cursor.item).fuelTicks > 0;
+    return false;
+}
+
+void shiftCraftOutputToInventory() {
+    while (ui::quickMoveCraftingOutput(app.crafting, app.inv)) {}
+}
+
+void handleInventoryUiClick(ui::UiSlot slot, ui::ClickButton btn, bool shift) {
+    if (slot.kind == ui::UiSlot::Kind::None) return;
+    if (shift) {
+        if (slot.kind == ui::UiSlot::Kind::Inventory) {
+            if (FurnaceState* f = openFurnaceState())
+                ui::quickMoveInventoryToFurnace(app.inv, slot.index, *f);
+        } else if (slot.kind == ui::UiSlot::Kind::Craft) {
+            ui::quickMoveFromCraftingGrid(app.crafting.grid, slot.index, app.inv);
+        } else if (slot.kind == ui::UiSlot::Kind::CraftOutput) {
+            shiftCraftOutputToInventory();
+        } else if (slot.kind == ui::UiSlot::Kind::Furnace) {
+            if (FurnaceState* f = openFurnaceState())
+                ui::quickMoveFromFurnace(*f, ui::FurnaceSlot(slot.index), app.inv);
+        }
+        return;
+    }
+
+    if (slot.kind == ui::UiSlot::Kind::Inventory) {
+        ui::clickInventorySlot(app.inv, app.cursorStack, slot.index, btn);
+    } else if (slot.kind == ui::UiSlot::Kind::Craft) {
+        int x = slot.index % app.crafting.grid.width;
+        int y = slot.index / app.crafting.grid.width;
+        ui::clickStack(app.crafting.grid.at(x, y), app.cursorStack, btn);
+    } else if (slot.kind == ui::UiSlot::Kind::CraftOutput) {
+        ui::clickCraftingOutput(app.crafting, app.cursorStack, btn);
+    } else if (slot.kind == ui::UiSlot::Kind::Furnace) {
+        FurnaceState* f = openFurnaceState();
+        if (!f) return;
+        ui::FurnaceSlot fs = ui::FurnaceSlot(slot.index);
+        if (fs == ui::FurnaceSlot::Output) {
+            ItemStack& out = ui::furnaceSlotRef(*f, fs);
+            if (out.empty()) return;
+            if (!app.cursorStack.empty() && !stacksCompatible(out, app.cursorStack)) return;
+            ui::clickStack(out, app.cursorStack, btn);
+            return;
+        }
+        if (!canCursorUseFurnaceSlot(app.cursorStack, fs)) return;
+        ui::clickStack(ui::furnaceSlotRef(*f, fs), app.cursorStack, btn);
+    }
+}
+
+void mouseButtonCallback(GLFWwindow* w, int button, int action, int mods) {
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
         app.breakHeld = false;
     }
@@ -331,13 +455,16 @@ void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
         return;
     }
     if (app.invOpen) { // clicks move stacks instead of recapturing the mouse
-        if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == GLFW_PRESS &&
+            (button == GLFW_MOUSE_BUTTON_LEFT || button == GLFW_MOUSE_BUTTON_RIGHT)) {
             double mx, my;
             glfwGetCursorPos(w, &mx, &my);
             int ww, wh;
             glfwGetWindowSize(w, &ww, &wh); // cursor coords are window coords
-            ui::clickInventorySlot(app.inv, app.cursorStack,
-                                   ui::inventorySlotAt(ww, wh, float(mx), float(my)));
+            ui::ClickButton btn = button == GLFW_MOUSE_BUTTON_LEFT
+                                ? ui::ClickButton::Left : ui::ClickButton::Right;
+            handleInventoryUiClick(uiSlotAt(ww, wh, float(mx), float(my)), btn,
+                                   (mods & GLFW_MOD_SHIFT) != 0);
         }
         return;
     }
@@ -481,6 +608,27 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
     hud.drawText(10, 10, 2.0f, buf);
 }
 
+void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
+                   float brightness = 1.0f) {
+    if (s.empty()) return;
+    Block b = placeBlockForItem(s.item);
+    if (b != Block::Air) hud.drawTile(x, y, size, tileFor(b, 4), brightness);
+    else hud.drawTile(x, y, size, int(itemIconTile(s.item)), brightness);
+
+    const ItemDef& d = itemDef(s.item);
+    if (d.maxDurability > 0) {
+        float ratio = float(s.durability) / float(d.maxDurability);
+        hud.drawRect(x, y + size - 5.0f, size, 4.0f, 0.05f, 0.05f, 0.05f, 0.85f);
+        hud.drawRect(x + 1.0f, y + size - 4.0f, (size - 2.0f) * ratio, 2.0f,
+                     0.2f, 0.85f, 0.2f, 0.95f);
+    } else if (s.count > 1 || d.stackMax > 1) {
+        char cnt[4];
+        std::snprintf(cnt, sizeof(cnt), "%d", s.count);
+        float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
+        hud.drawText(x + size - cw - 2.0f, y + size - 14.0f, 1.5f, cnt);
+    }
+}
+
 void drawHotbar(Hud& hud, int screenW, int screenH) {
     const float slot = 56.0f, pad = 4.0f, icon = slot - 2 * pad;
     float totalW = HOTBAR_SLOTS * slot + (HOTBAR_SLOTS - 1) * pad;
@@ -496,17 +644,7 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
         // fixed creative palette.
         if (app.survival) {
             const ItemStack& s = app.inv.slots[i];
-            if (!s.empty()) {
-                Block b = placeBlockForItem(s.item);
-                if (b != Block::Air)
-                    hud.drawTile(x + pad, y + pad, icon, tileFor(b, 4), sel ? 1.0f : 0.8f);
-                { // always show the count, "1" included — it's the ammo gauge
-                    char cnt[4];
-                    std::snprintf(cnt, sizeof(cnt), "%d", s.count);
-                    float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
-                    hud.drawText(x + slot - cw - 4, y + slot - 16, 1.5f, cnt);
-                }
-            }
+            drawItemStack(hud, s, x + pad, y + pad, icon, sel ? 1.0f : 0.8f);
         } else {
             hud.drawTile(x + pad, y + pad, icon, tileFor(HOTBAR[i], 4), sel ? 1.0f : 0.8f);
         }
@@ -528,29 +666,54 @@ void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
     for (int i = 0; i < Inventory::SLOTS; ++i) {
         ui::Rect r = ui::inventorySlotRect(L, i);
         hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, 0.9f);
-        const ItemStack& s = app.inv.slots[i];
-        if (s.empty()) continue;
-        Block b = placeBlockForItem(s.item);
-        if (b != Block::Air)
-            hud.drawTile(r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad, tileFor(b, 4));
-        { // count always shown, matching the hotbar
-            char cnt[4];
-            std::snprintf(cnt, sizeof(cnt), "%d", s.count);
-            float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
-            hud.drawText(r.x + L.slot - cw - 4, r.y + L.slot - 16, 1.5f, cnt);
+        drawItemStack(hud, app.inv.slots[i], r.x + L.pad, r.y + L.pad,
+                      L.slot - 2 * L.pad);
+    }
+    if (app.invScreen == InventoryScreen::Furnace) {
+        FurnaceState* f = openFurnaceState();
+        for (ui::FurnaceSlot slot : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
+                                     ui::FurnaceSlot::Output}) {
+            ui::Rect r = furnaceSlotRect(L, slot);
+            hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
+            if (f) drawItemStack(hud, ui::furnaceSlotRef(*f, slot),
+                                 r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
+        }
+        if (f && f->burnTicksRemaining > 0)
+            hud.drawRect(furnaceSlotRect(L, ui::FurnaceSlot::Fuel).x + L.slot + 10.0f,
+                         furnaceSlotRect(L, ui::FurnaceSlot::Fuel).y + 8.0f,
+                         8.0f, 34.0f, 0.95f, 0.45f, 0.12f, 0.9f);
+        if (f && f->cookTicks > 0)
+            hud.drawRect(furnaceSlotRect(L, ui::FurnaceSlot::Output).x - 42.0f,
+                         furnaceSlotRect(L, ui::FurnaceSlot::Output).y + 24.0f,
+                         34.0f * (float(f->cookTicks) / 200.0f), 8.0f,
+                         0.8f, 0.8f, 0.8f, 0.9f);
+    } else {
+        int surface = app.crafting.grid.width;
+        for (int y = 0; y < surface; ++y)
+            for (int x = 0; x < surface; ++x) {
+                ui::Rect r = craftSlotRect(L, surface, x, y);
+                hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
+                drawItemStack(hud, app.crafting.grid.at(x, y),
+                              r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
+            }
+        ui::Rect out = craftOutputRect(L, surface);
+        hud.drawRect(out.x, out.y, out.w, out.h, 0.22f, 0.22f, 0.16f, 0.92f);
+        drawItemStack(hud, crafting::craftingOutput(app.crafting.grid),
+                      out.x + L.pad, out.y + L.pad, L.slot - 2 * L.pad);
+        std::vector<ItemStack> recipes = ui::recipeReferenceOutputs();
+        float rx = L.x0 + Inventory::COLS * (L.slot + L.pad) + 30.0f;
+        float ry = L.y0;
+        for (size_t i = 0; i < recipes.size(); ++i) {
+            float x = rx + float(i % 3) * 34.0f;
+            float y = ry + float(i / 3) * 34.0f;
+            hud.drawRect(x, y, 30.0f, 30.0f, 0.12f, 0.12f, 0.12f, 0.75f);
+            drawItemStack(hud, recipes[i], x + 3.0f, y + 3.0f, 24.0f, 0.9f);
         }
     }
     if (!app.cursorStack.empty()) { // stack riding the mouse
         double mx, my;
         glfwGetCursorPos(w, &mx, &my);
-        Block b = placeBlockForItem(app.cursorStack.item);
-        if (b != Block::Air)
-            hud.drawTile(float(mx) - 20, float(my) - 20, 40, tileFor(b, 4));
-        if (app.cursorStack.count > 1) {
-            char cnt[4];
-            std::snprintf(cnt, sizeof(cnt), "%d", app.cursorStack.count);
-            hud.drawText(float(mx) + 6, float(my) + 6, 1.5f, cnt);
-        }
+        drawItemStack(hud, app.cursorStack, float(mx) - 20, float(my) - 20, 40);
     }
 }
 
@@ -685,6 +848,7 @@ int main(int argc, char** argv) {
     GLuint cubeVao = makeCubeLines(cubeVbo);
 
     World world(WORLD_SEED, SAVE_DIR);
+    app.world = &world;
     if (startTime >= 0.0f) // --time: pin the day clock for screenshots
         world.setDayTime(startTime * DAY_LENGTH);
 
@@ -828,12 +992,29 @@ int main(int argc, char** argv) {
         }
 
         RaycastHit hit = world.raycast(eye, dir, REACH);
+        if (app.invOpen && app.invScreen == InventoryScreen::Furnace &&
+            world.getBlock(app.openFurnace.x, app.openFurnace.y, app.openFurnace.z) != Block::Furnace) {
+            closeInventory(app.window);
+        }
 
         if (!app.survival && app.breakPressed && hit.hit &&
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
             Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
             app.audio.playBreak(soundMaterial(broken));
+        }
+        if (app.placePressed && hit.hit) {
+            if (app.survival && !app.input.sneak) {
+                Block target = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+                if (target == Block::CraftingTable) {
+                    openInventoryScreen(app.window, InventoryScreen::CraftingTable);
+                    app.placePressed = false;
+                } else if (target == Block::Furnace) {
+                    openInventoryScreen(app.window, InventoryScreen::Furnace, hit.block);
+                    if (!world.furnaceAt(hit.block)) world.getOrCreateFurnace(hit.block);
+                    app.placePressed = false;
+                }
+            }
         }
         if (app.placePressed && hit.hit) {
             glm::ivec3 p = hit.adjacent;
