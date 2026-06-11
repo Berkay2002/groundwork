@@ -16,6 +16,7 @@ add_executable(minecraft
   src/Chunk.cpp
   src/World.cpp
   src/Player.cpp
+  src/Physics.cpp
   src/Texture.cpp
   src/Hud.cpp
   src/Terrain.cpp
@@ -32,6 +33,8 @@ add_executable(world_tests
   src/Chunk.cpp
   src/World.cpp
   src/Terrain.cpp
+  src/Player.cpp
+  src/Physics.cpp
 )
 target_compile_definitions(world_tests PRIVATE GL_GLEXT_PROTOTYPES)
 target_link_libraries(world_tests PRIVATE GL Threads::Threads)

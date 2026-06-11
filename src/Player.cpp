@@ -1,4 +1,5 @@
 #include "Player.h"
+#include "Physics.h"
 #include "World.h"
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -31,15 +32,10 @@ void Player::look(float dx, float dy) {
 }
 
 bool Player::collidesAt(World& world, const glm::vec3& p) const {
-    const float hw = WIDTH * 0.5f;
-    int x0 = (int)std::floor(p.x - hw), x1 = (int)std::floor(p.x + hw - 1e-5f);
-    int y0 = (int)std::floor(p.y),      y1 = (int)std::floor(p.y + HEIGHT - 1e-5f);
-    int z0 = (int)std::floor(p.z - hw), z1 = (int)std::floor(p.z + hw - 1e-5f);
-    for (int y = y0; y <= y1; ++y)
-        for (int z = z0; z <= z1; ++z)
-            for (int x = x0; x <= x1; ++x)
-                if (isCollidable(world.getBlock(x, y, z))) return true;
-    return false;
+    Body b;
+    b.halfWidth = WIDTH * 0.5f;
+    b.height = HEIGHT;
+    return bodyCollidesAt(world, b, p);
 }
 
 bool Player::intersectsBlock(const glm::ivec3& b) const {
@@ -47,28 +43,6 @@ bool Player::intersectsBlock(const glm::ivec3& b) const {
     return pos.x + hw > b.x && pos.x - hw < b.x + 1 &&
            pos.y + HEIGHT > b.y && pos.y < b.y + 1 &&
            pos.z + hw > b.z && pos.z - hw < b.z + 1;
-}
-
-void Player::moveAxis(World& world, int axis, float amount) {
-    // Step in small increments so fast movement can't tunnel through blocks.
-    const float maxStep = 0.45f;
-    while (amount != 0.0f) {
-        float step = glm::clamp(amount, -maxStep, maxStep);
-        amount -= step;
-        glm::vec3 next = pos;
-        next[axis] += step;
-        if (!collidesAt(world, next)) {
-            pos = next;
-        } else {
-            if (axis == 1) {
-                if (vel.y < 0.0f) onGround = true;
-                vel.y = 0.0f;
-            } else {
-                vel[axis] = 0.0f;
-            }
-            break;
-        }
-    }
 }
 
 void Player::update(World& world, const PlayerInput& in, float dt) {
@@ -109,10 +83,11 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
         }
     }
 
-    onGround = false;
-    moveAxis(world, 1, vel.y * dt); // Y first for stable ground detection
-    moveAxis(world, 0, vel.x * dt);
-    moveAxis(world, 2, vel.z * dt);
+    Body b{pos, vel, WIDTH * 0.5f, HEIGHT, onGround};
+    moveBody(world, b, dt);
+    pos = b.pos;
+    vel = b.vel;
+    onGround = b.onGround;
 
     // Safety net: fell out of the world.
     if (pos.y < -20.0f) spawn(world);
@@ -127,10 +102,12 @@ void Player::spawn(World& world) {
     for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
         if (isSolid(world.getBlock(x, y, z))) {
             pos = glm::vec3(x + 0.5f, float(y + 1), z + 0.5f);
+            prevPos = pos; // don't interpolate across a respawn teleport
             vel = glm::vec3(0.0f);
             return;
         }
     }
     pos = glm::vec3(x + 0.5f, float(CHUNK_HEIGHT), z + 0.5f);
+    prevPos = pos;
     vel = glm::vec3(0.0f);
 }

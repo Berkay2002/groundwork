@@ -2,6 +2,8 @@
 // paths (generation, block access, raycast, persistence) never touch the GPU.
 #include "../src/World.h"
 #include "../src/Terrain.h"
+#include "../src/Physics.h"
+#include "../src/Player.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -645,6 +647,54 @@ static void testCrossBorderTorch() {
     std::filesystem::remove_all(dir);
 }
 
+// Body physics on a hand-built platform high above terrain (y=70 is air
+// everywhere near spawn: terrain tops out ~45 with trees).
+static void testBodyPhysics() {
+    std::filesystem::remove_all("test_phys_save");
+    World w(1337, "test_phys_save");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    w.setBlock(0, 70, 0, Block::Stone);
+
+    // Falls and lands exactly on top of the platform.
+    Body b;
+    b.halfWidth = 0.125f;
+    b.height = 0.25f;
+    b.pos = glm::vec3(0.5f, 75.0f, 0.5f);
+    for (int i = 0; i < 200 && !b.onGround; ++i) {
+        b.vel.y += -22.0f * 0.05f;
+        moveBody(w, b, 0.05f);
+    }
+    CHECK(b.onGround);
+    CHECK(std::abs(b.pos.y - 71.0f) < 1e-3f);
+    CHECK(b.vel.y == 0.0f);
+
+    // Horizontal motion stops at a wall and zeroes that velocity component.
+    w.setBlock(1, 71, 0, Block::Stone);
+    b.vel = glm::vec3(4.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 40; ++i) moveBody(w, b, 0.05f);
+    CHECK(b.pos.x <= 1.0f - 0.125f + 1e-4f);
+    CHECK(b.vel.x == 0.0f);
+
+    std::filesystem::remove_all("test_phys_save");
+}
+
+// The Player refactor onto Body must not change player physics.
+static void testPlayerLandsOnPlatform() {
+    std::filesystem::remove_all("test_player_save");
+    World w(1337, "test_player_save");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 1, 10000);
+    for (int dx = 0; dx < 2; ++dx)
+        for (int dz = 0; dz < 2; ++dz)
+            w.setBlock(8 + dx, 70, 8 + dz, Block::Stone);
+    Player p;
+    p.pos = glm::vec3(9.0f, 75.0f, 9.0f);
+    PlayerInput in;
+    for (int i = 0; i < 200 && !p.onGround; ++i) p.update(w, in, 0.05f);
+    CHECK(p.onGround);
+    CHECK(std::abs(p.pos.y - 71.0f) < 1e-3f);
+    std::filesystem::remove_all("test_player_save");
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -670,6 +720,8 @@ int main() {
     testLevelSeed();
     testUnloadSaves();
     testRaycast();
+    testBodyPhysics();
+    testPlayerLandsOnPlatform();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }
