@@ -19,15 +19,23 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 
 ### Batch H implementation notes (2026-06-11)
 
-- **Audio**: `src/Sounds.h` synthesizes break/place/footstep PCM at startup
-  (filtered xorshift noise, deterministic, headless-tested); `src/Audio.cpp`
-  mixes a 16-voice pool in a miniaudio device callback (mono f32 44.1 kHz,
-  mutex-guarded voices, atomic master volume). miniaudio 0.11.21 is vendored
-  in `third_party/` (SYSTEM include so -Wall stays ours; MA_NO_* trims the
-  build; links ${CMAKE_DL_LIBS} + m). `ENABLE_AUDIO=OFF` swaps in silent
-  stubs — call sites have no #ifdefs. init() failure = silence, never fatal.
-  Footsteps fire per ~2.2 m of on-ground horizontal travel in the tick loop;
-  `playVaried` jitters pitch 0.9–1.1 via an LCG.
+- **Audio** (reworked twice on user feedback — synthesis was rejected by
+  ear, then one-sound-for-all-blocks): real recordings from Kenney's CC0
+  "Impact Sounds" pack, embedded as raw 22 kHz mono s16 PCM in
+  `src/SoundData.h` (regenerate via `tools/make_sounddata.sh`; needs
+  curl/ffmpeg/xxd, normal builds don't). Three **material banks** (Soft/
+  Stone/Wood) + footsteps; blocks pick theirs via the registry's `SoundMat
+  sound` column (`soundMaterial(b)`; None = silent, e.g. water). Breaking
+  plays the bank at pitch ~1.0; placing reuses it at pitch ~1.3, gain 0.65.
+  Random variant + pitch jitter per play (LCG). `src/Audio.cpp` mixes a
+  16-voice pool in a miniaudio device callback (mutex-guarded voices,
+  linear-interpolated resampling, tanh soft limiter, atomic master volume).
+  miniaudio 0.11.21 vendored in `third_party/` (SYSTEM include; MA_NO_*
+  trims; links ${CMAKE_DL_LIBS} + m). `ENABLE_AUDIO=OFF` swaps in silent
+  stubs — call sites have no #ifdefs. init() failure = silence, never
+  fatal. Footsteps fire per ~2.2 m of on-ground travel in the tick loop.
+- **UX note**: the hotbar (gameplay UI) is hidden while the pause menu is
+  open — user called the overlap bad UX.
 - **Pause menu** (main.cpp): `Menu::{None,Main,Settings}` in App; Esc opens/
   backs out (inventory still closes first), gameplay freezes by simply not
   accumulating tick/gameTime while open (streaming + rendering continue, so

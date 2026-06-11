@@ -32,12 +32,13 @@ inline std::vector<float> decodeSound(const unsigned char* d, unsigned len,
     return out;
 }
 
-// All decoded variants of one event; index matches the Sound enum
-// (0 Break, 1 Place, 2 Footstep). Playing a random variant per event is
-// what keeps repeated actions from sounding mechanical.
-inline std::vector<std::vector<float>> soundVariants(int event) {
+// All decoded variants of one bank: banks 0..2 are the SoundMat material
+// families (Soft, Stone, Wood — see Block.h's registry column), bank
+// SOUND_BANK_STEP is footsteps. Playing a random variant per event is what
+// keeps repeated actions from sounding mechanical.
+inline std::vector<std::vector<float>> soundVariants(int bank) {
     std::vector<std::vector<float>> out;
-    const SoundBankEntry& e = SOUND_BANK[event];
+    const SoundBankEntry& e = SOUND_BANK[bank];
     for (int i = 0; i < e.count; ++i)
         out.push_back(decodeSound(e.variants[i].data, e.variants[i].len));
     return out;

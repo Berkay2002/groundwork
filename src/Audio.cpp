@@ -33,7 +33,8 @@ struct Voice {
 struct Audio::Impl {
     ma_device device{};
     bool deviceOk = false;
-    std::vector<std::vector<float>> sounds[3]; // variants, indexed by Sound
+    // Decoded variants per bank (material banks + the footstep bank).
+    std::vector<std::vector<float>> banks[SOUND_BANK_COUNT];
     Voice voices[MAX_VOICES];
     std::mutex voiceMutex; // guards voices between game and audio threads
     std::atomic<float> volume{1.0f};
@@ -42,6 +43,23 @@ struct Audio::Impl {
     float rand01() {
         rng = rng * 1664525u + 1013904223u;
         return float(rng >> 8) / float(1u << 24); // [0,1)
+    }
+
+    void playFrom(int bank, float gain, float pitch) {
+        if (!deviceOk) return;
+        const auto& variants = banks[bank];
+        if (variants.empty()) return;
+        size_t pick = size_t(rand01() * variants.size()) % variants.size();
+        std::lock_guard<std::mutex> lock(voiceMutex);
+        for (Voice& v : voices) {
+            if (v.active) continue;
+            v.buf = &variants[pick];
+            v.pos = 0.0f;
+            v.step = pitch;
+            v.gain = gain;
+            v.active = true;
+            return;
+        } // all voices busy: drop the sound — inaudible in practice
     }
 
     static void callback(ma_device* dev, void* out, const void*, ma_uint32 frames) {
@@ -79,7 +97,7 @@ Audio::~Audio() {
 
 bool Audio::init() {
     impl_ = new Impl();
-    for (int s = 0; s < 3; ++s) impl_->sounds[s] = soundVariants(s);
+    for (int b = 0; b < SOUND_BANK_COUNT; ++b) impl_->banks[b] = soundVariants(b);
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.format = ma_format_f32;
@@ -96,27 +114,21 @@ bool Audio::init() {
     return true;
 }
 
-void Audio::play(Sound s, float gain, float pitch) {
-    if (!impl_ || !impl_->deviceOk) return;
-    const auto& variants = impl_->sounds[int(s)];
-    if (variants.empty()) return;
-    size_t pick = size_t(impl_->rand01() * variants.size()) % variants.size();
-    std::lock_guard<std::mutex> lock(impl_->voiceMutex);
-    for (Voice& v : impl_->voices) {
-        if (v.active) continue;
-        v.buf = &variants[pick];
-        v.pos = 0.0f;
-        v.step = pitch;
-        v.gain = gain;
-        v.active = true;
-        return;
-    } // all voices busy: drop the sound — inaudible in practice
+void Audio::playBreak(SoundMat m) {
+    if (!impl_ || m == SoundMat::None) return;
+    impl_->playFrom(int(m) - 1, 1.0f, 0.95f + 0.1f * impl_->rand01());
 }
 
-void Audio::playVaried(Sound s, float gain) {
+void Audio::playPlace(SoundMat m) {
+    if (!impl_ || m == SoundMat::None) return;
+    // Same family as breaking, knocked up a fourth and quieter — reads as
+    // "set down" rather than "smash" without needing more recordings.
+    impl_->playFrom(int(m) - 1, 0.65f, 1.3f + 0.1f * impl_->rand01());
+}
+
+void Audio::playFootstep() {
     if (!impl_) return;
-    // Random recorded variant (in play) + a light pitch jitter on top.
-    play(s, gain, 0.95f + 0.1f * impl_->rand01());
+    impl_->playFrom(SOUND_BANK_STEP, 0.35f, 0.95f + 0.1f * impl_->rand01());
 }
 
 void Audio::setVolume(float v) {
@@ -128,8 +140,9 @@ void Audio::setVolume(float v) {
 
 Audio::~Audio() {}
 bool Audio::init() { return false; }
-void Audio::play(Sound, float, float) {}
-void Audio::playVaried(Sound, float) {}
+void Audio::playBreak(SoundMat) {}
+void Audio::playPlace(SoundMat) {}
+void Audio::playFootstep() {}
 void Audio::setVolume(float) {}
 
 #endif

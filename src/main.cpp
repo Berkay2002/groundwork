@@ -743,7 +743,7 @@ int main(int argc, char** argv) {
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
                 if (stepDist > 2.2f) { // roughly one stride
                     stepDist = 0.0f;
-                    app.audio.playVaried(Sound::Footstep, 0.35f);
+                    app.audio.playFootstep();
                 }
             }
             app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
@@ -782,7 +782,7 @@ int main(int argc, char** argv) {
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
             Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
-            app.audio.playVaried(Sound::Break);
+            app.audio.playBreak(soundMaterial(broken));
             // Creative destroys outright; survival drops the registry item.
             if (app.survival) app.entities.spawnBlockDrop(hit.block, broken);
         }
@@ -793,7 +793,7 @@ int main(int argc, char** argv) {
                 !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
                 if (!app.survival || app.inv.consumeOne(app.hotbarSlot)) {
                     world.setBlock(p.x, p.y, p.z, held);
-                    app.audio.playVaried(Sound::Place, 0.8f);
+                    app.audio.playPlace(soundMaterial(held));
                 }
             }
         }
@@ -864,7 +864,9 @@ int main(int argc, char** argv) {
         hud.begin(width, height);
         if (!app.invOpen && !paused) drawCrosshair(hud, width, height);
         drawDebugOverlay(hud, world, fps, frameMs, hit);
-        drawHotbar(hud, width, height);
+        // The hotbar is gameplay UI: hidden while the pause menu owns the
+        // screen (user feedback: it showing through the menu read as a bug).
+        if (!paused) drawHotbar(hud, width, height);
         if (app.invOpen) drawInventory(hud, app.window, width, height);
         if (paused) drawPauseMenu(hud, app.window, width, height);
         hud.end();

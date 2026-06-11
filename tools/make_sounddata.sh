@@ -12,9 +12,12 @@ PACK_URL="https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-16775897
 RATE=22050   # mono s16le; dull impact sounds don't benefit from 44.1k
 OUT=src/SoundData.h
 
-# Event -> sample variants (order matches the Sound enum in Audio.h).
-BREAK_SAMPLES=(impactMining_000 impactMining_001 impactMining_002)
-PLACE_SAMPLES=(impactWood_light_000 impactWood_light_001 impactWood_light_002)
+# Sound-material banks (order matches SoundMat in Block.h, minus None) plus
+# footsteps. Break and place share a bank: placing plays the same family at
+# a higher pitch and lower gain (see Audio.cpp), like the big voxel game.
+SOFT_SAMPLES=(impactSoft_heavy_000 impactSoft_heavy_001 impactSoft_heavy_002)
+STONE_SAMPLES=(impactMining_000 impactMining_001 impactMining_002)
+WOOD_SAMPLES=(impactWood_medium_000 impactWood_medium_001 impactWood_medium_002)
 STEP_SAMPLES=(footstep_grass_000 footstep_grass_001 footstep_grass_002)
 
 work=$(mktemp -d)
@@ -42,7 +45,7 @@ convert() { # name -> $work/<name>.raw (tail silence trimmed)
     echo
     echo "constexpr int SOUND_DATA_RATE = ${RATE};"
     echo
-    for name in "${BREAK_SAMPLES[@]}" "${PLACE_SAMPLES[@]}" "${STEP_SAMPLES[@]}"; do
+    for name in "${SOFT_SAMPLES[@]}" "${STONE_SAMPLES[@]}" "${WOOD_SAMPLES[@]}" "${STEP_SAMPLES[@]}"; do
         convert "$name"
         xxd -i -n "snd_${name}" "$work/$name.raw" | sed 's/^unsigned/static const unsigned/'
         echo
@@ -56,15 +59,19 @@ convert() { # name -> $work/<name>.raw (tail silence trimmed)
         done
         echo "};"
     }
-    emit_table SND_BREAK "${BREAK_SAMPLES[@]}"
-    emit_table SND_PLACE "${PLACE_SAMPLES[@]}"
+    emit_table SND_SOFT "${SOFT_SAMPLES[@]}"
+    emit_table SND_STONE "${STONE_SAMPLES[@]}"
+    emit_table SND_WOOD "${WOOD_SAMPLES[@]}"
     emit_table SND_STEP "${STEP_SAMPLES[@]}"
     echo
-    echo "// Indexed by the Sound enum (Break, Place, Footstep)."
+    echo "// Banks 0..2 = SoundMat::{Soft,Stone,Wood} - 1; bank 3 = footsteps."
     echo "struct SoundBankEntry { const EmbeddedSound* variants; int count; };"
-    echo "static const SoundBankEntry SOUND_BANK[3] = {"
-    echo "    {SND_BREAK, ${#BREAK_SAMPLES[@]}},"
-    echo "    {SND_PLACE, ${#PLACE_SAMPLES[@]}},"
+    echo "constexpr int SOUND_BANK_COUNT = 4;"
+    echo "constexpr int SOUND_BANK_STEP = 3; // footstep bank index"
+    echo "static const SoundBankEntry SOUND_BANK[SOUND_BANK_COUNT] = {"
+    echo "    {SND_SOFT, ${#SOFT_SAMPLES[@]}},"
+    echo "    {SND_STONE, ${#STONE_SAMPLES[@]}},"
+    echo "    {SND_WOOD, ${#WOOD_SAMPLES[@]}},"
     echo "    {SND_STEP, ${#STEP_SAMPLES[@]}},"
     echo "};"
 } > "$OUT"

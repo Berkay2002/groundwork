@@ -25,6 +25,10 @@ constexpr int ATLAS_TILES = 13;
 
 constexpr uint8_t UNBREAKABLE = 0xFF;
 
+// Sound material: which family of break/place recordings a block uses
+// (dirt must not clink like stone). None = silent (air, water).
+enum class SoundMat : uint8_t { None, Soft, Stone, Wood };
+
 // One row per block id: every per-block property lives here instead of in
 // scattered switch statements. Hardness (relative break time) and drop are
 // recorded now for Batch G (finite blocks, item drops) but unused until then.
@@ -44,25 +48,26 @@ struct BlockDef {
     uint8_t emission;  // block light seeded into the cell (0..15)
     uint8_t hardness;  // relative break time; UNBREAKABLE = never breaks
     Block drop;        // what breaking yields (Batch G)
+    SoundMat sound;    // break/place sound family
     uint8_t tiles[6];  // atlas tile per face: +X -X +Y(top) -Y(bottom) +Z -Z
 };
 
 // Indexed by enum value — rows are append-only, like the enum.
 constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
-    //          name        solid  collid opaque dimSun em  hard  drop            +X  -X  +Y  -Y  +Z  -Z
-    /*  0 */ {"Air",        false, false, false, false, 0,  0,    Block::Air,    { 0,  0,  0,  0,  0,  0}},
-    /*  1 */ {"Grass",      true,  true,  true,  false, 0,  2,    Block::Dirt,   { 1,  1,  0,  2,  1,  1}},
-    /*  2 */ {"Dirt",       true,  true,  true,  false, 0,  2,    Block::Dirt,   { 2,  2,  2,  2,  2,  2}},
-    /*  3 */ {"Stone",      true,  true,  true,  false, 0,  6,    Block::Stone,  { 3,  3,  3,  3,  3,  3}},
-    /*  4 */ {"Wood",       true,  true,  true,  false, 0,  3,    Block::Wood,   { 4,  4,  5,  5,  4,  4}},
-    /*  5 */ {"Leaves",     true,  true,  true,  false, 0,  1,    Block::Air,    { 6,  6,  6,  6,  6,  6}},
-    /*  6 */ {"Sand",       true,  true,  true,  false, 0,  2,    Block::Sand,   { 7,  7,  7,  7,  7,  7}},
+    //          name        solid  collid opaque dimSun em  hard  drop            sound            +X  -X  +Y  -Y  +Z  -Z
+    /*  0 */ {"Air",        false, false, false, false, 0,  0,    Block::Air,     SoundMat::None,  { 0,  0,  0,  0,  0,  0}},
+    /*  1 */ {"Grass",      true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  { 1,  1,  0,  2,  1,  1}},
+    /*  2 */ {"Dirt",       true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  { 2,  2,  2,  2,  2,  2}},
+    /*  3 */ {"Stone",      true,  true,  true,  false, 0,  6,    Block::Stone,   SoundMat::Stone, { 3,  3,  3,  3,  3,  3}},
+    /*  4 */ {"Wood",       true,  true,  true,  false, 0,  3,    Block::Wood,    SoundMat::Wood,  { 4,  4,  5,  5,  4,  4}},
+    /*  5 */ {"Leaves",     true,  true,  true,  false, 0,  1,    Block::Air,     SoundMat::Soft,  { 6,  6,  6,  6,  6,  6}},
+    /*  6 */ {"Sand",       true,  true,  true,  false, 0,  2,    Block::Sand,    SoundMat::Soft,  { 7,  7,  7,  7,  7,  7}},
     /*  7 */ {"Bedrock",    true,  true,  true,  false, 0,  UNBREAKABLE,
-                                                            Block::Air,          { 8,  8,  8,  8,  8,  8}},
-    /*  8 */ {"Torch",      true,  false, false, false, 14, 1,    Block::Torch,  { 9,  9,  9,  9,  9,  9}},
-    /*  9 */ {"Coal Ore",   true,  true,  true,  false, 0,  6,    Block::CoalOre,{10, 10, 10, 10, 10, 10}},
-    /* 10 */ {"Iron Ore",   true,  true,  true,  false, 0,  8,    Block::IronOre,{11, 11, 11, 11, 11, 11}},
-    /* 11 */ {"Water",      false, false, false, true,  0,  0,    Block::Air,    {12, 12, 12, 12, 12, 12}},
+                                                            Block::Air,           SoundMat::Stone, { 8,  8,  8,  8,  8,  8}},
+    /*  8 */ {"Torch",      true,  false, false, false, 14, 1,    Block::Torch,   SoundMat::Wood,  { 9,  9,  9,  9,  9,  9}},
+    /*  9 */ {"Coal Ore",   true,  true,  true,  false, 0,  6,    Block::CoalOre, SoundMat::Stone, {10, 10, 10, 10, 10, 10}},
+    /* 10 */ {"Iron Ore",   true,  true,  true,  false, 0,  8,    Block::IronOre, SoundMat::Stone, {11, 11, 11, 11, 11, 11}},
+    /* 11 */ {"Water",      false, false, false, true,  0,  0,    Block::Air,     SoundMat::None,  {12, 12, 12, 12, 12, 12}},
 };
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }
@@ -76,6 +81,7 @@ inline bool isCollidable(Block b) { return blockDef(b).collidable; }
 inline bool isOpaque(Block b) { return blockDef(b).opaque; }
 inline bool dimsSunlight(Block b) { return blockDef(b).dimsSunlight; }
 inline uint8_t lightEmission(Block b) { return blockDef(b).emission; }
+inline SoundMat soundMaterial(Block b) { return blockDef(b).sound; }
 
 // Face order used by the mesher: 0 +X, 1 -X, 2 +Y(top), 3 -Y(bottom), 4 +Z, 5 -Z
 inline int tileFor(Block b, int face) { return blockDef(b).tiles[face]; }

@@ -946,11 +946,21 @@ static void testKeyBinds() {
 }
 
 static void testSoundBank() {
-    // The embedded CC0 samples decode to sane buffers: every event has
+    // Every breakable block must map to a real material bank — a block
+    // without one breaks silently (user feedback: dirt must not clink).
+    for (int i = 0; i < BLOCK_TYPES; ++i) {
+        Block b = Block(i);
+        if (isBreakable(b)) CHECK(soundMaterial(b) != SoundMat::None);
+    }
+    CHECK(soundMaterial(Block::Dirt) == SoundMat::Soft);
+    CHECK(soundMaterial(Block::Stone) == SoundMat::Stone);
+    CHECK(soundMaterial(Block::Water) == SoundMat::None);
+
+    // The embedded CC0 samples decode to sane buffers: every bank has
     // multiple variants, each non-trivial, peak-normalized, with the
     // trailing silence trimmed by the generator script.
-    for (int event = 0; event < 3; ++event) {
-        auto variants = soundVariants(event);
+    for (int bank = 0; bank < SOUND_BANK_COUNT; ++bank) {
+        auto variants = soundVariants(bank);
         CHECK(variants.size() >= 2);
         for (const auto& s : variants) {
             CHECK(s.size() > size_t(SOUND_RATE) / 50); // at least 20 ms
