@@ -28,6 +28,8 @@ namespace {
 constexpr float REACH = 5.0f;           // block interaction distance
 constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
 constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
+constexpr float TICK_DT = 0.05f;          // 20 TPS simulation tick
+constexpr int MAX_TICKS_PER_FRAME = 5;    // stall guard: drop time, don't spiral
 constexpr uint32_t WORLD_SEED = 1337;
 const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
@@ -373,6 +375,8 @@ int main(int argc, char** argv) {
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
 
     double lastTime = glfwGetTime();
+    double accumulator = 0.0; // fixed-timestep simulation accumulator
+    double gameTime = 0.0;    // sim-side clock (drives item bob/spin)
     double autosaveTimer = 0.0;
     double fpsTimer = 0.0;
     int fpsFrames = 0;
@@ -393,13 +397,25 @@ int main(int argc, char** argv) {
         pollMovement();
 
         // --- Update ---
-        app.player.update(world, app.input, dt);
+        // Simulation runs at a fixed 20 TPS (multiplayer insurance: ticks
+        // are frame-rate independent); rendering interpolates by alpha.
+        accumulator += dt;
+        gameTime += dt;
+        int ticksRun = 0;
+        while (accumulator >= TICK_DT) {
+            if (++ticksRun > MAX_TICKS_PER_FRAME) { accumulator = 0.0; break; }
+            app.player.beginTick();
+            app.player.update(world, app.input, TICK_DT);
+            accumulator -= TICK_DT;
+        }
+        const float alpha = float(accumulator / TICK_DT);
+        (void)gameTime; // used once item entities render (Batch G Task 6)
         world.update(app.player.pos, settings.renderDistance);
 
         // Camera for this frame, computed early: mesh uploads prioritize
         // in-frustum chunks, so processMeshing wants the frustum too.
         glfwGetFramebufferSize(app.window, &width, &height);
-        glm::vec3 eye = app.player.eyePos();
+        glm::vec3 eye = app.player.eyePos(alpha);
         glm::vec3 dir = app.player.lookDir();
         float aspect = height > 0 ? float(width) / float(height) : 1.0f;
         glm::mat4 proj = glm::perspective(glm::radians(settings.fov), aspect, 0.05f, 600.0f);
