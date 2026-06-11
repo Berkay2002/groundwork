@@ -94,6 +94,13 @@ RGB ironOrePixel(int x, int y) {
     }
     return stonePixel(x, y);
 }
+RGB diamondOrePixel(int x, int y) {
+    if (oreBlob(x, y, 22)) {
+        float n = 0.85f + 0.25f * noise01(x, y, 23);
+        return shade({74, 220, 212}, n);
+    }
+    return stonePixel(x, y);
+}
 RGB waterPixel(int x, int y) {
     // Deep blue with faint horizontal wave streaks.
     float n = 0.85f + 0.2f * noise01(x / 3, y, 20) + 0.1f * noise01(x, y, 21);
@@ -111,6 +118,38 @@ RGB torchPixel(int x, int y) {
     if (x >= 6 && x <= 9 && y >= 5 && y <= 10)
         return shade({252, 150, 28}, 0.85f + 0.3f * noise01(x, y, 13)); // flame
     return shade({26, 26, 30}, 0.8f + 0.3f * noise01(x, y, 15)); // background
+}
+RGB cobblestonePixel(int x, int y) {
+    int bx = x / 4, by = y / 4;
+    float mortar = (x % 4 == 0 || y % 4 == 0) ? 0.65f : 1.0f;
+    float n = 0.75f + 0.35f * noise01(bx, by, 24) + 0.12f * noise01(x, y, 25);
+    return shade({118, 118, 118}, n * mortar);
+}
+RGB planksPixel(int x, int y) {
+    bool seam = (y == 4 || y == 9 || y == 14);
+    float n = 0.82f + 0.24f * noise01(x / 3, y, 26) + 0.12f * noise01(x, y, 27);
+    if (seam) n *= 0.65f;
+    return shade({152, 110, 62}, n);
+}
+RGB craftingTableSidePixel(int x, int y) {
+    if (y < 3 || y > 12 || x < 2 || x > 13) return woodSidePixel(x, y);
+    if ((x + y) % 5 == 0) return shade({86, 62, 38}, 0.9f);
+    return planksPixel(x, y);
+}
+RGB craftingTableTopPixel(int x, int y) {
+    bool grid = x == 5 || x == 10 || y == 5 || y == 10;
+    float n = 0.85f + 0.25f * noise01(x, y, 28);
+    return shade(grid ? RGB{80, 54, 32} : RGB{166, 120, 68}, n);
+}
+RGB furnaceSidePixel(int x, int y) {
+    return cobblestonePixel(x, y);
+}
+RGB furnaceFrontPixel(int x, int y) {
+    if (x >= 4 && x <= 11 && y >= 5 && y <= 10) {
+        float n = 0.7f + 0.25f * noise01(x, y, 29);
+        return shade({46, 46, 48}, n);
+    }
+    return cobblestonePixel(x, y);
 }
 
 // One function per tile; shared by the HUD's 2D atlas strip and the chunk
@@ -133,6 +172,13 @@ RGB tilePixel(TileId tile, int x, int y) {
         case TileId::CoalOre: return coalOrePixel(x, y);
         case TileId::IronOre: return ironOrePixel(x, y);
         case TileId::Water: return waterPixel(x, y);
+        case TileId::Cobblestone: return cobblestonePixel(x, y);
+        case TileId::Planks: return planksPixel(x, y);
+        case TileId::CraftingTableSide: return craftingTableSidePixel(x, y);
+        case TileId::CraftingTableTop: return craftingTableTopPixel(x, y);
+        case TileId::FurnaceSide: return furnaceSidePixel(x, y);
+        case TileId::FurnaceFront: return furnaceFrontPixel(x, y);
+        case TileId::DiamondOre: return diamondOrePixel(x, y);
         case TileId::Error:
         case TileId::Count: break;
     }

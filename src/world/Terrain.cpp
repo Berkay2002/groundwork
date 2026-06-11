@@ -126,6 +126,7 @@ void Terrain::generateChunk(Chunk& c) const {
     static const Ore ORES[] = {
         {Block::CoalOre, 0x0C0A1000u, COAL_MAX_Y, 110}, // ~43% of cells in band
         {Block::IronOre, 0x10F09000u, IRON_MAX_Y, 80},  // ~31%
+        {Block::DiamondOre, 0xD1A60000u, DIAMOND_MAX_Y, 16}, // rare, deep
     };
     for (const Ore& ore : ORES) {
         for (int cy = 0; cy * ORE_CELL <= ore.maxY; ++cy) {

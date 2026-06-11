@@ -27,6 +27,7 @@ public:
     static constexpr int ORE_CELL = 8;     // one vein candidate per ore per 8^3 cell
     static constexpr int COAL_MAX_Y = 44;  // depth bands (vein centers)
     static constexpr int IRON_MAX_Y = 22;
+    static constexpr int DIAMOND_MAX_Y = 14;
 
     struct Tree {
         bool exists = false;

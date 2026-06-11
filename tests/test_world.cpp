@@ -30,6 +30,7 @@ static int failures = 0;
 } while (0)
 
 static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
+static_assert(BLOCK_TYPES == 17, "Block ids are saved data; append ids only");
 
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
@@ -155,28 +156,32 @@ static void testCaves() {
 
 static void testOres() {
     Terrain t(1337);
-    int coal = 0, iron = 0;
-    for (int ccz = -3; ccz <= 3; ++ccz) {
-        for (int ccx = -3; ccx <= 3; ++ccx) {
+    int coal = 0, iron = 0, diamond = 0;
+    for (int ccz = -8; ccz <= 8; ++ccz) {
+        for (int ccx = -8; ccx <= 8; ++ccx) {
             Chunk c(ccx, ccz);
             t.generateChunk(c);
             for (int z = 0; z < CHUNK_SIZE; ++z)
                 for (int x = 0; x < CHUNK_SIZE; ++x)
                     for (int y = 0; y < CHUNK_HEIGHT; ++y) {
                         Block b = c.get(x, y, z);
-                        if (b != Block::CoalOre && b != Block::IronOre) continue;
+                        if (b != Block::CoalOre && b != Block::IronOre &&
+                            b != Block::DiamondOre) continue;
                         // Ore replaces stone only, so it stays under the dirt
                         // cap and respects its depth band (vein center max +1).
                         int h = t.heightAt(ccx * CHUNK_SIZE + x, ccz * CHUNK_SIZE + z);
                         CHECK(y < h - 3);
                         if (b == Block::CoalOre) { ++coal; CHECK(y <= Terrain::COAL_MAX_Y + 1); }
-                        else                     { ++iron; CHECK(y <= Terrain::IRON_MAX_Y + 1); }
+                        else if (b == Block::IronOre) { ++iron; CHECK(y <= Terrain::IRON_MAX_Y + 1); }
+                        else { ++diamond; CHECK(y <= Terrain::DIAMOND_MAX_Y + 1); }
                     }
         }
     }
     CHECK(coal > 100);       // both ores are actually common enough to find
     CHECK(iron > 50);
+    CHECK(diamond > 10);
     CHECK(coal > iron);      // coal has the wider band and higher chance
+    CHECK(iron > diamond);   // diamond exists, but is rarer and deeper
 }
 
 static void testSaveLoadRoundTrip() {
@@ -551,6 +556,8 @@ static void testBlockRegistry() {
         for (int f = 0; f < 6; ++f) CHECK(int(d.tiles[f]) < ATLAS_TILES);
         CHECK(d.emission <= 15);
         CHECK(uint8_t(d.drop) < BLOCK_TYPES);
+        CHECK(uint16_t(d.dropItem) < ITEM_TYPES);
+        CHECK(uint16_t(d.wrongToolDropItem) < ITEM_TYPES);
         CHECK(!d.collidable || d.solid);   // collidable implies solid
         CHECK(!d.opaque || d.solid);       // opaque implies solid
         CHECK(!(d.opaque && d.dimsSunlight)); // dimsSunlight is for transparents
@@ -566,6 +573,28 @@ static void testBlockRegistry() {
     CHECK(tileFor(Block::Grass, 0) == 1);  // side
     CHECK(tileFor(Block::Wood, 2) == 5 && tileFor(Block::Wood, 4) == 4);
     CHECK(std::string(blockName(Block::CoalOre)) == "Coal Ore");
+    CHECK(std::string(blockName(Block::Wood)) == "Log");
+    CHECK(std::string(blockName(Block::Cobblestone)) == "Cobblestone");
+    CHECK(blockDef(Block::Stone).preferredTool == ToolClass::Pickaxe);
+    CHECK(blockDef(Block::Stone).minHarvestTier == ToolTier::Wood);
+    CHECK(blockDef(Block::Stone).dropItem == ItemId::CobblestoneBlock);
+    CHECK(blockDef(Block::CoalOre).dropItem == ItemId::Coal);
+    CHECK(blockDef(Block::IronOre).dropItem == ItemId::RawIron);
+    CHECK(blockDef(Block::IronOre).minHarvestTier == ToolTier::Stone);
+    CHECK(blockDef(Block::DiamondOre).dropItem == ItemId::Diamond);
+    CHECK(blockDef(Block::DiamondOre).minHarvestTier == ToolTier::Iron);
+    CHECK(blockDef(Block::Dirt).preferredTool == ToolClass::Shovel);
+    CHECK(blockDef(Block::Sand).preferredTool == ToolClass::Shovel);
+    CHECK(blockDef(Block::Wood).preferredTool == ToolClass::Axe);
+    CHECK(blockDef(Block::Planks).preferredTool == ToolClass::Axe);
+    CHECK(blockDef(Block::CraftingTable).preferredTool == ToolClass::Axe);
+    CHECK(blockDef(Block::Furnace).preferredTool == ToolClass::Pickaxe);
+    CHECK(blockDef(Block::Furnace).wrongToolDropItem == ItemId::None);
+    CHECK(tileFor(Block::Cobblestone, 0) < ATLAS_TILES);
+    CHECK(tileFor(Block::Planks, 0) < ATLAS_TILES);
+    CHECK(tileFor(Block::CraftingTable, 2) < ATLAS_TILES);
+    CHECK(tileFor(Block::Furnace, 4) < ATLAS_TILES);
+    CHECK(tileFor(Block::DiamondOre, 0) < ATLAS_TILES);
 }
 
 static void testWaterPredicates() {
@@ -957,6 +986,12 @@ static void testItemRegistry() {
     CHECK(itemDef(ItemId::CobblestoneBlock).stackMax == 64);
     CHECK(itemDef(ItemId::PlanksBlock).stackMax == 64);
     CHECK(itemForBlock(Block::Dirt) == ItemId::DirtBlock);
+    CHECK(itemForBlock(Block::Cobblestone) == ItemId::CobblestoneBlock);
+    CHECK(itemForBlock(Block::Planks) == ItemId::PlanksBlock);
+    CHECK(itemForBlock(Block::CraftingTable) == ItemId::CraftingTableBlock);
+    CHECK(itemForBlock(Block::Furnace) == ItemId::FurnaceBlock);
+    CHECK(itemForBlock(Block::DiamondOre) == ItemId::DiamondOreBlock);
+    CHECK(placeBlockForItem(ItemId::CobblestoneBlock) == Block::Cobblestone);
     CHECK(placeBlockForItem(ItemId::TorchBlock) == Block::Torch);
     CHECK(placeBlockForItem(ItemId::Coal) == Block::Air);
 

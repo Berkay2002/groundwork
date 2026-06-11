@@ -1,4 +1,5 @@
 #pragma once
+#include "sim/ItemIds.h"
 #include <cstdint>
 
 // Enum values are the bytes written to chunk saves: append, never renumber.
@@ -15,8 +16,13 @@ enum class Block : uint8_t {
     CoalOre = 9,
     IronOre = 10,
     Water = 11,
+    Cobblestone = 12,
+    Planks = 13,
+    CraftingTable = 14,
+    Furnace = 15,
+    DiamondOre = 16,
 };
-constexpr int BLOCK_TYPES = 12;
+constexpr int BLOCK_TYPES = 17;
 
 // Texture tile identity. The numeric value is the texture-array layer and the
 // column in the HUD's horizontal strip atlas — a renderer/content ID with no
@@ -37,12 +43,19 @@ enum class TileId : uint8_t {
     CoalOre,
     IronOre,
     Water,
+    Cobblestone,
+    Planks,
+    CraftingTableSide,
+    CraftingTableTop,
+    FurnaceSide,
+    FurnaceFront,
+    DiamondOre,
     Error,
     Count
 };
 constexpr int ATLAS_TILES = int(TileId::Count);
 
-constexpr uint8_t UNBREAKABLE = 0xFF;
+constexpr float UNBREAKABLE = -1.0f;
 
 // Sound material: which family of break/place recordings a block uses
 // (dirt must not clink like stone). None = silent (air, water).
@@ -65,9 +78,15 @@ struct BlockDef {
     bool opaque;
     bool dimsSunlight;
     uint8_t emission;  // block light seeded into the cell (0..15)
-    uint8_t hardness;  // relative break time; UNBREAKABLE = never breaks
-    Block drop;        // what breaking yields (Batch G)
+    float hardness;    // Minecraft-like break hardness; UNBREAKABLE = never breaks
+    Block drop;        // legacy block drop, kept until all drop callers use item drops
     SoundMat sound;    // break/place sound family
+    ToolClass preferredTool;
+    ToolTier minHarvestTier;
+    ItemId dropItem;
+    uint8_t dropCount;
+    ItemId wrongToolDropItem;
+    uint8_t wrongToolDropCount;
     TileId tiles[6];   // tile per face: +X -X +Y(top) -Y(bottom) +Z -Z
 };
 
@@ -75,16 +94,28 @@ namespace tiledef {
 // Row builders so BLOCK_DEFS stays a readable table: most blocks use one tile
 // on all six faces; grass/wood differ per face (mesher face order above).
 constexpr BlockDef same(const char* name, bool solid, bool collid, bool opaque,
-                        bool dimSun, uint8_t em, uint8_t hard, Block drop,
-                        SoundMat snd, TileId t) {
+                        bool dimSun, uint8_t em, float hard, Block drop,
+                        SoundMat snd, TileId t, ToolClass tool = ToolClass::None,
+                        ToolTier tier = ToolTier::Hand,
+                        ItemId dropItem = ItemId::None, uint8_t dropCount = 0,
+                        ItemId wrongDropItem = ItemId::None,
+                        uint8_t wrongDropCount = 0) {
     return {name, solid, collid, opaque, dimSun, em, hard, drop, snd,
+            tool, tier, dropItem, dropCount, wrongDropItem, wrongDropCount,
             {t, t, t, t, t, t}};
 }
 constexpr BlockDef sideTopBot(const char* name, bool solid, bool collid,
                               bool opaque, bool dimSun, uint8_t em,
-                              uint8_t hard, Block drop, SoundMat snd,
-                              TileId side, TileId top, TileId bot) {
+                              float hard, Block drop, SoundMat snd,
+                              TileId side, TileId top, TileId bot,
+                              ToolClass tool = ToolClass::None,
+                              ToolTier tier = ToolTier::Hand,
+                              ItemId dropItem = ItemId::None,
+                              uint8_t dropCount = 0,
+                              ItemId wrongDropItem = ItemId::None,
+                              uint8_t wrongDropCount = 0) {
     return {name, solid, collid, opaque, dimSun, em, hard, drop, snd,
+            tool, tier, dropItem, dropCount, wrongDropItem, wrongDropCount,
             {side, side, top, bot, side, side}};
 }
 }
@@ -92,18 +123,23 @@ constexpr BlockDef sideTopBot(const char* name, bool solid, bool collid,
 // Indexed by enum value — rows are append-only, like the enum.
 constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
     //                       name        solid  collid opaque dimSun em  hard  drop            sound            tiles
-    /*  0 */ tiledef::same("Air",         false, false, false, false, 0,  0,    Block::Air,     SoundMat::None,  TileId::Error),
-    /*  1 */ tiledef::sideTopBot("Grass", true, true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  TileId::GrassSide, TileId::GrassTop, TileId::Dirt),
-    /*  2 */ tiledef::same("Dirt",        true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  TileId::Dirt),
-    /*  3 */ tiledef::same("Stone",       true,  true,  true,  false, 0,  6,    Block::Stone,   SoundMat::Stone, TileId::Stone),
-    /*  4 */ tiledef::sideTopBot("Wood",  true,  true,  true,  false, 0,  3,    Block::Wood,    SoundMat::Wood,  TileId::WoodSide, TileId::WoodTop, TileId::WoodTop),
-    /*  5 */ tiledef::same("Leaves",      true,  true,  true,  false, 0,  1,    Block::Air,     SoundMat::Soft,  TileId::Leaves),
-    /*  6 */ tiledef::same("Sand",        true,  true,  true,  false, 0,  2,    Block::Sand,    SoundMat::Soft,  TileId::Sand),
-    /*  7 */ tiledef::same("Bedrock",     true,  true,  true,  false, 0,  UNBREAKABLE, Block::Air, SoundMat::Stone, TileId::Bedrock),
-    /*  8 */ tiledef::same("Torch",       true,  false, false, false, 14, 1,    Block::Torch,   SoundMat::Wood,  TileId::Torch),
-    /*  9 */ tiledef::same("Coal Ore",    true,  true,  true,  false, 0,  6,    Block::CoalOre, SoundMat::Stone, TileId::CoalOre),
-    /* 10 */ tiledef::same("Iron Ore",    true,  true,  true,  false, 0,  8,    Block::IronOre, SoundMat::Stone, TileId::IronOre),
-    /* 11 */ tiledef::same("Water",       false, false, false, true,  0,  0,    Block::Air,     SoundMat::None,  TileId::Water),
+    /*  0 */ tiledef::same("Air",            false, false, false, false, 0,  0.0f,        Block::Air,         SoundMat::None,  TileId::Error),
+    /*  1 */ tiledef::sideTopBot("Grass",    true,  true,  true,  false, 0,  0.6f,        Block::Dirt,        SoundMat::Soft,  TileId::GrassSide, TileId::GrassTop, TileId::Dirt, ToolClass::Shovel, ToolTier::Hand, ItemId::DirtBlock, 1, ItemId::DirtBlock, 1),
+    /*  2 */ tiledef::same("Dirt",           true,  true,  true,  false, 0,  0.5f,        Block::Dirt,        SoundMat::Soft,  TileId::Dirt, ToolClass::Shovel, ToolTier::Hand, ItemId::DirtBlock, 1, ItemId::DirtBlock, 1),
+    /*  3 */ tiledef::same("Stone",          true,  true,  true,  false, 0,  1.5f,        Block::Cobblestone, SoundMat::Stone, TileId::Stone, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1),
+    /*  4 */ tiledef::sideTopBot("Log",      true,  true,  true,  false, 0,  2.0f,        Block::Wood,        SoundMat::Wood,  TileId::WoodSide, TileId::WoodTop, TileId::WoodTop, ToolClass::Axe, ToolTier::Hand, ItemId::LogBlock, 1, ItemId::LogBlock, 1),
+    /*  5 */ tiledef::same("Leaves",         true,  true,  true,  false, 0,  0.2f,        Block::Air,         SoundMat::Soft,  TileId::Leaves),
+    /*  6 */ tiledef::same("Sand",           true,  true,  true,  false, 0,  0.5f,        Block::Sand,        SoundMat::Soft,  TileId::Sand, ToolClass::Shovel, ToolTier::Hand, ItemId::SandBlock, 1, ItemId::SandBlock, 1),
+    /*  7 */ tiledef::same("Bedrock",        true,  true,  true,  false, 0,  UNBREAKABLE, Block::Air,         SoundMat::Stone, TileId::Bedrock),
+    /*  8 */ tiledef::same("Torch",          true,  false, false, false, 14, 0.0f,        Block::Torch,       SoundMat::Wood,  TileId::Torch, ToolClass::None, ToolTier::Hand, ItemId::TorchBlock, 1, ItemId::TorchBlock, 1),
+    /*  9 */ tiledef::same("Coal Ore",       true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::CoalOre, ToolClass::Pickaxe, ToolTier::Wood, ItemId::Coal, 1),
+    /* 10 */ tiledef::same("Iron Ore",       true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::IronOre, ToolClass::Pickaxe, ToolTier::Stone, ItemId::RawIron, 1),
+    /* 11 */ tiledef::same("Water",          false, false, false, true,  0,  0.0f,        Block::Air,         SoundMat::None,  TileId::Water),
+    /* 12 */ tiledef::same("Cobblestone",    true,  true,  true,  false, 0,  2.0f,        Block::Cobblestone, SoundMat::Stone, TileId::Cobblestone, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1),
+    /* 13 */ tiledef::same("Planks",         true,  true,  true,  false, 0,  2.0f,        Block::Planks,      SoundMat::Wood,  TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::PlanksBlock, 1, ItemId::PlanksBlock, 1),
+    /* 14 */ tiledef::sideTopBot("Crafting Table", true, true, true, false, 0, 2.5f,      Block::CraftingTable, SoundMat::Wood, TileId::CraftingTableSide, TileId::CraftingTableTop, TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::CraftingTableBlock, 1, ItemId::CraftingTableBlock, 1),
+    /* 15 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 0,  3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceSide, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
+    /* 16 */ tiledef::same("Diamond Ore",    true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::DiamondOre, ToolClass::Pickaxe, ToolTier::Iron, ItemId::Diamond, 1),
 };
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }

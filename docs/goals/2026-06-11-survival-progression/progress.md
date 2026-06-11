@@ -2,9 +2,9 @@
 
 ## STATUS
 
-- Current: M2 / Task 3
-- Last verified: M1 milestone reviews approved after fixes (`cmake --build build -j` exit 0;
-  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M2 / Task 4
+- Last verified: M2/T3 validation green (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
 
@@ -63,3 +63,8 @@
   warning-free and tests printed `all tests passed`.
 - [2026-06-11] M1 code-quality re-review round 2: APPROVED. All prior
   quality findings resolved; M1 milestone gate cleared.
+- [2026-06-11] M2/T3 DONE. Appended Cobblestone, Planks, Crafting Table,
+  Furnace, and Diamond Ore block ids; added block tool/tier/drop metadata,
+  procedural tiles, item mappings, and deterministic deep diamond ore
+  generation. Validation: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
