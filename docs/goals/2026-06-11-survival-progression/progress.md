@@ -2,12 +2,12 @@
 
 ## STATUS
 
-- Current: M2 code-quality review
-- Last verified: M2 spec-compliance re-review approved after fixes
+- Current: M3 / Task 6
+- Last verified: M2 milestone reviews approved after fixes
   (`cmake --build build -j` exit 0, warning-free; `.\build\world_tests.exe`
   -> `all tests passed`, 2026-06-11)
 - Blockers: none
-- Minor issues parked: 0
+- Minor issues parked: 3
 
 ## Log
 
@@ -93,3 +93,10 @@
 - [2026-06-11] M2 spec-compliance re-review round 2: APPROVED. Prior findings
   M2-SPEC-001 and M2-SPEC-002 resolved; no new Critical or Important
   spec-compliance findings.
+- [2026-06-11] M2 code-quality review round 1: APPROVED. No Critical or
+  Important findings. Parked minor issues for later cleanup: legacy
+  `BlockDef::drop` column remains after item-drop migration; `Entities`
+  item-stack ingress should use a stricter canonical split/normalization
+  helper before more producers arrive; block-item reverse mapping duplicates
+  `placeBlock` metadata and should eventually derive or be more generically
+  guarded. M2 milestone gate cleared.
