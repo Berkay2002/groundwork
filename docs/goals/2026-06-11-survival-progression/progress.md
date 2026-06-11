@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M1 / Task 2
-- Last verified: M1/T1 validation green (`cmake --build build -j` exit 0;
+- Current: M1 milestone review
+- Last verified: M1/T2 validation green (`cmake --build build -j` exit 0;
   `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -38,3 +38,8 @@
   durability, item-aware inventory stacking, block-item mappings for current
   gameplay, and stack-based item entities. Validation: `cmake --build build -j`
   exit 0; `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
+- [2026-06-11] M1/T2 DONE. Player saves now use v3 item-stack slots
+  (`u16 item`, `u8 count`, `u16 durability`), v1 still migrates to empty
+  inventory, and v2 block-stack saves migrate slot-for-slot with Stone ->
+  Cobblestone item. Validation: `cmake --build build -j &&
+  .\build\world_tests.exe` exit 0; tests printed `all tests passed`.

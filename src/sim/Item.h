@@ -47,6 +47,11 @@ enum class ItemId : uint16_t {
     DiamondPickaxe,
     DiamondAxe,
     DiamondShovel,
+    CobblestoneBlock,
+    PlanksBlock,
+    CraftingTableBlock,
+    FurnaceBlock,
+    DiamondOreBlock,
     Count
 };
 
@@ -110,6 +115,11 @@ constexpr ItemDef ITEM_DEFS[ITEM_TYPES] = {
     /* 26 */ itemdef::tool("Diamond Pickaxe", ToolClass::Pickaxe, ToolTier::Diamond, 1561, 8.0f),
     /* 27 */ itemdef::tool("Diamond Axe", ToolClass::Axe, ToolTier::Diamond, 1561, 8.0f),
     /* 28 */ itemdef::tool("Diamond Shovel", ToolClass::Shovel, ToolTier::Diamond, 1561, 8.0f),
+    /* 29 */ itemdef::simple("Cobblestone"),
+    /* 30 */ itemdef::simple("Planks"),
+    /* 31 */ itemdef::simple("Crafting Table"),
+    /* 32 */ itemdef::simple("Furnace"),
+    /* 33 */ itemdef::simple("Diamond Ore"),
 };
 
 inline const ItemDef& itemDef(ItemId id) {

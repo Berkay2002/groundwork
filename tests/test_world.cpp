@@ -942,6 +942,8 @@ static void testItemRegistry() {
     CHECK(itemDef(ItemId::WoodPickaxe).maxDurability == 59);
     CHECK(itemDef(ItemId::DiamondShovel).miningSpeed == 8.0f);
     CHECK(itemDef(ItemId::DiamondShovel).maxDurability == 1561);
+    CHECK(itemDef(ItemId::CobblestoneBlock).stackMax == 64);
+    CHECK(itemDef(ItemId::PlanksBlock).stackMax == 64);
     CHECK(itemForBlock(Block::Dirt) == ItemId::DirtBlock);
     CHECK(placeBlockForItem(ItemId::TorchBlock) == Block::Torch);
     CHECK(placeBlockForItem(ItemId::Coal) == Block::Air);
@@ -1015,7 +1017,7 @@ static void testEntityBucketsAndDrops() {
     std::filesystem::remove_all("test_ent_save4");
 }
 
-static void testPlayerSaveV2Roundtrip() {
+static void testPlayerSaveV3Roundtrip() {
     std::filesystem::create_directories("test_psave");
     PlayerState a;
     a.pos = glm::vec3(12.5f, 34.0f, -8.25f);
@@ -1025,6 +1027,9 @@ static void testPlayerSaveV2Roundtrip() {
     a.hotbarSlot = 3;
     a.inv.add(ItemId::DirtBlock, 70);
     a.inv.add(ItemId::TorchBlock, 5);
+    a.inv.slots[4] = makeToolStack(ItemId::IronPickaxe);
+    a.inv.slots[4].durability = 123;
+    a.inv.add(ItemId::Coal, 9);
     CHECK(savePlayerFile("test_psave/player.bin", a));
     PlayerState b;
     CHECK(loadPlayerFile("test_psave/player.bin", b));
@@ -1033,8 +1038,74 @@ static void testPlayerSaveV2Roundtrip() {
     for (int i = 0; i < Inventory::SLOTS; ++i) {
         CHECK(b.inv.slots[i].item == a.inv.slots[i].item);
         CHECK(b.inv.slots[i].count == a.inv.slots[i].count);
+        CHECK(b.inv.slots[i].durability == a.inv.slots[i].durability);
     }
     std::filesystem::remove_all("test_psave");
+}
+
+static void testPlayerSaveV2BlockInventoryMigrates() {
+    std::filesystem::create_directories("test_psave2");
+    {
+        std::ofstream f("test_psave2/player.bin", std::ios::binary);
+        f.write("MCPL", 4);
+        uint32_t v = 2;
+        f.write(reinterpret_cast<const char*>(&v), 4);
+        glm::vec3 pos(4.0f, 5.0f, 6.0f);
+        float yaw = 30.0f, pitch = -10.0f;
+        f.write(reinterpret_cast<const char*>(&pos), sizeof(pos));
+        f.write(reinterpret_cast<const char*>(&yaw), 4);
+        f.write(reinterpret_cast<const char*>(&pitch), 4);
+        uint8_t flying = 0, slot = 5;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            uint8_t b = 0, c = 0;
+            if (i == 0) { b = uint8_t(Block::Stone); c = 3; }
+            if (i == 1) { b = uint8_t(Block::Dirt); c = 2; }
+            if (i == 2) { b = uint8_t(Block::CoalOre); c = 1; }
+            if (i == 3) { b = 250; c = 9; }
+            f.write(reinterpret_cast<const char*>(&b), 1);
+            f.write(reinterpret_cast<const char*>(&c), 1);
+        }
+    }
+    PlayerState s;
+    CHECK(loadPlayerFile("test_psave2/player.bin", s));
+    CHECK(s.pos == glm::vec3(4.0f, 5.0f, 6.0f));
+    CHECK(s.hotbarSlot == 5);
+    CHECK(s.inv.slots[0].item == ItemId::CobblestoneBlock && s.inv.slots[0].count == 3);
+    CHECK(s.inv.slots[1].item == ItemId::DirtBlock && s.inv.slots[1].count == 2);
+    CHECK(s.inv.slots[2].item == ItemId::CoalOreBlock && s.inv.slots[2].count == 1);
+    CHECK(s.inv.slots[3].empty());
+    std::filesystem::remove_all("test_psave2");
+}
+
+static void testPlayerSaveV3UnknownItemSanitizes() {
+    std::filesystem::create_directories("test_psave3");
+    {
+        std::ofstream f("test_psave3/player.bin", std::ios::binary);
+        f.write("MCPL", 4);
+        uint32_t v = PLAYER_VERSION;
+        f.write(reinterpret_cast<const char*>(&v), 4);
+        PlayerState base;
+        f.write(reinterpret_cast<const char*>(&base.pos), sizeof(base.pos));
+        f.write(reinterpret_cast<const char*>(&base.yaw), 4);
+        f.write(reinterpret_cast<const char*>(&base.pitch), 4);
+        uint8_t flying = 0, slot = 0;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            uint16_t id = i == 0 ? uint16_t(65000) : 0;
+            uint8_t count = i == 0 ? 5 : 0;
+            uint16_t durability = 0;
+            f.write(reinterpret_cast<const char*>(&id), 2);
+            f.write(reinterpret_cast<const char*>(&count), 1);
+            f.write(reinterpret_cast<const char*>(&durability), 2);
+        }
+    }
+    PlayerState s;
+    CHECK(loadPlayerFile("test_psave3/player.bin", s));
+    CHECK(s.inv.slots[0].empty());
+    std::filesystem::remove_all("test_psave3");
 }
 
 static void testPlayerSaveV1Migrates() {
@@ -1405,7 +1476,9 @@ int main() {
     testItemPickup();
     testItemFrozenInUnloadedChunk();
     testEntityBucketsAndDrops();
-    testPlayerSaveV2Roundtrip();
+    testPlayerSaveV3Roundtrip();
+    testPlayerSaveV2BlockInventoryMigrates();
+    testPlayerSaveV3UnknownItemSanitizes();
     testPlayerSaveV1Migrates();
     testKeyBinds();
     testSoundBank();
