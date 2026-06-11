@@ -55,6 +55,22 @@ Two caveats learned the hard way:
 To inspect detail in a screenshot, crop+upscale with PIL
 (`im.crop(...).resize(..., Image.NEAREST)`) before Reading it.
 
+## Batch G demo flags (items, inventory)
+
+Breaking blocks can't be scripted in a `--frames` run, so two debug flags
+stage the Batch G features for screenshots:
+
+```sh
+./build/minecraft --demo-items --frames 300   # 3 item cubes 3m ahead of the viewpoint
+./build/minecraft --demo-inv --frames 120     # survival + stocked inventory, UI open
+```
+
+Run both from a temp dir (fresh world spawns on land; the real save's
+viewpoint may be over a lake where drops sink out of sight). For live
+input tests, `xdotool` works — but `windowactivate` the window first and
+use `mousemove --window <id> x y` (window coords); clicks silently go
+nowhere without activation.
+
 ## Threading changes
 
 Rerun `world_tests` several times (`for i in 1 2 3; do ./build/world_tests; done`)
@@ -64,6 +80,7 @@ and do a ThreadSanitizer pass. TSAN crashes at startup on this kernel
 ```sh
 g++ -std=c++17 -fsanitize=thread -g -O1 -DGL_GLEXT_PROTOTYPES \
     tests/test_world.cpp src/Chunk.cpp src/World.cpp src/Terrain.cpp \
+    src/Player.cpp src/Physics.cpp src/Entity.cpp \
     -o /tmp/tsan_tests -lGL -lpthread
 setarch $(uname -m) -R /tmp/tsan_tests        # <- the ASLR workaround
 ```

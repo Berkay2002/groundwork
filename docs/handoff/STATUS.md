@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11, after Batch F)
+# Status (last updated: 2026-06-11, after Batch G)
 
 ## Where the project stands
 
-All planned batches through F **plus all A–D addenda** are done and verified:
+All planned batches through G **plus all A–D addenda** are done and verified:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -14,6 +14,59 @@ All planned batches through F **plus all A–D addenda** are done and verified:
 | Batch E | Spaghetti caves (two 3D noise fields, surface-pinched), Coal/Iron ore veins (depth-banded, per-8³-cell hashing), water (lake basins to SEA_LEVEL 20, translucent second mesh pass, sunlight attenuation, swim physics, hotbar slot 8) | done |
 | A–D addenda | level.bin seed file, atomic saves, autosave; block registry table; `--bench` + golden-screenshot test; per-vertex AO + smooth lighting (fog pre-existed) | done |
 | Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
+| Batch G | Fixed 20 TPS simulation tick + interpolated rendering, shared `Body` AABB physics, item entities (drops, magnetized pickup, bob/spin rendering), survival mode (finite stacked placement, hotbar counts), 4×8 inventory UI, player save v2 with inventory | done |
+
+### Batch G implementation notes (2026-06-11)
+
+- **Fixed tick**: `TICK_DT = 0.05` accumulator loop in main.cpp runs player
+  physics + entity ticks at exactly 20 TPS regardless of frame rate
+  (`MAX_TICKS_PER_FRAME = 5` stall guard drops time rather than spiraling).
+  Rendering interpolates: `Player::beginTick()` stores `prevPos`, the camera
+  uses `eyePos(alpha)` with `alpha = accumulator / TICK_DT`. The golden test
+  passes unchanged (stationary viewpoint ⇒ prevPos == pos). Costs ~5%
+  (~0.08 ms/frame) vs Batch F measured old-vs-new binary in identical fresh
+  worlds; bench numbers depend heavily on viewpoint, so compare binaries in
+  the same CWD, not against historical logs.
+- **Physics extraction**: the player's collidesAt/moveAxis became
+  `Body`/`bodyCollidesAt`/`moveBody` in `src/Physics.{h,cpp}`. One behavior
+  change, deliberate: on collision a body now **snaps flush** to the
+  obstacle plane instead of stopping at the last 0.45-block sub-step
+  (a step is < 1 block, so the leading face crossed exactly one cell
+  boundary). Without this, item cubes visibly hovered above the ground;
+  it also pins the player exactly to surfaces. Tests assert exact landing.
+- **Entities** (`src/Entity.{h,cpp}`, main thread only like the chunk map):
+  `ItemEntity` = Body (0.25×0.25 cube) + block + count + age. Tick order:
+  magnet (inside 2.0 of the player torso, velocity 8 m/s toward it,
+  overrides gravity) else gravity −22/friction; then moveBody; then pickup
+  (< 0.8, after a 0.4 s delay so drops visibly pop out); despawn at 300 s.
+  Items **freeze** (no physics, no aging) when their chunk is unloaded
+  (`isAreaReady(pos, 0)`), and are **not persisted** — both accepted
+  limitations; placing a block onto an item entombs it (known minor issue).
+  Per-chunk buckets, rebuilt each tick, back `itemsNear` queries (mobs later).
+- **Modes**: creative (default) is untouched — fixed palette, infinite,
+  break destroys with no drop. `survival=1` (settings.cfg): break spawns
+  the registry's `drop` (`hardness` still unused — no break times yet),
+  placement consumes from the selected hotbar stack, hotbar renders
+  inventory row 0 with counts (counts always shown, "1" included — user
+  feedback: a hidden "1" reads as a broken counter), E opens the 4×8 grid
+  (click = pick up / put down / swap / merge; Esc or E closes; a held
+  cursor stack is re-added on close, overflow dropped as an item).
+- **Item rendering** (`src/ItemRenderer.{h,cpp}`): own tiny shader, one
+  static unit-cube VBO, per-item model matrix (bob = sin on `gameTime`,
+  spin, ×0.25 scale), per-face texture layers via a `uLayers[6]` uniform +
+  face-index attrib, lit by `0.85^(15−max(sun,block))` at the item's cell.
+  Drawn between the opaque and water passes, culling off (6 quads/item).
+  NOTE: drawChunks no longer leaves the chunk shader as the implicit
+  current program — main.cpp re-binds `chunkShader.use()` before the water
+  pass.
+- **Save v2** (`src/PlayerSave.h`, logic out of main.cpp so it's testable):
+  v1 fields + 32 × (block byte, count byte). v1 files **migrate** (position
+  kept, empty inventory) rather than being rejected; unknown block bytes
+  clamp to Air like chunk loading. The user's real player.bin was verified
+  to migrate silently and re-save as v2.
+- **Demo flags** for screenshots/live testing: `--demo-items`, `--demo-inv`
+  (see VERIFICATION.md; xdotool needs windowactivate + window-relative
+  mousemove).
 
 ### Batch F implementation notes (2026-06-11)
 
@@ -143,12 +196,11 @@ All planned batches through F **plus all A–D addenda** are done and verified:
 
 ## What's next
 
-**Batch G — Items, Inventory & Entity Foundation** is next per the agreed
-order (`TODO.md`): fixed-timestep simulation tick first (the multiplayer
-insurance), then a minimal entity system reusing the player's collision,
-then block drops as the first entity, hotbar counts, inventory UI, and
-player-save v2 for persistence. The Block registry's `hardness`/`drop`
-columns have been waiting for this batch since the B addendum.
+**Batch H — Polish & Distribution** is next per the agreed order
+(`TODO.md`): audio, pause menu, key rebinding, day/night cycle, release
+packaging. The Block registry's `hardness` column is still unused (no break
+times yet) — a natural survival-mode follow-up if the user wants it before
+H. The Batch G plan lives at `docs/plans/batch-g-items-entities.md`.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -161,7 +213,23 @@ columns have been waiting for this batch since the B addendum.
 - World seed fixed at 1337 in `main.cpp`.
 - Internet access works (font8x8 was fetched via curl).
 
-## Recent verification snapshot (Batch F)
+## Recent verification snapshot (Batch G)
+
+Warning-free build; `world_tests` (new: body physics incl. exact-landing,
+player-on-Body regression, inventory stacking, item fall/land, magnet
+pickup, frozen-in-unloaded-chunk, buckets + registry drops, player save v2
+roundtrip + v1 migration) passes 3× and under TSAN (ASLR workaround, now
+also compiling Player/Physics/Entity). Golden screenshot passes
+**unchanged** (creative + stationary viewpoint). Old-vs-new binary in
+identical fresh worlds: 580 → 552 fps (~0.08 ms/frame for tick loop +
+entity hooks). Verified visually/live (xdotool-driven, screenshots
+inspected): three drop cubes resting on terrain with correct per-face
+textures; mining two blocks underfoot → drops magnetize in → hotbar "Sand
+2"; relaunch → count persists; walking over drops 3 m away collects them;
+E opens the grid; clicking moved a 64-stack hotbar→grid. The user's real
+v1 player.bin migrated silently (position bytes identical, file now v2).
+
+## Older verification snapshot (Batch F)
 
 Warning-free build; `world_tests` (new: greedy merging/UV-span/determinism,
 torch mesh, rewritten position-keyed AO/smooth tests) passes 3× and under

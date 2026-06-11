@@ -39,8 +39,9 @@ After an intentional visual change, regenerate the reference with
 | Left click | Break block |
 | Right click | Place block |
 | 1–8, scroll wheel | Select hotbar slot |
+| E | Open/close inventory (survival mode) |
 | F | Toggle fly mode |
-| Esc | Release mouse, then quit |
+| Esc | Close inventory / release mouse, then quit |
 
 A debug overlay (FPS, position, current chunk, drawn/loaded chunk counts,
 generation and meshing timings with queue depths, targeted block and the
@@ -50,7 +51,14 @@ with the selected block at the bottom.
 ## Settings
 
 `settings.cfg` is created next to the executable on first run:
-`mouse_sensitivity`, `fov`, `render_distance` (chunks), `vsync`.
+`mouse_sensitivity`, `fov`, `render_distance` (chunks), `vsync`, `survival`.
+
+`survival=0` (the default) is creative mode: the hotbar is a fixed palette of
+infinite blocks and breaking destroys blocks outright. `survival=1` makes
+blocks finite: breaking spawns a dropped item that you walk near to collect,
+the hotbar shows your actual stacks with counts, placing consumes from the
+selected stack, and `E` opens a 4×8 inventory grid (click to pick up, drop,
+swap, or merge stacks; the hotbar is the bottom row).
 
 ## How it works
 
@@ -115,7 +123,22 @@ with the selected block at the bottom.
   jumping, and swept per-axis AABB collision (sub-stepped so fast movement
   can't tunnel through blocks). Water is swim-through: gravity weakens, you
   sink slowly, and holding Space swims up. `F` toggles a fly mode for
-  exploring.
+  exploring. The collision itself lives in `src/Physics.h/.cpp` as a reusable
+  `Body`/`moveBody`, shared with entities.
+- **Simulation tick** — all gameplay simulation (player physics, entities)
+  runs at a fixed 20 ticks per second, decoupled from the frame rate;
+  rendering interpolates positions between the last two ticks. This keeps
+  physics deterministic across machines and is the groundwork a future
+  multiplayer mode would need.
+- **Entities** (`src/Entity.h/.cpp`) — a minimal entity layer whose first
+  citizen is the dropped item: a small textured cube (`src/ItemRenderer.cpp`)
+  that bobs and spins, falls with the shared AABB physics, magnetizes to the
+  player within ~2 blocks, and stacks into the inventory on contact. Entities
+  are bucketed per chunk for proximity queries, freeze while their chunk is
+  unloaded, and despawn after 5 minutes; they are not saved across runs.
+- **Inventory** (`src/Inventory.h`) — 4 rows × 8 columns of stacks (max 64),
+  row 0 doubling as the hotbar. Pure logic, exercised headlessly by the
+  tests; the grid UI is drawn entirely with the HUD primitives.
 - **Textures** (`src/Texture.cpp`) — all block tiles are generated
   procedurally at startup (hash-noise grass/dirt/stone art), so there are no
   asset files. The same tile functions fill both a texture array (chunk
@@ -129,6 +152,8 @@ with the selected block at the bottom.
   on a 30-second autosave timer, and on exit; untouched chunks are
   regenerated from the seed, which lives in `saves/world1/level.bin` so the
   world survives changes to the built-in default seed. Player position, look
-  direction, fly mode, and hotbar slot persist in `saves/world1/player.bin`.
-  All save files are written atomically (temp file + rename), and files with
-  a bad/old header are rejected and regenerated rather than crashing.
+  direction, fly mode, hotbar slot, and the survival inventory persist in
+  `saves/world1/player.bin` (format v2; v1 files load with an empty
+  inventory so old saves keep their position). All save files are written
+  atomically (temp file + rename), and files with a bad/old header are
+  rejected and regenerated rather than crashing.

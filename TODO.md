@@ -107,22 +107,27 @@ what was actually built.
 - [x] Occlusion heuristics: bench shows we are nowhere near draw-bound
       (~80 draws/frame at ~340 fps), so skipped per the "don't guess" rule.
 
-## Batch G — Items, Inventory & Entity Foundation
+## Batch G — Items, Inventory & Entity Foundation — DONE
 
-- [ ] (new) Fixed-timestep simulation tick (e.g. 20 TPS) for world/entity
-      logic, decoupled from render with interpolation — the "don't bake in
-      single-player assumptions" insurance for later multiplayer, far easier
-      before entities exist than after
-- [ ] (new) Minimal entity system: position, velocity, AABB reusing the
-      player's sub-stepped collision, update + render lists, per-chunk
-      bucketing
-- [ ] Block drops: breaking yields an item — dropped items as the first
-      entity (small bobbing cube, magnetized pickup), replacing the old
-      direct-to-inventory plan
-- [ ] Item counts in hotbar slots + finite placement (survival-ish mode
-      flag; keep current infinite mode as creative)
-- [ ] Full inventory grid UI (open/close with E, move stacks, Hud-based)
-- [ ] Inventory persistence in player.bin (bump player save to v2)
+- [x] (new) Fixed-timestep simulation tick (20 TPS, `TICK_DT` accumulator in
+      main.cpp) for player/entity logic, decoupled from render with
+      position interpolation (`prevPos` + alpha) — the "don't bake in
+      single-player assumptions" insurance for later multiplayer
+- [x] (new) Minimal entity system (`src/Entity.{h,cpp}`): position, velocity,
+      AABB reusing the player's sub-stepped collision (extracted to
+      `src/Physics.{h,cpp}` as `Body`/`moveBody`), update + render lists,
+      per-chunk bucketing. Entities freeze in unloaded chunks and are NOT
+      persisted across runs (accepted Batch G limitation).
+- [x] Block drops: breaking yields the registry's `drop` — dropped items as
+      the first entity (small bobbing/spinning cube via
+      `src/ItemRenderer.cpp`, magnetized pickup within ~2 blocks). Survival
+      mode only; creative keeps destroy-outright.
+- [x] Item counts in hotbar slots + finite placement (`survival=1` in
+      settings.cfg; the default stays the original infinite creative mode)
+- [x] Full inventory grid UI (open/close with E, click to move/swap/merge
+      stacks, Hud-based, 4×8 with the hotbar as row 0)
+- [x] Inventory persistence in player.bin (save bumped to v2; v1 files
+      migrate with an empty inventory instead of being rejected)
 
 ## Batch H — Polish & Distribution
 
