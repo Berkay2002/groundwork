@@ -1326,16 +1326,27 @@ static void testFurnaceBlockedAndMissingInputBurns() {
     blocked.fuel = makeItemStack(ItemId::Coal, 1);
     blocked.output = makeItemStack(ItemId::IronIngot, 64);
     store.tickFurnaces();
-    CHECK(blocked.fuel.empty());
-    CHECK(blocked.burnTicksRemaining == 1599);
+    CHECK(blocked.fuel.item == ItemId::Coal && blocked.fuel.count == 1);
+    CHECK(blocked.burnTicksRemaining == 0);
+    CHECK(blocked.cookTicks == 0);
+    CHECK(blocked.output.count == 64);
+    blocked.burnTicksRemaining = 7;
+    store.tickFurnaces();
+    CHECK(blocked.burnTicksRemaining == 6);
+    CHECK(blocked.fuel.item == ItemId::Coal && blocked.fuel.count == 1);
     CHECK(blocked.cookTicks == 0);
     CHECK(blocked.output.count == 64);
 
     FurnaceState& missing = store.getOrCreateFurnace({1, 1, 0});
     missing.fuel = makeItemStack(ItemId::Coal, 1);
     store.tickFurnaces();
-    CHECK(missing.fuel.empty());
-    CHECK(missing.burnTicksRemaining == 1599);
+    CHECK(missing.fuel.item == ItemId::Coal && missing.fuel.count == 1);
+    CHECK(missing.burnTicksRemaining == 0);
+    CHECK(missing.cookTicks == 0);
+    missing.burnTicksRemaining = 5;
+    store.tickFurnaces();
+    CHECK(missing.fuel.item == ItemId::Coal && missing.fuel.count == 1);
+    CHECK(missing.burnTicksRemaining == 4);
     CHECK(missing.cookTicks == 0);
 }
 
@@ -1370,6 +1381,7 @@ static void testFurnaceSaveLoadAndRemoval() {
         bad.write("NOPE", 4);
     }
     BlockEntityStore badLoaded;
+    badLoaded.getOrCreateFurnace({1, 2, 3}).output = makeItemStack(ItemId::IronIngot, 1);
     CHECK(!loadBlockEntitiesFile(path, badLoaded));
     CHECK(badLoaded.furnaceCount() == 0);
 

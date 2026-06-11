@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M3 milestone review
-- Last verified: M3/T8 validation green (`cmake --build build -j` exit 0,
+- Current: M3 spec-compliance re-review
+- Last verified: M3 spec-review fixes validation green (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 3
@@ -119,3 +119,11 @@
   stacks from world-owned furnace state for item-entity spawning. Validation:
   `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
   0 and printed `all tests passed`.
+- [2026-06-11] M3 spec-compliance review round 1: REJECTED. Important finding
+  M3-SPEC-001: unlit furnaces consumed fresh fuel even when smelting could not
+  proceed. Minor finding M3-SPEC-002: bad block-entity load rejected the file
+  but did not clear a non-empty target store. Fixed by consuming fresh fuel
+  only when smelting can proceed, preserving already-lit burn countdown while
+  blocked/missing input, and clearing the output store on bad/malformed loads.
+  Validation rerun: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`.

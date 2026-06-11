@@ -54,14 +54,13 @@ void BlockEntityStore::removeFurnace(glm::ivec3 pos) {
 void BlockEntityStore::tickFurnaces() {
     for (auto& it : furnaces_) {
         FurnaceState& f = it.second;
-        bool lit = consumeFuelIfNeeded(f);
-        if (lit && f.burnTicksRemaining > 0) --f.burnTicksRemaining;
+        bool smeltingPossible = canSmelt(f);
+        if (f.burnTicksRemaining == 0 && smeltingPossible)
+            consumeFuelIfNeeded(f);
+        bool lit = f.burnTicksRemaining > 0;
+        if (lit) --f.burnTicksRemaining;
 
-        if (!canSmelt(f)) {
-            f.cookTicks = 0;
-            continue;
-        }
-        if (!lit) {
+        if (!smeltingPossible || !lit) {
             f.cookTicks = 0;
             continue;
         }
@@ -75,14 +74,19 @@ void BlockEntityStore::tickFurnaces() {
 
 bool loadBlockEntitiesFile(const std::string& path, BlockEntityStore& out) {
     std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
+    if (!f) {
+        out.clear();
+        return false;
+    }
     char magic[4];
     uint32_t version = 0, count = 0;
     f.read(magic, 4);
     f.read(reinterpret_cast<char*>(&version), 4);
     f.read(reinterpret_cast<char*>(&count), 4);
-    if (!f || std::memcmp(magic, BE_MAGIC, 4) != 0 || version != BE_VERSION)
+    if (!f || std::memcmp(magic, BE_MAGIC, 4) != 0 || version != BE_VERSION) {
+        out.clear();
         return false;
+    }
 
     BlockEntityStore loaded;
     for (uint32_t i = 0; i < count; ++i) {
@@ -93,11 +97,15 @@ bool loadBlockEntitiesFile(const std::string& path, BlockEntityStore& out) {
         f.read(reinterpret_cast<char*>(&z), 4);
         if (!readItemStack(f, state.input) || !readItemStack(f, state.fuel) ||
             !readItemStack(f, state.output)) {
+            out.clear();
             return false;
         }
         f.read(reinterpret_cast<char*>(&state.burnTicksRemaining), 4);
         f.read(reinterpret_cast<char*>(&state.cookTicks), 4);
-        if (!f) return false;
+        if (!f) {
+            out.clear();
+            return false;
+        }
         if (state.burnTicksRemaining < 0) state.burnTicksRemaining = 0;
         if (state.cookTicks < 0) state.cookTicks = 0;
         loaded.getOrCreateFurnace({x, y, z}) = state;
