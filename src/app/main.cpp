@@ -23,6 +23,7 @@
 #include "render/GLCompat.h"
 #include "ui/Hud.h"
 #include "sim/Inventory.h"
+#include "sim/Mining.h"
 #include "render/ItemRenderer.h"
 #include "ui/MenuUi.h"
 #include "sim/Player.h"
@@ -126,6 +127,8 @@ struct App {
     double lastMouseX = 0, lastMouseY = 0;
     bool firstMouse = true;
     bool breakPressed = false, placePressed = false;
+    bool breakHeld = false;
+    mining::BreakProgressState breakProgress;
 };
 
 App app;
@@ -136,9 +139,42 @@ Block heldBlock() {
     return s.empty() ? Block::Air : placeBlockForItem(s.item);
 }
 
+void resetBreakProgress() {
+    app.breakProgress = {};
+}
+
+void survivalMiningTick(World& world) {
+    if (!app.survival || app.invOpen || app.menu != Menu::None || !app.breakHeld) {
+        resetBreakProgress();
+        return;
+    }
+
+    RaycastHit hit = world.raycast(app.player.eyePos(), app.player.lookDir(), REACH);
+    bool validTarget = hit.hit;
+    Block targetBlock = validTarget ? world.getBlock(hit.block.x, hit.block.y, hit.block.z)
+                                    : Block::Air;
+    ItemStack held = app.inv.slots[app.hotbarSlot];
+    mining::BreakProgressEvent ev =
+        mining::advanceBreakProgress(app.breakProgress, true, validTarget, hit.block,
+                                     targetBlock, held);
+    if (!ev.removed) return;
+
+    world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
+    app.audio.playBreak(soundMaterial(targetBlock));
+
+    if (ev.useDurability) {
+        mining::applyDurabilityUse(app.inv.slots[app.hotbarSlot],
+                                   mining::DurabilityUseReason::Mining);
+    }
+
+    ItemStack drop = mining::miningDrop(targetBlock, mining::miningToolForStack(held));
+    if (!drop.empty()) app.entities.spawnBlockDrop(hit.block, drop);
+}
+
 // ---- Inventory UI (survival): rows 1..3 on top, hotbar row 0 below a gap ----
 
 void closeInventory(GLFWwindow* w) {
+    resetBreakProgress();
     app.invOpen = false;
     if (!app.cursorStack.empty()) { // never destroy items on close
         int leftover = app.inv.addStack(app.cursorStack);
@@ -162,12 +198,14 @@ void closeInventory(GLFWwindow* w) {
 std::vector<int> fpsOptions = {0};
 
 void openMenu() {
+    resetBreakProgress();
     app.menu = Menu::Main;
     app.mouseCaptured = false;
     glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 }
 
 void closeMenu() {
+    resetBreakProgress();
     app.menu = Menu::None;
     app.mouseCaptured = true;
     app.firstMouse = true;
@@ -262,6 +300,7 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
         if (app.invOpen) {
             closeInventory(w);
         } else {
+            resetBreakProgress();
             app.invOpen = true;
             app.mouseCaptured = false;
             glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
@@ -275,6 +314,9 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
 }
 
 void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
+        app.breakHeld = false;
+    }
     if (app.menu != Menu::None) { // clicks operate the pause menu
         if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
             double mx, my;
@@ -305,7 +347,10 @@ void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
         return;
     }
     if (action == GLFW_PRESS) {
-        if (button == GLFW_MOUSE_BUTTON_LEFT) app.breakPressed = true;
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            app.breakPressed = true;
+            app.breakHeld = true;
+        }
         if (button == GLFW_MOUSE_BUTTON_RIGHT) app.placePressed = true;
     }
 }
@@ -728,10 +773,12 @@ int main(int argc, char** argv) {
         const int ticksToRun = tickClock.advance(frameDt, paused);
         const double simDt = tickClock.consumedSeconds();
         gameTime += simDt;
+        if (paused || app.invOpen || !app.survival || !app.breakHeld) resetBreakProgress();
         for (int i = 0; i < ticksToRun; ++i) {
             app.player.beginTick();
             // Inventory open: keep simulating (gravity), drop movement intent.
             app.player.update(world, app.invOpen ? PlayerInput{} : app.input, float(TickClock::TICK_DT));
+            survivalMiningTick(world);
             if (app.player.onGround() && !app.player.flying) {
                 glm::vec3 d = app.player.pos() - app.player.prevPos;
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
@@ -774,13 +821,11 @@ int main(int argc, char** argv) {
 
         RaycastHit hit = world.raycast(eye, dir, REACH);
 
-        if (app.breakPressed && hit.hit &&
+        if (!app.survival && app.breakPressed && hit.hit &&
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
             Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
             app.audio.playBreak(soundMaterial(broken));
-            // Creative destroys outright; survival drops the registry item.
-            if (app.survival) app.entities.spawnBlockDrop(hit.block, broken);
         }
         if (app.placePressed && hit.hit) {
             glm::ivec3 p = hit.adjacent;
@@ -788,6 +833,7 @@ int main(int argc, char** argv) {
             if (held != Block::Air &&
                 !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
                 if (!app.survival || app.inv.consumeOne(app.hotbarSlot)) {
+                    resetBreakProgress();
                     world.setBlock(p.x, p.y, p.z, held);
                     app.audio.playPlace(soundMaterial(held));
                 }

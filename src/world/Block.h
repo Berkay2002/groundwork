@@ -62,8 +62,8 @@ constexpr float UNBREAKABLE = -1.0f;
 enum class SoundMat : uint8_t { None, Soft, Stone, Wood };
 
 // One row per block id: every per-block property lives here instead of in
-// scattered switch statements. Hardness (relative break time) and drop are
-// recorded now for Batch G (finite blocks, item drops) but unused until then.
+// scattered switch statements. Survival mining reads hardness, tool class,
+// harvest tier, and item drops directly from this table.
 //
 // The predicates are deliberately distinct — don't conflate them:
 //   solid       raycast target / occupies the cell for placement

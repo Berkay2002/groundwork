@@ -51,13 +51,18 @@ void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack s
     }
 }
 
-void Entities::spawnBlockDrop(const glm::ivec3& blockPos, Block broken) {
-    Block drop = blockDef(broken).drop;
-    if (drop == Block::Air) return;
+void Entities::spawnBlockDrop(const glm::ivec3& blockPos, ItemStack stack) {
+    stack = normalizeItemStack(stack);
+    if (stack.empty()) return;
     float a = rand01() * 6.2831853f;
     spawnItem(glm::vec3(blockPos) + glm::vec3(0.5f, 0.4f, 0.5f),
               glm::vec3(std::cos(a) * 1.5f, 3.5f, std::sin(a) * 1.5f),
-              itemForBlock(drop), 1);
+              stack);
+}
+
+void Entities::spawnBlockDrop(const glm::ivec3& blockPos, Block broken) {
+    const BlockDef& d = blockDef(broken);
+    spawnBlockDrop(blockPos, makeItemStack(d.dropItem, d.dropCount));
 }
 
 void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* inv, float dt) {

@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M2 / Task 4
-- Last verified: M2/T3 validation green (`cmake --build build -j` exit 0,
+- Current: M2 / Task 5
+- Last verified: M2/T4 validation green (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -67,4 +67,10 @@
   Furnace, and Diamond Ore block ids; added block tool/tier/drop metadata,
   procedural tiles, item mappings, and deterministic deep diamond ore
   generation. Validation: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
+- [2026-06-11] M2/T4 DONE. Added pure mining rules for hardness, tool class,
+  harvest tier, exact tick rounding, useful/wrong drops, progress reset, and
+  mining durability use. Survival breaking now advances on fixed 20 TPS held
+  input, creative remains instant, and block drops use item-stack harvest
+  results. Validation: `cmake --build build -j` exit 0 warning-free;
   `.\build\world_tests.exe` exit 0 and printed `all tests passed`.

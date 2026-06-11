@@ -41,6 +41,7 @@ add_executable(groundwork
   src/world/WorldSave.cpp
   src/sim/Player.cpp
   src/sim/Physics.cpp
+  src/sim/Mining.cpp
   src/sim/Entity.cpp
   src/render/ItemRenderer.cpp
   src/render/GLCompat.cpp
@@ -91,6 +92,7 @@ add_executable(world_tests
   src/world/Terrain.cpp
   src/sim/Player.cpp
   src/sim/Physics.cpp
+  src/sim/Mining.cpp
   src/sim/Entity.cpp
   src/render/GLCompat.cpp
 )

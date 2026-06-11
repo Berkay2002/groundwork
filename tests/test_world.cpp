@@ -7,6 +7,7 @@
 #include "sim/Item.h"
 #include "sim/Inventory.h"
 #include "sim/Entity.h"
+#include "sim/Mining.h"
 #include "sim/PlayerSave.h"
 #include "world/WorldSave.h"
 #include "world/DayCycle.h"
@@ -1007,6 +1008,119 @@ static void testItemRegistry() {
     CHECK(makeItemStack(ItemId::WoodPickaxe, 99).count == 1);
 }
 
+static void testMiningRequiredTicksAndDrops() {
+    using namespace mining;
+    ItemStack hand;
+    ItemStack woodPick = makeToolStack(ItemId::WoodPickaxe);
+    ItemStack stonePick = makeToolStack(ItemId::StonePickaxe);
+    ItemStack ironPick = makeToolStack(ItemId::IronPickaxe);
+    ItemStack woodAxe = makeToolStack(ItemId::WoodAxe);
+    ItemStack diamondShovel = makeToolStack(ItemId::DiamondShovel);
+
+    CHECK(requiredBreakTicks(Block::Dirt, miningToolForStack(hand)) == 15);
+    CHECK(canHarvestUsefulDrop(Block::Dirt, miningToolForStack(hand)));
+    CHECK(miningDrop(Block::Dirt, miningToolForStack(hand)).item == ItemId::DirtBlock);
+    CHECK(requiredBreakTicks(Block::Dirt, miningToolForStack(diamondShovel)) == 2);
+    CHECK(shouldUseDurabilityForBreak(Block::Dirt, miningToolForStack(diamondShovel)));
+    CHECK(requiredBreakTicks(Block::Wood, miningToolForStack(hand)) == 60);
+    CHECK(canHarvestUsefulDrop(Block::Wood, miningToolForStack(hand)));
+    CHECK(miningDrop(Block::Wood, miningToolForStack(hand)).item == ItemId::LogBlock);
+    CHECK(requiredBreakTicks(Block::Wood, miningToolForStack(woodAxe)) == 30);
+    CHECK(miningDrop(Block::CraftingTable, miningToolForStack(hand)).item == ItemId::CraftingTableBlock);
+
+    CHECK(requiredBreakTicks(Block::Stone, miningToolForStack(hand)) == 150);
+    CHECK(!canHarvestUsefulDrop(Block::Stone, miningToolForStack(hand)));
+    CHECK(miningDrop(Block::Stone, miningToolForStack(hand)).empty());
+    CHECK(requiredBreakTicks(Block::Stone, miningToolForStack(woodPick)) == 23);
+    CHECK(canHarvestUsefulDrop(Block::Stone, miningToolForStack(woodPick)));
+    CHECK(miningDrop(Block::Stone, miningToolForStack(woodPick)).item == ItemId::CobblestoneBlock);
+
+    CHECK(requiredBreakTicks(Block::Cobblestone, miningToolForStack(stonePick)) == 15);
+    CHECK(requiredBreakTicks(Block::IronOre, miningToolForStack(woodPick)) == 300);
+    CHECK(miningDrop(Block::IronOre, miningToolForStack(woodPick)).empty());
+    CHECK(requiredBreakTicks(Block::IronOre, miningToolForStack(stonePick)) == 23);
+    CHECK(miningDrop(Block::IronOre, miningToolForStack(stonePick)).item == ItemId::RawIron);
+    CHECK(requiredBreakTicks(Block::DiamondOre, miningToolForStack(stonePick)) == 300);
+    CHECK(miningDrop(Block::DiamondOre, miningToolForStack(stonePick)).empty());
+    CHECK(requiredBreakTicks(Block::DiamondOre, miningToolForStack(ironPick)) == 15);
+    CHECK(miningDrop(Block::DiamondOre, miningToolForStack(ironPick)).item == ItemId::Diamond);
+
+    CHECK(requiredBreakTicks(Block::Bedrock, miningToolForStack(ironPick)) == NEVER_BREAKS);
+    CHECK(requiredBreakTicks(Block::Torch, miningToolForStack(hand)) == INSTANT_BREAK);
+    CHECK(!shouldUseDurabilityForBreak(Block::Torch, miningToolForStack(ironPick)));
+    CHECK(miningDrop(Block::Torch, miningToolForStack(hand)).item == ItemId::TorchBlock);
+}
+
+static void testMiningDurabilityUse() {
+    using namespace mining;
+    ItemStack hand;
+    CHECK(applyDurabilityUse(hand, DurabilityUseReason::Mining));
+    CHECK(hand.empty());
+
+    ItemStack pick = makeToolStack(ItemId::WoodPickaxe);
+    uint16_t start = pick.durability;
+    CHECK(applyDurabilityUse(pick, DurabilityUseReason::Mining));
+    CHECK(pick.item == ItemId::WoodPickaxe && pick.durability == start - 1);
+
+    pick.durability = 1;
+    CHECK(!applyDurabilityUse(pick, DurabilityUseReason::Mining));
+    CHECK(pick.empty());
+}
+
+static void testMiningProgressResetsAndBreakEvent() {
+    using namespace mining;
+    BreakProgressState state;
+    ItemStack hand;
+    glm::ivec3 a(1, 2, 3);
+    glm::ivec3 b(1, 2, 4);
+
+    for (int i = 0; i < 14; ++i) {
+        BreakProgressEvent ev = advanceBreakProgress(state, true, true, a, Block::Dirt, hand);
+        CHECK(!ev.removed);
+        CHECK(!ev.useDurability);
+        CHECK(state.active);
+    }
+    BreakProgressEvent ev = advanceBreakProgress(state, true, true, a, Block::Dirt, hand);
+    CHECK(ev.removed);
+    CHECK(!ev.useDurability);
+    CHECK(!state.active);
+
+    ItemStack shovel = makeToolStack(ItemId::WoodShovel);
+    ev = advanceBreakProgress(state, true, true, a, Block::Dirt, shovel);
+    CHECK(!ev.removed && ev.progress > 0.0f);
+    for (int i = 0; i < 7; ++i)
+        ev = advanceBreakProgress(state, true, true, a, Block::Dirt, shovel);
+    CHECK(ev.removed);
+    CHECK(ev.useDurability);
+
+    advanceBreakProgress(state, true, true, a, Block::Wood, hand);
+    CHECK(state.active && state.ticks == 1);
+    advanceBreakProgress(state, true, true, a, Block::Wood, hand);
+    CHECK(state.ticks == 2);
+    ev = advanceBreakProgress(state, true, true, b, Block::Wood, hand);
+    CHECK(ev.reset);
+    CHECK(state.active && state.target == b && state.ticks == 1);
+    ev = advanceBreakProgress(state, false, true, b, Block::Wood, hand);
+    CHECK(ev.reset);
+    CHECK(!state.active && state.ticks == 0);
+    advanceBreakProgress(state, true, true, a, Block::Wood, hand);
+    ev = advanceBreakProgress(state, true, true, a, Block::Wood,
+                              makeItemStack(ItemId::Coal, 1));
+    CHECK(ev.reset);
+    CHECK(state.active && state.ticks == 1);
+    ev = advanceBreakProgress(state, true, false, a, Block::Wood, hand);
+    CHECK(ev.reset);
+    CHECK(!state.active);
+
+    ev = advanceBreakProgress(state, true, true, a, Block::Bedrock, hand);
+    CHECK(!ev.removed);
+    CHECK(!state.active);
+    ev = advanceBreakProgress(state, true, true, a, Block::Torch, hand);
+    CHECK(ev.removed);
+    CHECK(!ev.useDurability);
+    CHECK(!state.active);
+}
+
 static void testItemEntityFallsAndLands() {
     std::filesystem::remove_all("test_ent_save");
     World w(1337, "test_ent_save");
@@ -1059,12 +1173,14 @@ static void testEntityBucketsAndDrops() {
     // Registry-driven drops: Grass drops Dirt, Leaves drop nothing.
     ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Grass);
     ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Leaves);
-    CHECK(ents.items().size() == 1);
+    ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Stone);
+    CHECK(ents.items().size() == 2);
     CHECK(ents.items()[0]->stack.item == ItemId::DirtBlock);
+    CHECK(ents.items()[1]->stack.item == ItemId::CobblestoneBlock);
     // Bucket query: a second item two chunks away is not "near".
     ents.spawnItem(glm::vec3(40.5f, 70.0f, 0.5f), glm::vec3(0.0f), ItemId::StoneBlock, 1);
     ents.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
-    CHECK(ents.itemsNear(glm::vec3(0.5f, 70.0f, 0.5f), 8.0f).size() == 1);
+    CHECK(ents.itemsNear(glm::vec3(0.5f, 70.0f, 0.5f), 8.0f).size() == 2);
     CHECK(ents.itemsNear(glm::vec3(40.5f, 70.0f, 0.5f), 8.0f).size() == 1);
     std::filesystem::remove_all("test_ent_save4");
 }
@@ -1536,6 +1652,9 @@ int main() {
     testPlayerLandsOnPlatform();
     testItemRegistry();
     testInventory();
+    testMiningRequiredTicksAndDrops();
+    testMiningDurabilityUse();
+    testMiningProgressResetsAndBreakEvent();
     testItemEntityFallsAndLands();
     testItemPickup();
     testItemFrozenInUnloadedChunk();

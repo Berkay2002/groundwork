@@ -29,8 +29,10 @@ class Entities {
 public:
     void spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemId item, int count = 1);
     void spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack stack);
-    // Drop for a broken block: the registry's `drop`, tossed from the block
-    // center with a small pseudo-random horizontal kick. No-op for Air drops.
+    // Toss an item stack from a block center with a small pseudo-random
+    // horizontal kick. No-op for empty stacks.
+    void spawnBlockDrop(const glm::ivec3& blockPos, ItemStack stack);
+    // Correct-harvest drop for old callers that only know the broken block.
     void spawnBlockDrop(const glm::ivec3& blockPos, Block broken);
 
     // One simulation tick: physics, magnetized pickup into `inv` (skipped
