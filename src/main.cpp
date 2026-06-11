@@ -21,6 +21,7 @@
 #include "Inventory.h"
 #include "ItemRenderer.h"
 #include "Player.h"
+#include "PlayerSave.h"
 #include "SaveIO.h"
 #include "Settings.h"
 #include "Shader.h"
@@ -270,49 +271,35 @@ void pollMovement() {
     app.input.sprint  = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
 }
 
-// ---- Player persistence (versioned) ----
-constexpr char PLAYER_MAGIC[4] = {'M', 'C', 'P', 'L'};
-constexpr uint32_t PLAYER_VERSION = 1;
-
+// ---- Player persistence (versioned, format in PlayerSave.h) ----
 std::string playerPath() { return std::string(SAVE_DIR) + "/player.bin"; }
 
 void savePlayer() {
-    bool ok = atomicSave(playerPath(), [](std::ofstream& f) {
-        f.write(PLAYER_MAGIC, 4);
-        f.write(reinterpret_cast<const char*>(&PLAYER_VERSION), 4);
-        const Player& p = app.player;
-        f.write(reinterpret_cast<const char*>(&p.pos), sizeof(p.pos));
-        f.write(reinterpret_cast<const char*>(&p.yaw), sizeof(p.yaw));
-        f.write(reinterpret_cast<const char*>(&p.pitch), sizeof(p.pitch));
-        uint8_t flying = p.flying ? 1 : 0;
-        uint8_t slot = (uint8_t)app.hotbarSlot;
-        f.write(reinterpret_cast<const char*>(&flying), 1);
-        f.write(reinterpret_cast<const char*>(&slot), 1);
-    });
-    if (!ok) std::fprintf(stderr, "warning: failed to save player data\n");
+    PlayerState s;
+    s.pos = app.player.pos;
+    s.yaw = app.player.yaw;
+    s.pitch = app.player.pitch;
+    s.flying = app.player.flying;
+    s.hotbarSlot = uint8_t(app.hotbarSlot);
+    s.inv = app.inv;
+    if (!savePlayerFile(playerPath(), s))
+        std::fprintf(stderr, "warning: failed to save player data\n");
 }
 
 bool loadPlayer() {
-    std::ifstream f(playerPath(), std::ios::binary);
-    if (!f) return false;
-    char magic[4];
-    uint32_t version = 0;
-    f.read(magic, 4);
-    f.read(reinterpret_cast<char*>(&version), 4);
-    if (!f || std::memcmp(magic, PLAYER_MAGIC, 4) != 0 || version != PLAYER_VERSION) {
-        std::fprintf(stderr, "warning: bad/old player save, starting at spawn\n");
+    PlayerState s;
+    if (!loadPlayerFile(playerPath(), s)) {
+        if (std::ifstream(playerPath()))
+            std::fprintf(stderr, "warning: bad/old player save, starting at spawn\n");
         return false;
     }
-    Player& p = app.player;
-    f.read(reinterpret_cast<char*>(&p.pos), sizeof(p.pos));
-    f.read(reinterpret_cast<char*>(&p.yaw), sizeof(p.yaw));
-    f.read(reinterpret_cast<char*>(&p.pitch), sizeof(p.pitch));
-    uint8_t flying = 0, slot = 0;
-    f.read(reinterpret_cast<char*>(&flying), 1);
-    f.read(reinterpret_cast<char*>(&slot), 1);
-    if (!f) return false;
-    p.flying = flying != 0;
-    app.hotbarSlot = slot < HOTBAR_SLOTS ? slot : 0;
+    app.player.pos = s.pos;
+    app.player.prevPos = s.pos;
+    app.player.yaw = s.yaw;
+    app.player.pitch = s.pitch;
+    app.player.flying = s.flying;
+    app.hotbarSlot = s.hotbarSlot < HOTBAR_SLOTS ? s.hotbarSlot : 0;
+    app.inv = s.inv;
     return true;
 }
 

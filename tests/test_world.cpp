@@ -6,6 +6,7 @@
 #include "../src/Player.h"
 #include "../src/Inventory.h"
 #include "../src/Entity.h"
+#include "../src/PlayerSave.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -781,6 +782,59 @@ static void testEntityBucketsAndDrops() {
     std::filesystem::remove_all("test_ent_save4");
 }
 
+static void testPlayerSaveV2Roundtrip() {
+    std::filesystem::create_directories("test_psave");
+    PlayerState a;
+    a.pos = glm::vec3(12.5f, 34.0f, -8.25f);
+    a.yaw = 123.0f;
+    a.pitch = -45.0f;
+    a.flying = true;
+    a.hotbarSlot = 3;
+    a.inv.add(Block::Dirt, 70);
+    a.inv.add(Block::Torch, 5);
+    CHECK(savePlayerFile("test_psave/player.bin", a));
+    PlayerState b;
+    CHECK(loadPlayerFile("test_psave/player.bin", b));
+    CHECK(b.pos == a.pos && b.yaw == a.yaw && b.pitch == a.pitch);
+    CHECK(b.flying && b.hotbarSlot == 3);
+    for (int i = 0; i < Inventory::SLOTS; ++i) {
+        CHECK(b.inv.slots[i].block == a.inv.slots[i].block);
+        CHECK(b.inv.slots[i].count == a.inv.slots[i].count);
+    }
+    std::filesystem::remove_all("test_psave");
+}
+
+static void testPlayerSaveV1Migrates() {
+    // Hand-craft a v1 file: header + pos + yaw + pitch + flying + slot.
+    std::filesystem::create_directories("test_psave1");
+    {
+        std::ofstream f("test_psave1/player.bin", std::ios::binary);
+        f.write("MCPL", 4);
+        uint32_t v = 1;
+        f.write(reinterpret_cast<const char*>(&v), 4);
+        glm::vec3 pos(1.0f, 2.0f, 3.0f);
+        float yaw = 10.0f, pitch = 20.0f;
+        f.write(reinterpret_cast<const char*>(&pos), sizeof(pos));
+        f.write(reinterpret_cast<const char*>(&yaw), 4);
+        f.write(reinterpret_cast<const char*>(&pitch), 4);
+        uint8_t flying = 1, slot = 2;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+    }
+    PlayerState s;
+    CHECK(loadPlayerFile("test_psave1/player.bin", s));
+    CHECK(s.pos == glm::vec3(1.0f, 2.0f, 3.0f));
+    CHECK(s.flying && s.hotbarSlot == 2);
+    for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(s.inv.slots[i].empty());
+    // Bad magic is rejected.
+    {
+        std::ofstream f("test_psave1/bad.bin", std::ios::binary);
+        f.write("XXXX", 4);
+    }
+    CHECK(!loadPlayerFile("test_psave1/bad.bin", s));
+    std::filesystem::remove_all("test_psave1");
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -813,6 +867,8 @@ int main() {
     testItemPickup();
     testItemFrozenInUnloadedChunk();
     testEntityBucketsAndDrops();
+    testPlayerSaveV2Roundtrip();
+    testPlayerSaveV1Migrates();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }
