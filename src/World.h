@@ -76,15 +76,22 @@ public:
     void saveAllModified();
     WorldStats stats() const;
 
+    // The world's actual seed: read from saves/<dir>/level.bin when present
+    // (written on world creation), so a save stays valid even if the
+    // default seed constant in main.cpp changes.
+    uint32_t seed() const { return seed_; }
+
     static int floorDiv(int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
     static int mod(int a, int b) { int m = a % b; return m < 0 ? m + b : m; }
 
 private:
+    static uint32_t loadOrCreateSeed(const std::string& saveDir, uint32_t fallback);
     Chunk* getChunk(int cx, int cz) const;
     void saveChunk(const Chunk& c);
     bool loadChunkFromDisk(Chunk& c) const;
     std::string chunkPath(int cx, int cz) const;
     void markNeighborsDirty(int cx, int cz);
+    void markBorderDirty(int cx, int cz, int lx, int lz);
     ChunkSnapshot snapshot(const Chunk& c) const;
 
     // Cross-chunk light BFS (main thread only: walks live chunks, marks them

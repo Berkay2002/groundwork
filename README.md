@@ -17,7 +17,15 @@ cmake --build build -j
 Run the headless world-logic tests with `./build/world_tests`.
 
 `./build/minecraft --frames 300` runs 300 frames, saves `screenshot.ppm`, and
-exits (useful for automated checks).
+exits (useful for automated checks). `./build/minecraft --bench 300` runs 300
+frames with vsync forced off, prints performance counters (fps, chunks
+drawn/loaded, mesh uploads, worker timings), and exits.
+
+`ctest --test-dir build` additionally runs a golden-screenshot regression
+test (`tests/golden_screenshot.py`) that renders a fixed viewpoint and
+compares it against `tests/golden/reference.png`; it skips without a display.
+After an intentional visual change, regenerate the reference with
+`python3 tests/golden_screenshot.py --update build/minecraft tests/golden/reference.png`.
 
 ## Controls
 
@@ -58,11 +66,19 @@ with the selected block at the bottom.
   uploads stay on the main thread, with two mutex-guarded result queues as
   the only synchronization. Lifecycle: missing → generating → loaded+dirty →
   meshing → uploaded; edits set dirty again.
+- **Blocks** (`src/Block.h`) — a single constexpr registry table holds every
+  per-block property (name, solidity, collision, opacity, light emission,
+  hardness, drop, per-face atlas tiles); the gameplay code only reads it
+  through small predicate helpers, and saved chunk bytes are the enum values
+  (append-only).
 - **Chunk** (`src/Chunk.h/.cpp`) — 16×80×16 block storage plus mesh building:
   only faces adjacent to non-opaque cells are emitted, with per-face shading
-  and the light level of the cell each face looks into baked into the
-  vertices. Chunks are marked dirty on edits (including neighbors across
-  borders) and rebuilt with a per-frame budget. Torches are meshed as thin
+  and per-vertex smooth lighting + ambient occlusion baked into the
+  vertices: each corner averages the light of the open cells around it and
+  darkens by the classic 3-neighbor AO rule, so block edges and corners read
+  as soft contact shadows. Chunks are marked dirty on edits (including
+  neighbors across borders, diagonals included) and rebuilt with a per-frame
+  budget. Torches are meshed as thin
   3D posts rather than cubes. Water builds a second, translucent mesh per
   chunk, drawn after all opaque geometry with blending (faces appear only
   against air, so a lake renders as one surface — visible from below too).
@@ -97,8 +113,10 @@ with the selected block at the bottom.
   crosshair) using the public-domain `font8x8` bitmap font baked into a
   texture at startup.
 - **Saving** — modified chunks are written as versioned block dumps
-  (`MCCH` magic + version header) to `saves/world1/c_<x>_<z>.bin` on unload
-  and on exit; untouched chunks are regenerated from the seed. Player
-  position, look direction, fly mode, and hotbar slot persist in
-  `saves/world1/player.bin`. Files with a bad/old header are rejected and
-  regenerated rather than crashing.
+  (`MCCH` magic + version header) to `saves/world1/c_<x>_<z>.bin` on unload,
+  on a 30-second autosave timer, and on exit; untouched chunks are
+  regenerated from the seed, which lives in `saves/world1/level.bin` so the
+  world survives changes to the built-in default seed. Player position, look
+  direction, fly mode, and hotbar slot persist in `saves/world1/player.bin`.
+  All save files are written atomically (temp file + rename), and files with
+  a bad/old header are rejected and regenerated rather than crashing.

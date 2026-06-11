@@ -1,4 +1,5 @@
 #include "World.h"
+#include "SaveIO.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -25,8 +26,41 @@ void ema(std::atomic<float>& avg, float sample) {
 }
 
 World::World(uint32_t seed, std::string saveDir)
-    : seed_(seed), terrain_(seed), saveDir_(std::move(saveDir)), pool_(workerCount()) {
-    std::filesystem::create_directories(saveDir_);
+    : seed_(loadOrCreateSeed(saveDir, seed)), terrain_(seed_),
+      saveDir_(std::move(saveDir)), pool_(workerCount()) {}
+
+namespace {
+constexpr char LEVEL_MAGIC[4] = {'M', 'C', 'L', 'V'};
+constexpr uint32_t LEVEL_VERSION = 1;
+}
+
+// The seed lives in level.bin so a save directory stays valid even if the
+// caller's default seed changes (unmodified chunks regenerate from the seed).
+// Missing or bad file: adopt the fallback and (re)write it.
+uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback) {
+    std::filesystem::create_directories(saveDir);
+    std::string path = saveDir + "/level.bin";
+    {
+        std::ifstream f(path, std::ios::binary);
+        if (f) {
+            char magic[4];
+            uint32_t version = 0, seed = 0;
+            f.read(magic, 4);
+            f.read(reinterpret_cast<char*>(&version), 4);
+            f.read(reinterpret_cast<char*>(&seed), 4);
+            if (f && std::memcmp(magic, LEVEL_MAGIC, 4) == 0 && version == LEVEL_VERSION)
+                return seed;
+            std::fprintf(stderr, "warning: bad/old level.bin, rewriting with seed %u\n",
+                         fallback);
+        }
+    }
+    if (!atomicSave(path, [&](std::ofstream& f) {
+            f.write(LEVEL_MAGIC, 4);
+            f.write(reinterpret_cast<const char*>(&LEVEL_VERSION), 4);
+            f.write(reinterpret_cast<const char*>(&fallback), 4);
+        }))
+        std::fprintf(stderr, "warning: failed to write level.bin\n");
+    return fallback;
 }
 
 World::~World() { saveAllModified(); }
@@ -56,10 +90,7 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
     c->dirty = true;
     c->modified = true;
     // Border block changes affect the neighbor's mesh too.
-    if (lx == 0)              { if (Chunk* n = getChunk(cx - 1, cz)) n->dirty = true; }
-    if (lx == CHUNK_SIZE - 1) { if (Chunk* n = getChunk(cx + 1, cz)) n->dirty = true; }
-    if (lz == 0)              { if (Chunk* n = getChunk(cx, cz - 1)) n->dirty = true; }
-    if (lz == CHUNK_SIZE - 1) { if (Chunk* n = getChunk(cx, cz + 1)) n->dirty = true; }
+    markBorderDirty(cx, cz, lx, lz);
 
     // Incremental relight (chunks touched by the BFS mark themselves dirty).
     glm::ivec3 p(wx, wy, wz);
@@ -116,10 +147,26 @@ void World::setLight(LightChan ch, int wx, int wy, int wz, uint8_t v) {
     else                      c->setBlockLight(lx, wy, lz, v);
     c->dirty = true;
     // Border cells light the neighbor chunk's faces, so its mesh is stale too.
-    if (lx == 0)              { if (Chunk* n = getChunk(cx - 1, cz)) n->dirty = true; }
-    if (lx == CHUNK_SIZE - 1) { if (Chunk* n = getChunk(cx + 1, cz)) n->dirty = true; }
-    if (lz == 0)              { if (Chunk* n = getChunk(cx, cz - 1)) n->dirty = true; }
-    if (lz == CHUNK_SIZE - 1) { if (Chunk* n = getChunk(cx, cz + 1)) n->dirty = true; }
+    markBorderDirty(cx, cz, lx, lz);
+}
+
+// A changed border cell invalidates the meshes that can see it: the face
+// neighbor(s), and — because AO/smooth lighting sample diagonally — the
+// diagonal neighbor when the cell sits on a chunk corner.
+void World::markBorderDirty(int cx, int cz, int lx, int lz) {
+    bool xn = lx == 0, xp = lx == CHUNK_SIZE - 1;
+    bool zn = lz == 0, zp = lz == CHUNK_SIZE - 1;
+    auto mark = [&](int dx, int dz) {
+        if (Chunk* n = getChunk(cx + dx, cz + dz)) n->dirty = true;
+    };
+    if (xn) mark(-1, 0);
+    if (xp) mark(1, 0);
+    if (zn) mark(0, -1);
+    if (zp) mark(0, 1);
+    if (xn && zn) mark(-1, -1);
+    if (xn && zp) mark(-1, 1);
+    if (xp && zn) mark(1, -1);
+    if (xp && zp) mark(1, 1);
 }
 
 namespace {
@@ -206,7 +253,10 @@ void World::seedChunkBorderLight(int cx, int cz) {
 }
 
 void World::markNeighborsDirty(int cx, int cz) {
-    static const int d[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    // Diagonals included: a new chunk's corner columns feed the AO/smooth
+    // lighting of all eight surrounding meshes.
+    static const int d[8][2] = {{1,0},{-1,0},{0,1},{0,-1},
+                                {1,1},{1,-1},{-1,1},{-1,-1}};
     for (auto& o : d)
         if (Chunk* n = getChunk(cx + o[0], cz + o[1])) n->dirty = true;
 }
@@ -233,15 +283,24 @@ bool World::loadChunkFromDisk(Chunk& c) const {
         return false;
     }
     f.read(reinterpret_cast<char*>(c.rawData()), Chunk::rawSize());
-    return f.gcount() == (std::streamsize)Chunk::rawSize();
+    if (f.gcount() != (std::streamsize)Chunk::rawSize()) return false;
+    // Saved bytes index straight into BLOCK_DEFS: clamp unknown ids (file
+    // from a newer build, or corruption) to Air instead of reading off the
+    // end of the registry.
+    uint8_t* raw = c.rawData();
+    for (size_t i = 0; i < Chunk::rawSize(); ++i)
+        if (raw[i] >= BLOCK_TYPES) raw[i] = uint8_t(Block::Air);
+    return true;
 }
 
 void World::saveChunk(const Chunk& c) {
-    std::ofstream f(chunkPath(c.cx(), c.cz()), std::ios::binary);
-    if (!f) { std::fprintf(stderr, "warning: failed to save chunk %d,%d\n", c.cx(), c.cz()); return; }
-    f.write(CHUNK_MAGIC, 4);
-    f.write(reinterpret_cast<const char*>(&CHUNK_VERSION), 4);
-    f.write(reinterpret_cast<const char*>(c.rawData()), Chunk::rawSize());
+    bool ok = atomicSave(chunkPath(c.cx(), c.cz()), [&](std::ofstream& f) {
+        f.write(CHUNK_MAGIC, 4);
+        f.write(reinterpret_cast<const char*>(&CHUNK_VERSION), 4);
+        f.write(reinterpret_cast<const char*>(c.rawData()), Chunk::rawSize());
+    });
+    if (!ok)
+        std::fprintf(stderr, "warning: failed to save chunk %d,%d\n", c.cx(), c.cz());
 }
 
 void World::update(const glm::vec3& playerPos, int renderDistance) {
@@ -326,6 +385,24 @@ ChunkSnapshot World::snapshot(const Chunk& c) const {
     edge(c.cx() + 1, c.cz(), true, 0,              s.edgeXp, s.lightXp);
     edge(c.cx(), c.cz() - 1, false, CHUNK_SIZE - 1, s.edgeZn, s.lightZn);
     edge(c.cx(), c.cz() + 1, false, 0,              s.edgeZp, s.lightZp);
+
+    // Diagonal corner columns for AO/smooth lighting at chunk corners.
+    auto corner = [&](int ncx, int ncz, int fx, int fz,
+                      std::vector<Block>& cb, std::vector<uint8_t>& cl) {
+        Chunk* n = getChunk(ncx, ncz);
+        if (!n) return; // empty = treat as air / sky-lit
+        cb.resize(CHUNK_HEIGHT);
+        cl.resize(CHUNK_HEIGHT);
+        for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+            cb[y] = n->get(fx, y, fz);
+            cl[y] = n->packedLight(fx, y, fz);
+        }
+    };
+    constexpr int E = CHUNK_SIZE - 1;
+    corner(c.cx() - 1, c.cz() - 1, E, E, s.cornerXnZn, s.cornerLightXnZn);
+    corner(c.cx() + 1, c.cz() - 1, 0, E, s.cornerXpZn, s.cornerLightXpZn);
+    corner(c.cx() - 1, c.cz() + 1, E, 0, s.cornerXnZp, s.cornerLightXnZp);
+    corner(c.cx() + 1, c.cz() + 1, 0, 0, s.cornerXpZp, s.cornerLightXpZp);
     return s;
 }
 

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 
 static int failures = 0;
 #define CHECK(cond) do { \
@@ -179,6 +180,57 @@ static void testSaveLoadRoundTrip() {
     std::filesystem::remove_all(dir);
 }
 
+static void testLevelSeed() {
+    const char* dir = "test_saves_level";
+    std::filesystem::remove_all(dir);
+    {
+        World w(1234, dir);
+        CHECK(w.seed() == 1234); // fresh world adopts the requested seed
+    }
+    CHECK(std::filesystem::exists(std::string(dir) + "/level.bin"));
+    {
+        // A different default seed must NOT corrupt an existing save: the
+        // world keeps the seed recorded in level.bin.
+        World w(9999, dir);
+        CHECK(w.seed() == 1234);
+    }
+    {
+        // A corrupt level.bin is rejected and rewritten with the fallback.
+        std::ofstream f(std::string(dir) + "/level.bin", std::ios::binary);
+        f << "JUNK";
+    }
+    {
+        World w(4321, dir);
+        CHECK(w.seed() == 4321);
+    }
+    {
+        World w(1111, dir);
+        CHECK(w.seed() == 4321); // the rewrite stuck
+    }
+    std::filesystem::remove_all(dir);
+}
+
+static void testUnloadSaves() {
+    const char* dir = "test_saves_unload";
+    std::filesystem::remove_all(dir);
+    {
+        World w(99, dir);
+        w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+        w.setBlock(5, 40, 5, Block::Stone);
+        // Stream far away: chunk (0,0) leaves the keep radius and must be
+        // saved on unload, not only at exit.
+        w.update(glm::vec3(1000, 40, 1000), 2);
+        CHECK(w.getBlock(5, 40, 5) == Block::Air); // chunk really unloaded
+        CHECK(std::filesystem::exists(std::string(dir) + "/c_0_0.bin"));
+        // No half-written temp files left behind by the atomic writer.
+        CHECK(!std::filesystem::exists(std::string(dir) + "/c_0_0.bin.tmp"));
+        // Coming back reloads the edit from disk.
+        w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+        CHECK(w.getBlock(5, 40, 5) == Block::Stone);
+    }
+    std::filesystem::remove_all(dir);
+}
+
 static void testRaycast() {
     const char* dir = "test_saves_tmp2";
     std::filesystem::remove_all(dir);
@@ -223,6 +275,96 @@ static void testMeshData() {
     s.edgeXn.assign(size_t(CHUNK_HEIGHT) * CHUNK_SIZE, Block::Stone);
     md = buildMeshData(s);
     CHECK(md.inds.size() == 5u * 6);
+}
+
+// Vertex brightness (the 6th float) of vertex v of the n-th emitted face.
+static float faceVertLight(const MeshData& md, int face, int v) {
+    return md.verts[size_t(face) * 4 * 6 + size_t(v) * 6 + 5];
+}
+
+static void testAmbientOcclusion() {
+    // Isolated stone block: emits faces f=0..5 in order; the top (+Y) face is
+    // the third. With nothing around, all four corners are fully open.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    s.blocks[at(8, 40, 8)] = Block::Stone;
+    MeshData md = buildMeshData(s);
+    for (int v = 1; v < 4; ++v)
+        CHECK(faceVertLight(md, 2, v) == faceVertLight(md, 2, 0));
+
+    // A diagonal occluder above (+X,+Z corner) darkens exactly the top-face
+    // vertex whose corner cell it fills (v1 = (x+1, y+1, z+1)).
+    s.blocks[at(9, 41, 9)] = Block::Stone;
+    md = buildMeshData(s);
+    float open = faceVertLight(md, 2, 0);
+    float shaded = faceVertLight(md, 2, 1);
+    CHECK(shaded < open);
+    CHECK(faceVertLight(md, 2, 2) == open); // other corners untouched
+    CHECK(faceVertLight(md, 2, 3) == open);
+}
+
+static void testAOCornerColumn() {
+    // Cross-chunk AO: a block at the chunk's (-X,-Z) corner shaded by a
+    // diagonal neighbor supplied via the snapshot's corner column.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    s.blocks[(40 * CHUNK_SIZE + 0) * CHUNK_SIZE + 0] = Block::Stone;
+    MeshData md = buildMeshData(s);
+    float open = faceVertLight(md, 2, 3); // top-face vertex at (0, 41, 0)
+    s.cornerXnZn.assign(CHUNK_HEIGHT, Block::Air);
+    s.cornerXnZn[41] = Block::Stone; // diagonal cell (-1, 41, -1)
+    md = buildMeshData(s);
+    CHECK(faceVertLight(md, 2, 3) < open);
+    CHECK(faceVertLight(md, 2, 1) == open); // opposite corner unaffected
+}
+
+static void testSmoothLighting() {
+    // Explicit light data: only the cell straight above the block is sunlit;
+    // the corners average it with their dark side/diagonal cells, so every
+    // top-face vertex lands strictly between dark and full brightness.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    s.light.assign(Chunk::rawSize(), 0);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    s.blocks[at(8, 40, 8)] = Block::Stone;
+    s.light[at(8, 41, 8)] = 15; // sun nibble
+    MeshData md = buildMeshData(s);
+    float v0 = faceVertLight(md, 2, 0);
+    CHECK(v0 > 0.1f && v0 < 1.0f);
+
+    // Lighting the +X neighbor cell too brightens the two +X-side corners
+    // (v1, v2) relative to the -X ones (v0, v3): the gradient interpolates.
+    s.light[at(9, 41, 8)] = 15;
+    md = buildMeshData(s);
+    CHECK(faceVertLight(md, 2, 1) > faceVertLight(md, 2, 0));
+    CHECK(faceVertLight(md, 2, 2) > faceVertLight(md, 2, 3));
+}
+
+static void testBlockRegistry() {
+    // Every row is filled in and internally consistent.
+    for (int i = 0; i < BLOCK_TYPES; ++i) {
+        Block b = Block(i);
+        const BlockDef& d = blockDef(b);
+        CHECK(d.name != nullptr && d.name[0] != '\0');
+        for (int f = 0; f < 6; ++f) CHECK(d.tiles[f] < ATLAS_TILES);
+        CHECK(d.emission <= 15);
+        CHECK(uint8_t(d.drop) < BLOCK_TYPES);
+        CHECK(!d.collidable || d.solid);   // collidable implies solid
+        CHECK(!d.opaque || d.solid);       // opaque implies solid
+        CHECK(!(d.opaque && d.dimsSunlight)); // dimsSunlight is for transparents
+    }
+    // Spot-check the semantics the old switch-based predicates encoded.
+    CHECK(!isSolid(Block::Air));
+    CHECK(isSolid(Block::Torch) && !isCollidable(Block::Torch) && !isOpaque(Block::Torch));
+    CHECK(lightEmission(Block::Torch) == 14);
+    CHECK(!isBreakable(Block::Bedrock) && isSolid(Block::Bedrock));
+    CHECK(isBreakable(Block::Stone));
+    CHECK(tileFor(Block::Grass, 2) == 0);  // top
+    CHECK(tileFor(Block::Grass, 3) == 2);  // bottom = dirt
+    CHECK(tileFor(Block::Grass, 0) == 1);  // side
+    CHECK(tileFor(Block::Wood, 2) == 5 && tileFor(Block::Wood, 4) == 4);
+    CHECK(std::string(blockName(Block::CoalOre)) == "Coal Ore");
 }
 
 static void testWaterPredicates() {
@@ -379,6 +521,10 @@ static void testCrossBorderTorch() {
 int main() {
     testFloorDivMod();
     testMeshData();
+    testAmbientOcclusion();
+    testAOCornerColumn();
+    testSmoothLighting();
+    testBlockRegistry();
     testWaterPredicates();
     testWaterGeneration();
     testWaterMesh();
@@ -392,6 +538,8 @@ int main() {
     testCaves();
     testOres();
     testSaveLoadRoundTrip();
+    testLevelSeed();
+    testUnloadSaves();
     testRaycast();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;

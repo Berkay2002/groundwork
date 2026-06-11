@@ -37,3 +37,10 @@ target_compile_definitions(world_tests PRIVATE GL_GLEXT_PROTOTYPES)
 target_link_libraries(world_tests PRIVATE GL Threads::Threads)
 target_compile_options(world_tests PRIVATE -Wall -O2)
 add_test(NAME world_tests COMMAND world_tests)
+
+# Golden-screenshot regression test: needs a display; skips cleanly without one.
+add_test(NAME golden_screenshot
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden_screenshot.py
+          $<TARGET_FILE:minecraft>
+          ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/reference.png)
+set_tests_properties(golden_screenshot PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)

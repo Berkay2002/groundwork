@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11, after Batch E)
+# Status (last updated: 2026-06-11, after the A–D addenda)
 
 ## Where the project stands
 
-All planned batches through E are **done and verified**:
+All planned batches through E **plus all A–D addenda** are done and verified:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -12,6 +12,45 @@ All planned batches through E are **done and verified**:
 | Batch C | Frustum culling, background generation + meshing on a worker pool, perf counters in overlay | done |
 | Batch D | 4-bit sun + block light per cell, BFS add/unlight relight on edits, cross-border propagation, light baked into mesh verts (0.85^n curve), Torch block as a 3D post (walk-through, non-opaque, emits 14), light readout in overlay | done |
 | Batch E | Spaghetti caves (two 3D noise fields, surface-pinched), Coal/Iron ore veins (depth-banded, per-8³-cell hashing), water (lake basins to SEA_LEVEL 20, translucent second mesh pass, sunlight attenuation, swim physics, hotbar slot 8) | done |
+| A–D addenda | level.bin seed file, atomic saves, autosave; block registry table; `--bench` + golden-screenshot test; per-vertex AO + smooth lighting (fog pre-existed) | done |
+
+### A–D addenda implementation notes (2026-06-11)
+
+- **Save safety (A)**: `World::loadOrCreateSeed` reads/writes
+  `saves/world1/level.bin` (`MCLV` + u32 version + u32 seed); a caller seed
+  only matters for brand-new worlds. All save files (chunk/player/level) go
+  through `atomicSave` in `src/SaveIO.h` (write `.tmp`, `rename()`). A 30 s
+  autosave timer in main.cpp saves modified chunks + player; unload-time
+  saving already existed and is now pinned by `testUnloadSaves`.
+- **Block registry (B)**: `BLOCK_DEFS` constexpr table in `Block.h`; the
+  old predicate helpers (`isSolid`/`isOpaque`/…, `tileFor`, `blockName`)
+  remain as thin table lookups, so call sites didn't change. `hardness`
+  (255 = unbreakable) and `drop` are recorded for Batch G but unused.
+  `loadChunkFromDisk` clamps out-of-range saved bytes to Air because the
+  bytes index straight into the table.
+- **AO + smooth lighting (D)**: in `buildMeshData`, each cube-face vertex
+  gets brightness = directional face shade × average light of the open
+  cells around its corner × 3-neighbor AO (`AO_CURVE` {0.55,0.72,0.86,1}).
+  Quads split along the darker diagonal (anisotropy fix) — so triangle
+  index order is no longer fixed, but vertex order is, which is what the
+  mesh tests rely on. `ChunkSnapshot` gained four diagonal **corner
+  columns** (blocks + light, `[y]`-indexed, empty = air/sunlit) because
+  corner vertices sample diagonally out of the chunk; `World::snapshot`
+  fills them, `markNeighborsDirty` is now 8-directional, and
+  `markBorderDirty` (shared by `setBlock`/`setLight`) dirties the diagonal
+  neighbor for corner cells. Torch keeps its fullbright special case;
+  **water stays flat-lit per face** (a lake reads as one even sheet).
+  Greedy meshing (Batch F) must merge only faces with identical corner
+  AO/light — that data is per-vertex now.
+- **Bench + golden (C)**: `--bench N` runs N frames with vsync forced off
+  and prints fps + chunk/worker counters. `tests/golden_screenshot.py`
+  (registered in ctest, `SKIP_RETURN_CODE 77` without a display) runs
+  `--frames 400` from a fixed crafted viewpoint in a temp dir and compares
+  to `tests/golden/reference.png` (≤1.5% pixels differing, ≤2.0 mean
+  delta; observed noise ~0.03% from the overlay fps text). **Regenerate
+  the reference (`--update`) after every intentional visual change** —
+  Batch F's greedy mesher should produce an identical image, which makes
+  this test the main safety net there.
 
 ### Batch D implementation notes
 
@@ -65,9 +104,12 @@ All planned batches through E are **done and verified**:
 ## What's next
 
 **Batch F — Mesh & Render Optimization** (greedy meshing, vertex packing,
-draw ordering) is next per the agreed order D → E → F → G → H; reasoning at
-the bottom of `TODO.md`. Note water changed the meshing rules (second
-translucent mesh) — greedy meshing must handle both meshes.
+draw ordering) is next per the agreed order; reasoning at the bottom of
+`TODO.md`. Two constraints set up for it: greedy merging must compare
+per-vertex corner AO/light values (only faces with identical corners merge),
+and water is a second translucent mesh that must be handled too. Use
+`--bench` for before/after numbers and the golden-screenshot test to prove
+the image didn't change.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -80,7 +122,18 @@ translucent mesh) — greedy meshing must handle both meshes.
 - World seed fixed at 1337 in `main.cpp`.
 - Internet access works (font8x8 was fetched via curl).
 
-## Recent verification snapshot
+## Recent verification snapshot (A–D addenda)
+
+Warning-free build; `world_tests` (now incl. level-seed, unload-save,
+registry, AO, corner-column AO, smooth-lighting tests) passes repeatedly and
+under TSAN (ASLR workaround). `--bench 300`: ~360 fps vsync-off at render
+distance 6, gen 0.51 ms, mesh 0.26 ms (AO/smooth lighting cost ~0.05 ms of
+meshing). Golden screenshot stable at 0.027% pixel noise across runs.
+Verified visually: AO contact shadows at terrain ledges and under tree
+canopies, smooth gradients on the ground, fog fading distant chunks into
+the sky with no pop-in edge.
+
+## Older verification snapshot (Batch E)
 
 At Batch E completion: 120 fps at render distance 6, gen ~0.5 ms/chunk
 (caves + ores + water roughly doubled it again, still trivial), mesh

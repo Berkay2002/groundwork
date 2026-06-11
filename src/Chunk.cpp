@@ -44,6 +44,9 @@ const float LIGHT_CURVE[16] = {
     0.090f, 0.103f, 0.121f, 0.142f, 0.167f, 0.197f, 0.232f, 0.272f,
     0.321f, 0.377f, 0.444f, 0.522f, 0.614f, 0.722f, 0.850f, 1.000f,
 };
+// Ambient occlusion level (0 = fully occluded corner .. 3 = open) ->
+// brightness multiplier.
+const float AO_CURVE[4] = {0.55f, 0.72f, 0.86f, 1.0f};
 }
 
 void Chunk::computeInitialLight() {
@@ -104,26 +107,40 @@ void Chunk::computeInitialLight() {
 
 MeshData buildMeshData(const ChunkSnapshot& s) {
     constexpr int CS = CHUNK_SIZE;
+    // AO/smooth-light corner samples reach one cell diagonally out of the
+    // chunk, so both x and z can be out of range at once (corner columns).
     auto blockAt = [&](int x, int y, int z) -> Block {
         if (y < 0 || y >= CHUNK_HEIGHT) return Block::Air;
-        // Only one coordinate can be out of range (face neighbors are axis-aligned).
-        if (x < 0)   return s.edgeXn.empty() ? Block::Air : s.edgeXn[y * CS + z];
-        if (x >= CS) return s.edgeXp.empty() ? Block::Air : s.edgeXp[y * CS + z];
-        if (z < 0)   return s.edgeZn.empty() ? Block::Air : s.edgeZn[y * CS + x];
-        if (z >= CS) return s.edgeZp.empty() ? Block::Air : s.edgeZp[y * CS + x];
+        bool xn = x < 0, xp = x >= CS, zn = z < 0, zp = z >= CS;
+        if ((xn || xp) && (zn || zp)) {
+            const std::vector<Block>& c = xn ? (zn ? s.cornerXnZn : s.cornerXnZp)
+                                             : (zn ? s.cornerXpZn : s.cornerXpZp);
+            return c.empty() ? Block::Air : c[y];
+        }
+        if (xn) return s.edgeXn.empty() ? Block::Air : s.edgeXn[y * CS + z];
+        if (xp) return s.edgeXp.empty() ? Block::Air : s.edgeXp[y * CS + z];
+        if (zn) return s.edgeZn.empty() ? Block::Air : s.edgeZn[y * CS + x];
+        if (zp) return s.edgeZp.empty() ? Block::Air : s.edgeZp[y * CS + x];
         return s.blocks[(y * CS + z) * CS + x];
     };
-    // Combined light level (max of sun and block light) of the cell a face
-    // looks into. Missing data (above the world, absent neighbor, bare test
-    // snapshot) counts as fully sunlit.
+    // Combined light level (max of sun and block light) of a cell. Missing
+    // data (above the world, absent neighbor, bare test snapshot) counts as
+    // fully sunlit.
     auto lightAt = [&](int x, int y, int z) -> int {
         auto lvl = [](uint8_t p) { int sl = p & 0x0F, bl = p >> 4; return sl > bl ? sl : bl; };
         if (y >= CHUNK_HEIGHT) return 15;
         if (y < 0) return 0;
-        if (x < 0)   return s.lightXn.empty() ? 15 : lvl(s.lightXn[y * CS + z]);
-        if (x >= CS) return s.lightXp.empty() ? 15 : lvl(s.lightXp[y * CS + z]);
-        if (z < 0)   return s.lightZn.empty() ? 15 : lvl(s.lightZn[y * CS + x]);
-        if (z >= CS) return s.lightZp.empty() ? 15 : lvl(s.lightZp[y * CS + x]);
+        bool xn = x < 0, xp = x >= CS, zn = z < 0, zp = z >= CS;
+        if ((xn || xp) && (zn || zp)) {
+            const std::vector<uint8_t>& c =
+                xn ? (zn ? s.cornerLightXnZn : s.cornerLightXnZp)
+                   : (zn ? s.cornerLightXpZn : s.cornerLightXpZp);
+            return c.empty() ? 15 : lvl(c[y]);
+        }
+        if (xn) return s.lightXn.empty() ? 15 : lvl(s.lightXn[y * CS + z]);
+        if (xp) return s.lightXp.empty() ? 15 : lvl(s.lightXp[y * CS + z]);
+        if (zn) return s.lightZn.empty() ? 15 : lvl(s.lightZn[y * CS + x]);
+        if (zp) return s.lightZp.empty() ? 15 : lvl(s.lightZp[y * CS + x]);
         return s.light.empty() ? 15 : lvl(s.light[(y * CS + z) * CS + x]);
     };
 
@@ -192,20 +209,64 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
 
                     int tile = tileFor(b, f);
                     float u0 = tile * tileW;
-                    // The face is lit by the cell it looks into.
-                    float light = FACES[f].light * LIGHT_CURVE[lightAt(nx, ny, nz)];
-                    uint32_t base = uint32_t(verts.size() / 6);
                     const FaceDef& fd = FACES[f];
+
+                    // Per-vertex brightness: directional face shade x smooth
+                    // light x ambient occlusion. Each corner samples the four
+                    // cells around it in the plane the face looks into; water
+                    // keeps flat per-face light (a lake stays one even sheet).
+                    float br[4];
+                    if (water) {
+                        br[0] = br[1] = br[2] = br[3] =
+                            FACES[f].light * LIGHT_CURVE[lightAt(nx, ny, nz)];
+                    } else {
+                        int axis = f >> 1; // 0 X, 1 Y, 2 Z
+                        int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+                        for (int v = 0; v < 4; ++v) {
+                            int s1 = fd.corners[v][a1] > 0.5f ? 1 : -1;
+                            int s2 = fd.corners[v][a2] > 0.5f ? 1 : -1;
+                            int c1[3] = {nx, ny, nz}; c1[a1] += s1;
+                            int c2[3] = {nx, ny, nz}; c2[a2] += s2;
+                            int cc[3] = {nx, ny, nz}; cc[a1] += s1; cc[a2] += s2;
+                            bool o1 = isOpaque(blockAt(c1[0], c1[1], c1[2]));
+                            bool o2 = isOpaque(blockAt(c2[0], c2[1], c2[2]));
+                            bool oc = isOpaque(blockAt(cc[0], cc[1], cc[2]));
+                            // Classic 3-neighbor AO: both sides solid fully
+                            // occludes the corner regardless of the diagonal.
+                            int ao = (o1 && o2) ? 0 : 3 - (int(o1) + int(o2) + int(oc));
+                            // Smooth light: average the open cells around the
+                            // corner. The diagonal is skipped when both sides
+                            // block it, so light can't leak around an edge.
+                            float sum = LIGHT_CURVE[lightAt(nx, ny, nz)];
+                            int cnt = 1;
+                            if (!o1) { sum += LIGHT_CURVE[lightAt(c1[0], c1[1], c1[2])]; ++cnt; }
+                            if (!o2) { sum += LIGHT_CURVE[lightAt(c2[0], c2[1], c2[2])]; ++cnt; }
+                            if (!oc && !(o1 && o2)) {
+                                sum += LIGHT_CURVE[lightAt(cc[0], cc[1], cc[2])]; ++cnt;
+                            }
+                            br[v] = FACES[f].light * (sum / cnt) * AO_CURVE[ao];
+                        }
+                    }
+
+                    uint32_t base = uint32_t(verts.size() / 6);
                     for (int v = 0; v < 4; ++v) {
                         verts.push_back(float(bx + x) + fd.corners[v][0]);
                         verts.push_back(float(y)      + fd.corners[v][1]);
                         verts.push_back(float(bz + z) + fd.corners[v][2]);
                         verts.push_back(u0 + FACE_UV[v][0] * tileW);
                         verts.push_back(FACE_UV[v][1]);
-                        verts.push_back(light);
+                        verts.push_back(br[v]);
                     }
-                    inds.push_back(base + 0); inds.push_back(base + 1); inds.push_back(base + 2);
-                    inds.push_back(base + 0); inds.push_back(base + 2); inds.push_back(base + 3);
+                    // Split the quad along the diagonal with the smaller
+                    // brightness sum, so AO corners shade as corners instead
+                    // of bleeding across the whole face (anisotropy fix).
+                    if (br[0] + br[2] > br[1] + br[3]) {
+                        inds.push_back(base + 0); inds.push_back(base + 1); inds.push_back(base + 3);
+                        inds.push_back(base + 1); inds.push_back(base + 2); inds.push_back(base + 3);
+                    } else {
+                        inds.push_back(base + 0); inds.push_back(base + 1); inds.push_back(base + 2);
+                        inds.push_back(base + 0); inds.push_back(base + 2); inds.push_back(base + 3);
+                    }
                 }
             }
         }

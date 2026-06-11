@@ -17,6 +17,7 @@
 #include "Frustum.h"
 #include "Hud.h"
 #include "Player.h"
+#include "SaveIO.h"
 #include "Settings.h"
 #include "Shader.h"
 #include "Texture.h"
@@ -25,6 +26,7 @@
 namespace {
 
 constexpr float REACH = 5.0f;           // block interaction distance
+constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
 constexpr uint32_t WORLD_SEED = 1337;
 const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
@@ -163,23 +165,6 @@ void pollMovement() {
     app.input.sprint  = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
 }
 
-const char* blockName(Block b) {
-    switch (b) {
-        case Block::Grass:   return "Grass";
-        case Block::Dirt:    return "Dirt";
-        case Block::Stone:   return "Stone";
-        case Block::Wood:    return "Wood";
-        case Block::Leaves:  return "Leaves";
-        case Block::Sand:    return "Sand";
-        case Block::Bedrock: return "Bedrock";
-        case Block::Torch:   return "Torch";
-        case Block::CoalOre: return "Coal Ore";
-        case Block::IronOre: return "Iron Ore";
-        case Block::Water:   return "Water";
-        default:             return "Air";
-    }
-}
-
 // ---- Player persistence (versioned) ----
 constexpr char PLAYER_MAGIC[4] = {'M', 'C', 'P', 'L'};
 constexpr uint32_t PLAYER_VERSION = 1;
@@ -187,18 +172,19 @@ constexpr uint32_t PLAYER_VERSION = 1;
 std::string playerPath() { return std::string(SAVE_DIR) + "/player.bin"; }
 
 void savePlayer() {
-    std::ofstream f(playerPath(), std::ios::binary);
-    if (!f) { std::fprintf(stderr, "warning: failed to save player data\n"); return; }
-    f.write(PLAYER_MAGIC, 4);
-    f.write(reinterpret_cast<const char*>(&PLAYER_VERSION), 4);
-    const Player& p = app.player;
-    f.write(reinterpret_cast<const char*>(&p.pos), sizeof(p.pos));
-    f.write(reinterpret_cast<const char*>(&p.yaw), sizeof(p.yaw));
-    f.write(reinterpret_cast<const char*>(&p.pitch), sizeof(p.pitch));
-    uint8_t flying = p.flying ? 1 : 0;
-    uint8_t slot = (uint8_t)app.hotbarSlot;
-    f.write(reinterpret_cast<const char*>(&flying), 1);
-    f.write(reinterpret_cast<const char*>(&slot), 1);
+    bool ok = atomicSave(playerPath(), [](std::ofstream& f) {
+        f.write(PLAYER_MAGIC, 4);
+        f.write(reinterpret_cast<const char*>(&PLAYER_VERSION), 4);
+        const Player& p = app.player;
+        f.write(reinterpret_cast<const char*>(&p.pos), sizeof(p.pos));
+        f.write(reinterpret_cast<const char*>(&p.yaw), sizeof(p.yaw));
+        f.write(reinterpret_cast<const char*>(&p.pitch), sizeof(p.pitch));
+        uint8_t flying = p.flying ? 1 : 0;
+        uint8_t slot = (uint8_t)app.hotbarSlot;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+    });
+    if (!ok) std::fprintf(stderr, "warning: failed to save player data\n");
 }
 
 bool loadPlayer() {
@@ -317,9 +303,14 @@ void drawCrosshair(Hud& hud, int screenW, int screenH) {
 
 int main(int argc, char** argv) {
     // --frames N : run N frames then exit (with a screenshot) for automated testing.
+    // --bench N  : run N frames vsync-off, print perf counters, exit (no screenshot)
+    //              — the before/after number for rendering optimization work.
     long maxFrames = -1;
-    for (int i = 1; i < argc - 1; ++i)
+    bool bench = false;
+    for (int i = 1; i < argc - 1; ++i) {
         if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
+        if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
+    }
 
     Settings settings = Settings::load("settings.cfg");
     app.player.sensitivity = settings.mouseSensitivity;
@@ -341,7 +332,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     glfwMakeContextCurrent(app.window);
-    glfwSwapInterval(settings.vsync ? 1 : 0);
+    // A benchmark must not be capped by the display's refresh rate.
+    glfwSwapInterval(settings.vsync && !bench ? 1 : 0);
 
     glfwSetKeyCallback(app.window, keyCallback);
     glfwSetMouseButtonCallback(app.window, mouseButtonCallback);
@@ -371,11 +363,15 @@ int main(int argc, char** argv) {
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
 
     double lastTime = glfwGetTime();
+    double autosaveTimer = 0.0;
     double fpsTimer = 0.0;
     int fpsFrames = 0;
     double fps = 0.0;
     float frameMs = 0.0f;
     long frameCount = 0;
+    // Bench accumulators.
+    double benchStart = glfwGetTime();
+    long benchDrawn = 0, benchUploads = 0;
 
     while (!glfwWindowShouldClose(app.window)) {
         double now = glfwGetTime();
@@ -390,6 +386,15 @@ int main(int argc, char** argv) {
         app.player.update(world, app.input, dt);
         world.update(app.player.pos, settings.renderDistance);
         world.processMeshing(8);
+
+        // Periodic autosave so a crash loses at most ~30 s of edits (chunks
+        // streaming out and clean exit already save on their own).
+        autosaveTimer += dt;
+        if (autosaveTimer >= AUTOSAVE_SECONDS) {
+            autosaveTimer = 0.0;
+            world.saveAllModified();
+            savePlayer();
+        }
 
         glm::vec3 eye = app.player.eyePos();
         glm::vec3 dir = app.player.lookDir();
@@ -472,9 +477,27 @@ int main(int argc, char** argv) {
 
         glfwSwapBuffers(app.window);
 
+        if (bench) {
+            WorldStats st = world.stats();
+            benchDrawn += st.drawn;
+            benchUploads += st.uploads;
+        }
         ++frameCount;
         if (maxFrames >= 0 && frameCount >= maxFrames) {
-            saveScreenshotPPM("screenshot.ppm", width, height);
+            if (bench) {
+                double secs = glfwGetTime() - benchStart;
+                WorldStats st = world.stats();
+                std::printf(
+                    "bench: %ld frames in %.2f s = %.1f fps (%.2f ms/frame)\n"
+                    "chunks: %d loaded, %.1f drawn/frame avg, %ld mesh uploads total\n"
+                    "workers: gen %.2f ms/chunk, mesh %.2f ms/chunk (moving avg), "
+                    "queues gen %d mesh %d\n",
+                    frameCount, secs, frameCount / secs, secs * 1000.0 / frameCount,
+                    st.loaded, double(benchDrawn) / frameCount, benchUploads,
+                    st.genMs, st.meshMs, st.genQueued, st.meshQueued);
+            } else {
+                saveScreenshotPPM("screenshot.ppm", width, height);
+            }
             break;
         }
     }

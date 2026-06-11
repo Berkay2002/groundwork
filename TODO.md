@@ -1,60 +1,66 @@
-# Roadmap Checklist (v2 — proposed)
+# Roadmap Checklist (v2)
 
-Proposed update of `TODO.md`. Same F → G → H spine; the new groundwork items
-are filed as unchecked addenda under the done batch they conceptually extend
-(persistence under A, blocks under B, perf/verification under C, lighting
-visuals under D) rather than as new batches. Batch E reflects what was
-actually built.
+Same F → G → H spine; the groundwork items were filed as addenda under the
+done batch they conceptually extend (persistence under A, blocks under B,
+perf/verification under C, lighting visuals under D) rather than as new
+batches. **All A–D addenda are now done** (2026-06-11). Batch E reflects
+what was actually built.
 
-## Batch A — Usable Game Foundation — DONE (+ addenda)
+## Batch A — Usable Game Foundation — DONE (incl. addenda)
 
 - [x] On-screen debug overlay, hotbar UI, player persistence, `settings.cfg`,
       versioned save headers
-- [ ] (new) World metadata file (`saves/world1/level.bin`: magic + version +
-      seed). The seed is hardcoded in `main.cpp`, so a saves directory is only
-      valid for a binary with that constant — unmodified chunks regenerate
-      from the seed, making the save corrupt-by-design if it changes. Read
-      seed from the file, write it on world creation.
-- [ ] (new) Atomic save writes: write chunk/player/level files to a temp name
-      and `rename()` over the old file, so a crash mid-write can't corrupt
-      real player data.
-- [ ] (new) Autosave + save-on-unload audit: verify edited chunks are saved
-      when they stream out and on a periodic timer, not only at clean exit.
+- [x] World metadata file (`saves/world1/level.bin`: `MCLV` + version +
+      seed). Written on world creation, read back on load, so the save stays
+      valid even if the default seed constant in `main.cpp` changes; bad/old
+      files are rewritten with the fallback seed.
+- [x] Atomic save writes: chunk/player/level files stream to `<name>.tmp`
+      and `rename()` over the old file (`src/SaveIO.h`), so a crash
+      mid-write can't corrupt real player data.
+- [x] Autosave + save-on-unload audit: chunks streaming out were already
+      saved (now covered by a test); a 30 s timer in the main loop also
+      saves modified chunks + player, so a crash loses at most ~30 s.
 
-## Batch B — Better Terrain — DONE (+ addendum)
+## Batch B — Better Terrain — DONE (incl. addendum)
 
 - [x] Trees, Wood/Leaves/Sand/Bedrock blocks, two-scale terrain, bedrock floor
-- [ ] (new) Block registry table: id → name, opacity, collidability, emission,
-      `dimsSunlight`, per-face tile, hardness, drop — replacing the growing
-      predicate/`tileFor` switches in `Block.h`. Prerequisite for Batch G
-      (drops, hardness) and later modding. Compile-time table (constexpr
-      array) for now; file-loaded definitions are the later modding step.
-      Enum values stay the saved bytes: **append, never renumber** still
-      applies.
+- [x] Block registry table: constexpr `BLOCK_DEFS` in `Block.h` (name,
+      solid/collidable/opaque/`dimsSunlight`, emission, hardness, drop,
+      per-face tiles) replacing the predicate/`tileFor` switches. Hardness
+      and drop are recorded for Batch G but unused until then; chunk loading
+      clamps unknown saved ids to Air. File-loaded definitions remain the
+      later modding step. Enum values stay the saved bytes: **append, never
+      renumber** still applies.
 
-## Batch C — Scalable World — DONE (+ addenda)
+## Batch C — Scalable World — DONE (incl. addenda)
 
 - [x] Frustum culling, background gen + meshing on worker threads, perf
       counters in overlay
-- [ ] (new) `--bench` flag: run N frames, print perf counters (gen/mesh
-      times, draw counts) and exit — the before/after number for Batch F.
-- [ ] (new) Golden-screenshot regression test: `--frames N` + fixed seed
-      already give deterministic output; compare against a stored reference
-      image with a tolerance, catching rendering regressions mechanically.
+- [x] `--bench N` flag: run N frames with vsync forced off, print fps,
+      drawn/loaded chunk counts, upload totals and gen/mesh worker times,
+      exit — the before/after number for Batch F.
+- [x] Golden-screenshot regression test: `tests/golden_screenshot.py` runs
+      `--frames 400` from a fixed viewpoint in a temp world and compares
+      against `tests/golden/reference.png` with a tolerance (overlay text
+      noise ~0.03%, limit 1.5%). Registered in ctest; skips without a
+      display. Regenerate after intentional visual changes with `--update`.
 
-## Batch D — Lighting — DONE (+ addenda)
+## Batch D — Lighting — DONE (incl. addenda)
 
 - [x] 4-bit sun + block light, BFS relight on edits, cross-border
       propagation, light baked into mesh verts, Torch block
-- [ ] (new) Per-vertex ambient occlusion (classic 3-neighbor corner
-      darkening, computed in `buildMeshData` from the existing
-      `ChunkSnapshot`). **Must land before greedy meshing** — it changes
-      which faces are mergeable.
-- [ ] (new) Smooth lighting: interpolate sun/block light across face
-      vertices (average the 4 cells around each corner) instead of flat
-      per-face. Same ordering constraint as AO.
-- [ ] (new) Distance fog matched to render distance (few shader lines;
-      hides chunk pop-in; fog color follows the Batch H day/night sky).
+- [x] Per-vertex ambient occlusion (classic 3-neighbor corner darkening in
+      `buildMeshData`; `ChunkSnapshot` gained diagonal corner columns; quad
+      split follows the darker diagonal). Landed before greedy meshing as
+      required — face merging must now compare corner AO/light.
+- [x] Smooth lighting: vertex brightness averages the open cells around
+      each corner (light can't leak around an edge: the diagonal cell is
+      skipped when both sides are opaque). Water keeps flat per-face light
+      so a lake stays one even sheet.
+- [x] Distance fog matched to render distance — was already in the chunk
+      shader since the MVP (0.7–0.98 of render distance, fading to the
+      `uSky` uniform, which the Batch H day/night sky will drive); verified
+      and ticked rather than rebuilt.
 
 ## Batch E — Underground & Richer Terrain — DONE
 
@@ -132,8 +138,8 @@ Far-later items, and each is a batch-sized commitment. Revisit after H.
 
 ## Suggested order
 
-Addenda first (small: A's save safety + seed file, B's registry, C's bench/
-golden screenshot, D's AO/smooth light/fog), then F → G → H. The A–C addenda
-are independent and can be batched together; the D addenda must precede F's
-greedy mesher because merging rules depend on corner AO/light; entities live
-inside G because dropped items are the gentle on-ramp to mobs; polish last.
+~~Addenda first~~ (done: A's save safety + seed file, B's registry, C's
+bench/golden screenshot, D's AO/smooth light/fog), then F → G → H. The D
+addenda preceded F's greedy mesher because merging rules depend on corner
+AO/light values; entities live inside G because dropped items are the gentle
+on-ramp to mobs; polish last.

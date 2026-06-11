@@ -16,17 +16,22 @@ struct MeshData {
     std::vector<uint32_t> waterInds;
 };
 
-// Self-contained copy of everything mesh building needs: the chunk's blocks
-// plus one-block-deep slices of the four side neighbors. Workers read only
-// this, never live chunks. Light bytes pack sunlight in the low nibble and
-// block light in the high nibble; empty light vectors mean "fully sunlit"
-// (manual test snapshots, missing neighbors).
+// Self-contained copy of everything mesh building needs: the chunk's blocks,
+// one-block-deep slices of the four side neighbors, and the four diagonal
+// corner columns (ambient occlusion / smooth lighting at a chunk-corner
+// vertex samples diagonally). Workers read only this, never live chunks.
+// Light bytes pack sunlight in the low nibble and block light in the high
+// nibble; empty light vectors mean "fully sunlit" (manual test snapshots,
+// missing neighbors).
 struct ChunkSnapshot {
     int cx = 0, cz = 0;
     std::vector<Block> blocks;                       // [(y*CS+z)*CS+x]
     std::vector<Block> edgeXn, edgeXp, edgeZn, edgeZp; // [y*CS + (z or x)]
+    std::vector<Block> cornerXnZn, cornerXpZn, cornerXnZp, cornerXpZp; // [y]
     std::vector<uint8_t> light;
     std::vector<uint8_t> lightXn, lightXp, lightZn, lightZp;
+    std::vector<uint8_t> cornerLightXnZn, cornerLightXpZn,
+                         cornerLightXnZp, cornerLightXpZp;
 };
 
 MeshData buildMeshData(const ChunkSnapshot& s);
