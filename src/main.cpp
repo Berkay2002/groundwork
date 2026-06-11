@@ -332,32 +332,27 @@ void drawPauseMenu(Hud& hud, GLFWwindow* w, int sw, int sh) {
 }
 
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
-    if (action == GLFW_PRESS) {
-        switch (key) {
-            case GLFW_KEY_E:
-                if (!app.survival || app.menu != Menu::None) break;
-                if (app.invOpen) {
-                    closeInventory(w);
-                } else {
-                    app.invOpen = true;
-                    app.mouseCaptured = false;
-                    glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                }
-                break;
-            case GLFW_KEY_ESCAPE:
-                if (app.invOpen) { closeInventory(w); break; }
-                if (app.menu == Menu::Settings) { app.menu = Menu::Main; break; }
-                if (app.menu == Menu::Main) { closeMenu(); break; }
-                openMenu();
-                break;
-            case GLFW_KEY_F:
-                if (app.menu == Menu::None) app.player.flying = !app.player.flying;
-                break;
-            default:
-                if (app.menu == Menu::None &&
-                    key >= GLFW_KEY_1 && key < GLFW_KEY_1 + HOTBAR_SLOTS)
-                    app.hotbarSlot = key - GLFW_KEY_1;
+    if (action != GLFW_PRESS) return;
+    // if/else rather than switch: inventory and fly are rebindable.
+    if (key == GLFW_KEY_ESCAPE) {
+        if (app.invOpen) { closeInventory(w); return; }
+        if (app.menu == Menu::Settings) { app.menu = Menu::Main; return; }
+        if (app.menu == Menu::Main) { closeMenu(); return; }
+        openMenu();
+    } else if (key == app.settings.keyInventory) {
+        if (!app.survival || app.menu != Menu::None) return;
+        if (app.invOpen) {
+            closeInventory(w);
+        } else {
+            app.invOpen = true;
+            app.mouseCaptured = false;
+            glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
+    } else if (key == app.settings.keyFly) {
+        if (app.menu == Menu::None) app.player.flying = !app.player.flying;
+    } else if (app.menu == Menu::None &&
+               key >= GLFW_KEY_1 && key < GLFW_KEY_1 + HOTBAR_SLOTS) {
+        app.hotbarSlot = key - GLFW_KEY_1;
     }
 }
 
@@ -417,13 +412,14 @@ void scrollCallback(GLFWwindow*, double, double dy) {
 
 void pollMovement() {
     GLFWwindow* w = app.window;
-    app.input.forward = glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS;
-    app.input.back    = glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS;
-    app.input.left    = glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS;
-    app.input.right   = glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS;
-    app.input.jump    = glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS;
-    app.input.sneak   = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
-    app.input.sprint  = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+    const Settings& s = app.settings; // movement keys are rebindable
+    app.input.forward = glfwGetKey(w, s.keyForward) == GLFW_PRESS;
+    app.input.back    = glfwGetKey(w, s.keyBack) == GLFW_PRESS;
+    app.input.left    = glfwGetKey(w, s.keyLeft) == GLFW_PRESS;
+    app.input.right   = glfwGetKey(w, s.keyRight) == GLFW_PRESS;
+    app.input.jump    = glfwGetKey(w, s.keyJump) == GLFW_PRESS;
+    app.input.sneak   = glfwGetKey(w, s.keySneak) == GLFW_PRESS;
+    app.input.sprint  = glfwGetKey(w, s.keySprint) == GLFW_PRESS;
 }
 
 // ---- Player persistence (versioned, format in PlayerSave.h) ----

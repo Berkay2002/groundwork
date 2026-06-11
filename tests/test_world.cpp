@@ -7,6 +7,7 @@
 #include "../src/Inventory.h"
 #include "../src/Entity.h"
 #include "../src/PlayerSave.h"
+#include "../src/Settings.h"
 #include "../src/Sounds.h"
 #include <algorithm>
 #include <cassert>
@@ -836,6 +837,34 @@ static void testPlayerSaveV1Migrates() {
     std::filesystem::remove_all("test_psave1");
 }
 
+static void testKeyBinds() {
+    CHECK(keys::fromName("W") == 'W');
+    CHECK(keys::fromName("w") == 'W'); // case-insensitive
+    CHECK(keys::fromName("SPACE") == keys::SPACE);
+    CHECK(keys::fromName("lshift") == keys::LSHIFT);
+    CHECK(keys::fromName("nosuchkey") == -1);
+    CHECK(keys::toName('W') == "W");
+    CHECK(keys::toName(keys::LCTRL) == "LCTRL");
+
+    // Custom binds parse; bad names/actions warn and keep the default.
+    {
+        std::ofstream f("test_settings.cfg");
+        f << "key_forward=Z\nkey_jump=TAB\nkey_back=NOSUCH\nkey_dance=Q\n";
+    }
+    Settings s = Settings::load("test_settings.cfg");
+    CHECK(s.keyForward == 'Z');
+    CHECK(s.keyJump == keys::TAB);
+    CHECK(s.keyBack == 'S');
+
+    // Save/load round-trips every bind.
+    s.keySneak = keys::CAPSLOCK;
+    s.save("test_settings.cfg");
+    Settings t = Settings::load("test_settings.cfg");
+    CHECK(t.keyForward == 'Z' && t.keyJump == keys::TAB);
+    CHECK(t.keySneak == keys::CAPSLOCK && t.keyInventory == 'E');
+    std::filesystem::remove("test_settings.cfg");
+}
+
 static void testSoundSynthesis() {
     // The procedural effects must be bounded, non-silent, deterministic,
     // and end near silence (no click on cutoff).
@@ -888,6 +917,7 @@ int main() {
     testEntityBucketsAndDrops();
     testPlayerSaveV2Roundtrip();
     testPlayerSaveV1Migrates();
+    testKeyBinds();
     testSoundSynthesis();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
