@@ -2,11 +2,11 @@
 
 ## STATUS
 
-- Current: M3 code-quality review
-- Last verified: M3 spec-compliance re-review approved after fixes (`cmake --build build -j` exit 0,
+- Current: M4 / Task 9
+- Last verified: M3 milestone reviews approved after fixes (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
-- Minor issues parked: 3
+- Minor issues parked: 5
 
 ## Log
 
@@ -130,3 +130,8 @@
 - [2026-06-11] M3 spec-compliance re-review round 2: APPROVED. Prior findings
   M3-SPEC-001 and M3-SPEC-002 resolved; no new Critical or Important
   spec-compliance findings.
+- [2026-06-11] M3 code-quality review round 1: APPROVED. No Critical or
+  Important findings. Parked minor issues: `recipeAt()` silently clamps
+  out-of-range indices instead of exposing caller bugs; M4 furnace UI should
+  use a checked World-level furnace accessor to avoid accidentally creating
+  persistent orphan block entities. M3 milestone gate cleared.
