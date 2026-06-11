@@ -743,7 +743,7 @@ int main(int argc, char** argv) {
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
                 if (stepDist > 2.2f) { // roughly one stride
                     stepDist = 0.0f;
-                    app.audio.playVaried(Sound::Footstep, 0.6f);
+                    app.audio.playVaried(Sound::Footstep, 0.35f);
                 }
             }
             app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);

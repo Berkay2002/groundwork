@@ -12,6 +12,7 @@
 #include "miniaudio.h"
 
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <vector>
 
@@ -48,11 +49,20 @@ struct Audio::Impl {
             const std::vector<float>& s = *v.buf;
             for (ma_uint32 i = 0; i < frames; ++i) {
                 size_t idx = size_t(v.pos);
-                if (idx >= s.size()) { v.active = false; break; }
-                dst[i] += s[idx] * v.gain * vol;
+                if (idx + 1 >= s.size()) { v.active = false; break; }
+                // Linear interpolation: stepping by a fractional pitch
+                // without it aliases audibly.
+                float frac = v.pos - float(idx);
+                float smp = s[idx] + (s[idx + 1] - s[idx]) * frac;
+                dst[i] += smp * v.gain * vol;
                 v.pos += v.step;
             }
         }
+        // Soft limiter: overlapping voices may sum past +/-1, and hard
+        // digital clipping is exactly the kind of harshness we synthesized
+        // so carefully to avoid.
+        for (ma_uint32 i = 0; i < frames; ++i)
+            dst[i] = std::tanh(dst[i]);
     }
 };
 

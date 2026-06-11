@@ -958,6 +958,13 @@ static void testSoundSynthesis() {
         for (size_t i = s.size() - SOUND_RATE / 200; i < s.size(); ++i)
             tail = std::max(tail, std::fabs(s[i]));
         CHECK(tail < 0.1f);
+        // No clicks: the waveform never jumps between adjacent samples
+        // (this is what made the first version harsh), and it starts soft.
+        float jump = 0.0f;
+        for (size_t i = 1; i < s.size(); ++i)
+            jump = std::max(jump, std::fabs(s[i] - s[i - 1]));
+        CHECK(jump < 0.15f);
+        CHECK(std::fabs(s[0]) < 0.05f);
         std::vector<float> again = make();
         CHECK(again == s);
     }
