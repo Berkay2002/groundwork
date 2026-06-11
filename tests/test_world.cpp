@@ -4,6 +4,7 @@
 #include "../src/Terrain.h"
 #include "../src/Physics.h"
 #include "../src/Player.h"
+#include "../src/Inventory.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -695,6 +696,28 @@ static void testPlayerLandsOnPlatform() {
     std::filesystem::remove_all("test_player_save");
 }
 
+static void testInventory() {
+    Inventory inv;
+    // Fills hotbar-first, stacks to 64, overflows into the next slot.
+    CHECK(inv.add(Block::Dirt, 70) == 0);
+    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 64);
+    CHECK(inv.slots[1].block == Block::Dirt && inv.slots[1].count == 6);
+    // Tops up existing stacks before opening a new one.
+    CHECK(inv.add(Block::Dirt, 58) == 0);
+    CHECK(inv.slots[1].count == 64 && inv.slots[2].empty());
+    // Different block goes to the first empty slot.
+    CHECK(inv.add(Block::Stone, 1) == 0);
+    CHECK(inv.slots[2].block == Block::Stone && inv.slots[2].count == 1);
+    // consumeOne decrements and empties.
+    CHECK(inv.consumeOne(2));
+    CHECK(inv.slots[2].empty());
+    CHECK(!inv.consumeOne(2));
+    // Full inventory reports leftover.
+    Inventory full;
+    for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(full.add(Block::Stone, 64) == 0);
+    CHECK(full.add(Block::Stone, 10) == 10);
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -722,6 +745,7 @@ int main() {
     testRaycast();
     testBodyPhysics();
     testPlayerLandsOnPlatform();
+    testInventory();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }
