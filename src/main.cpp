@@ -119,6 +119,7 @@ struct App {
     Menu menu = Menu::None;
     bool survival = false;
     bool invOpen = false;
+    bool showDebug = true; // F3 toggles the top-left debug/perf overlay
     bool mouseCaptured = true;
     double lastMouseX = 0, lastMouseY = 0;
     bool firstMouse = true;
@@ -336,7 +337,9 @@ void drawPauseMenu(Hud& hud, GLFWwindow* w, int sw, int sh) {
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     if (action != GLFW_PRESS) return;
     // if/else rather than switch: inventory and fly are rebindable.
-    if (key == GLFW_KEY_ESCAPE) {
+    if (key == GLFW_KEY_F3) { // fixed, like Esc
+        app.showDebug = !app.showDebug;
+    } else if (key == GLFW_KEY_ESCAPE) {
         if (app.invOpen) { closeInventory(w); return; }
         if (app.menu == Menu::Settings) { app.menu = Menu::Main; return; }
         if (app.menu == Menu::Main) { closeMenu(); return; }
@@ -863,9 +866,9 @@ int main(int argc, char** argv) {
         }
         hud.begin(width, height);
         if (!app.invOpen && !paused) drawCrosshair(hud, width, height);
-        drawDebugOverlay(hud, world, fps, frameMs, hit);
-        // The hotbar is gameplay UI: hidden while the pause menu owns the
-        // screen (user feedback: it showing through the menu read as a bug).
+        // Gameplay/debug UI is hidden while the pause menu owns the screen
+        // (user feedback); F3 also toggles the debug overlay on its own.
+        if (app.showDebug && !paused) drawDebugOverlay(hud, world, fps, frameMs, hit);
         if (!paused) drawHotbar(hud, width, height);
         if (app.invOpen) drawInventory(hud, app.window, width, height);
         if (paused) drawPauseMenu(hud, app.window, width, height);

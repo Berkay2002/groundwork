@@ -53,6 +53,7 @@ After an intentional visual change, regenerate the reference with
 | 1–8, scroll wheel | Select hotbar slot |
 | E | Open/close inventory (survival mode) |
 | F | Toggle fly mode |
+| F3 | Toggle the debug overlay |
 | Esc | Pause menu — resume / settings / quit (closes the inventory first) |
 
 Movement, jump, sneak, sprint, fly, and inventory are rebindable through the
