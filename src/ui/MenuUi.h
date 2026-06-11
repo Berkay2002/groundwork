@@ -17,6 +17,7 @@ enum class MenuPage { None, Main, Settings };
 enum class MenuAction { None, Resume, OpenSettings, Quit, Back, AdjustSetting };
 enum class ClickButton { Left, Right };
 enum class FurnaceSlot { Input, Fuel, Output };
+enum class InventorySurface { Crafting, Furnace };
 enum class SettingId {
     RenderDistance = 0,
     Fov,
@@ -55,7 +56,7 @@ struct InventoryLayout {
 };
 
 struct UiSlot {
-    enum class Kind { None, Inventory, Craft, CraftOutput, Furnace };
+    enum class Kind { None, Inventory, Craft, CraftOutput, Furnace, RecipeReference };
     Kind kind = Kind::None;
     int index = -1;
 
@@ -64,6 +65,7 @@ struct UiSlot {
     static UiSlot craft(int slot) { return {Kind::Craft, slot}; }
     static UiSlot craftOutput() { return {Kind::CraftOutput, 0}; }
     static UiSlot furnace(FurnaceSlot slot) { return {Kind::Furnace, int(slot)}; }
+    static UiSlot recipeReference(int slot) { return {Kind::RecipeReference, slot}; }
     bool operator==(const UiSlot& o) const { return kind == o.kind && index == o.index; }
     bool operator!=(const UiSlot& o) const { return !(*this == o); }
 };
@@ -230,6 +232,63 @@ inline int inventorySlotAt(int w, int h, float mx, float my) {
     return -1;
 }
 
+inline int inventorySlotAt(const InventoryLayout& L, float mx, float my) {
+    for (int i = 0; i < Inventory::SLOTS; ++i)
+        if (inventorySlotRect(L, i).contains(mx, my)) return i;
+    return -1;
+}
+
+inline Rect craftSlotRect(const InventoryLayout& L, int surface, int x, int y) {
+    float panelW = surface * L.slot + (surface - 1) * L.pad;
+    float x0 = L.x0 - panelW - 86.0f;
+    return {x0 + x * (L.slot + L.pad), L.y0 + y * (L.slot + L.pad), L.slot, L.slot};
+}
+
+inline Rect craftOutputRect(const InventoryLayout& L, int surface) {
+    Rect last = craftSlotRect(L, surface, surface - 1, surface / 2);
+    return {last.x + L.slot + 20.0f, last.y, L.slot, L.slot};
+}
+
+inline Rect furnaceSlotRect(const InventoryLayout& L, FurnaceSlot slot) {
+    float x0 = L.x0 - 210.0f;
+    float y0 = L.y0 + 20.0f;
+    if (slot == FurnaceSlot::Input) return {x0, y0, L.slot, L.slot};
+    if (slot == FurnaceSlot::Fuel) return {x0, y0 + L.slot + 18.0f, L.slot, L.slot};
+    return {x0 + L.slot + 56.0f, y0 + (L.slot + 18.0f) * 0.5f, L.slot, L.slot};
+}
+
+inline Rect recipeReferenceSlotRect(const InventoryLayout& L, int index) {
+    float rx = L.x0 + Inventory::COLS * (L.slot + L.pad) + 30.0f;
+    float ry = L.y0;
+    return {rx + float(index % 3) * 34.0f, ry + float(index / 3) * 34.0f,
+            30.0f, 30.0f};
+}
+
+inline int recipeReferenceSlotAt(const InventoryLayout& L, float mx, float my,
+                                 int count = int(crafting::recipeCount())) {
+    for (int i = 0; i < count; ++i)
+        if (recipeReferenceSlotRect(L, i).contains(mx, my)) return i;
+    return -1;
+}
+
+inline UiSlot uiSlotAt(const InventoryLayout& L, InventorySurface surface,
+                       int craftSurface, float mx, float my) {
+    int invSlot = inventorySlotAt(L, mx, my);
+    if (invSlot >= 0) return UiSlot::inventory(invSlot);
+    if (surface == InventorySurface::Furnace) {
+        for (FurnaceSlot s : {FurnaceSlot::Input, FurnaceSlot::Fuel, FurnaceSlot::Output})
+            if (furnaceSlotRect(L, s).contains(mx, my)) return UiSlot::furnace(s);
+        return UiSlot::none();
+    }
+    for (int y = 0; y < craftSurface; ++y)
+        for (int x = 0; x < craftSurface; ++x)
+            if (craftSlotRect(L, craftSurface, x, y).contains(mx, my))
+                return UiSlot::craft(y * craftSurface + x);
+    if (craftOutputRect(L, craftSurface).contains(mx, my)) return UiSlot::craftOutput();
+    int recipe = recipeReferenceSlotAt(L, mx, my);
+    return recipe >= 0 ? UiSlot::recipeReference(recipe) : UiSlot::none();
+}
+
 inline void clickStack(ItemStack& slot, ItemStack& cursor, ClickButton button) {
     if (button == ClickButton::Left) {
         if (cursor.empty()) {
@@ -329,8 +388,10 @@ inline bool quickMoveInventoryToFurnace(Inventory& inv, int invSlot,
     if (invSlot < 0 || invSlot >= Inventory::SLOTS) return false;
     ItemStack& s = inv.slots[invSlot];
     if (s.empty()) return false;
-    FurnaceSlot dest = itemDef(s.item).fuelTicks > 0 ? FurnaceSlot::Fuel
-                                                     : FurnaceSlot::Input;
+    FurnaceSlot dest;
+    if (itemDef(s.item).fuelTicks > 0) dest = FurnaceSlot::Fuel;
+    else if (isFurnaceSmeltableInput(s.item)) dest = FurnaceSlot::Input;
+    else return false;
     ItemStack& target = furnaceSlotRef(furnace, dest);
     if (!target.empty() && !stacksCompatible(target, s)) return false;
     int max = itemDef(s.item).stackMax;

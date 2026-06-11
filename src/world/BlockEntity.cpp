@@ -12,7 +12,7 @@ constexpr uint32_t BE_VERSION = 1;
 constexpr int RAW_IRON_COOK_TICKS = 200;
 
 bool canSmelt(const FurnaceState& f) {
-    if (f.input.empty() || f.input.item != ItemId::RawIron) return false;
+    if (f.input.empty() || !isFurnaceSmeltableInput(f.input.item)) return false;
     if (f.output.empty()) return true;
     return f.output.item == ItemId::IronIngot &&
            f.output.count < itemDef(ItemId::IronIngot).stackMax;

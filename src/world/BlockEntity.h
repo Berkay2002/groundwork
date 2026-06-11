@@ -32,6 +32,10 @@ struct FurnaceState {
     int cookTicks = 0;
 };
 
+inline bool isFurnaceSmeltableInput(ItemId item) {
+    return item == ItemId::RawIron;
+}
+
 class BlockEntityStore {
 public:
     FurnaceState& getOrCreateFurnace(glm::ivec3 pos);

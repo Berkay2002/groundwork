@@ -2,10 +2,9 @@
 
 ## STATUS
 
-- Current: M4 milestone review
-- Last verified: M4/T11 completed (`cmake --build build -j` exit 0,
-  warning-free; `.\build\world_tests.exe` -> `all tests passed`;
-  `--demo-survival --frames 300` screenshot inspected, 2026-06-11)
+- Current: M4 spec-compliance re-review
+- Last verified: M4 spec-review fixes applied (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 5
 
@@ -170,3 +169,14 @@
   its screenshot was inspected with survival hotbar resources/tools/counts,
   staged Crafting Table and Furnace, targeted Diamond Ore, and visible mining
   cracks.
+- [2026-06-11] M4 spec-compliance review round 1: REJECTED. Important
+  findings: M4-T9-001 shift-clicking non-smeltable inventory items could place
+  inert junk into the furnace input slot, and M4-T9-002 Task 9 lacked headless
+  coverage for furnace slot and recipe-reference hit testing. Fixed by adding
+  canonical `isFurnaceSmeltableInput`, routing direct and shift-click furnace
+  input policy through it, making furnace shift-click no-op for non-fuel and
+  non-smeltable items, moving craft/furnace/recipe panel rect and hit-test
+  helpers into `MenuUi.h`, and adding tests for Raw Iron input, Coal fuel,
+  junk no-op, furnace slot hit testing, and recipe-reference slot hit testing.
+  Validation rerun: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`.

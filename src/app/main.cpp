@@ -359,42 +359,12 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     }
 }
 
-ui::Rect craftSlotRect(const ui::InventoryLayout& L, int surface, int x, int y) {
-    float panelW = surface * L.slot + (surface - 1) * L.pad;
-    float x0 = L.x0 - panelW - 86.0f;
-    return {x0 + x * (L.slot + L.pad), L.y0 + y * (L.slot + L.pad), L.slot, L.slot};
-}
-
-ui::Rect craftOutputRect(const ui::InventoryLayout& L, int surface) {
-    ui::Rect last = craftSlotRect(L, surface, surface - 1, surface / 2);
-    return {last.x + L.slot + 20.0f, last.y, L.slot, L.slot};
-}
-
-ui::Rect furnaceSlotRect(const ui::InventoryLayout& L, ui::FurnaceSlot slot) {
-    float x0 = L.x0 - 210.0f;
-    float y0 = L.y0 + 20.0f;
-    if (slot == ui::FurnaceSlot::Input) return {x0, y0, L.slot, L.slot};
-    if (slot == ui::FurnaceSlot::Fuel) return {x0, y0 + L.slot + 18.0f, L.slot, L.slot};
-    return {x0 + L.slot + 56.0f, y0 + (L.slot + 18.0f) * 0.5f, L.slot, L.slot};
-}
-
 ui::UiSlot uiSlotAt(int w, int h, float mx, float my) {
     ui::InventoryLayout L = ui::inventoryLayout(w, h);
-    int invSlot = ui::inventorySlotAt(w, h, mx, my);
-    if (invSlot >= 0) return ui::UiSlot::inventory(invSlot);
-    if (app.invScreen == InventoryScreen::Furnace) {
-        for (ui::FurnaceSlot s : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
-                                  ui::FurnaceSlot::Output})
-            if (furnaceSlotRect(L, s).contains(mx, my)) return ui::UiSlot::furnace(s);
-        return ui::UiSlot::none();
-    }
-    int surface = app.crafting.grid.width;
-    for (int y = 0; y < surface; ++y)
-        for (int x = 0; x < surface; ++x)
-            if (craftSlotRect(L, surface, x, y).contains(mx, my))
-                return ui::UiSlot::craft(y * surface + x);
-    if (craftOutputRect(L, surface).contains(mx, my)) return ui::UiSlot::craftOutput();
-    return ui::UiSlot::none();
+    ui::InventorySurface surface = app.invScreen == InventoryScreen::Furnace
+                                 ? ui::InventorySurface::Furnace
+                                 : ui::InventorySurface::Crafting;
+    return ui::uiSlotAt(L, surface, app.crafting.grid.width, mx, my);
 }
 
 FurnaceState* openFurnaceState() {
@@ -404,7 +374,7 @@ FurnaceState* openFurnaceState() {
 
 bool canCursorUseFurnaceSlot(const ItemStack& cursor, ui::FurnaceSlot slot) {
     if (cursor.empty()) return true;
-    if (slot == ui::FurnaceSlot::Input) return cursor.item == ItemId::RawIron;
+    if (slot == ui::FurnaceSlot::Input) return isFurnaceSmeltableInput(cursor.item);
     if (slot == ui::FurnaceSlot::Fuel) return itemDef(cursor.item).fuelTicks > 0;
     return false;
 }
@@ -687,41 +657,38 @@ void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
         FurnaceState* f = openFurnaceState();
         for (ui::FurnaceSlot slot : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
                                      ui::FurnaceSlot::Output}) {
-            ui::Rect r = furnaceSlotRect(L, slot);
+            ui::Rect r = ui::furnaceSlotRect(L, slot);
             hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
             if (f) drawItemStack(hud, ui::furnaceSlotRef(*f, slot),
                                  r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
         }
         if (f && f->burnTicksRemaining > 0)
-            hud.drawRect(furnaceSlotRect(L, ui::FurnaceSlot::Fuel).x + L.slot + 10.0f,
-                         furnaceSlotRect(L, ui::FurnaceSlot::Fuel).y + 8.0f,
+            hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).x + L.slot + 10.0f,
+                         ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).y + 8.0f,
                          8.0f, 34.0f, 0.95f, 0.45f, 0.12f, 0.9f);
         if (f && f->cookTicks > 0)
-            hud.drawRect(furnaceSlotRect(L, ui::FurnaceSlot::Output).x - 42.0f,
-                         furnaceSlotRect(L, ui::FurnaceSlot::Output).y + 24.0f,
+            hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).x - 42.0f,
+                         ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).y + 24.0f,
                          34.0f * (float(f->cookTicks) / 200.0f), 8.0f,
                          0.8f, 0.8f, 0.8f, 0.9f);
     } else {
         int surface = app.crafting.grid.width;
         for (int y = 0; y < surface; ++y)
             for (int x = 0; x < surface; ++x) {
-                ui::Rect r = craftSlotRect(L, surface, x, y);
+                ui::Rect r = ui::craftSlotRect(L, surface, x, y);
                 hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
                 drawItemStack(hud, app.crafting.grid.at(x, y),
                               r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
             }
-        ui::Rect out = craftOutputRect(L, surface);
+        ui::Rect out = ui::craftOutputRect(L, surface);
         hud.drawRect(out.x, out.y, out.w, out.h, 0.22f, 0.22f, 0.16f, 0.92f);
         drawItemStack(hud, crafting::craftingOutput(app.crafting.grid),
                       out.x + L.pad, out.y + L.pad, L.slot - 2 * L.pad);
         std::vector<ItemStack> recipes = ui::recipeReferenceOutputs();
-        float rx = L.x0 + Inventory::COLS * (L.slot + L.pad) + 30.0f;
-        float ry = L.y0;
         for (size_t i = 0; i < recipes.size(); ++i) {
-            float x = rx + float(i % 3) * 34.0f;
-            float y = ry + float(i / 3) * 34.0f;
-            hud.drawRect(x, y, 30.0f, 30.0f, 0.12f, 0.12f, 0.12f, 0.75f);
-            drawItemStack(hud, recipes[i], x + 3.0f, y + 3.0f, 24.0f, 0.9f);
+            ui::Rect r = ui::recipeReferenceSlotRect(L, int(i));
+            hud.drawRect(r.x, r.y, r.w, r.h, 0.12f, 0.12f, 0.12f, 0.75f);
+            drawItemStack(hud, recipes[i], r.x + 3.0f, r.y + 3.0f, 24.0f, 0.9f);
         }
     }
     if (!app.cursorStack.empty()) { // stack riding the mouse

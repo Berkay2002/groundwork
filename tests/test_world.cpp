@@ -2080,6 +2080,40 @@ static void testMenuUiCraftingSlotsAndOutput() {
     CHECK(state.grid.at(0, 0).count == 1);
 }
 
+static void testMenuUiSurfaceHitTesting() {
+    ui::InventoryLayout L = ui::inventoryLayout(1280, 720);
+    ui::Rect inv = ui::inventorySlotRect(L, 3);
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Crafting, 2,
+                       inv.x + 1.0f, inv.y + 1.0f) == ui::UiSlot::inventory(3));
+
+    ui::Rect craft = ui::craftSlotRect(L, 3, 2, 1);
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Crafting, 3,
+                       craft.x + 1.0f, craft.y + 1.0f) == ui::UiSlot::craft(5));
+
+    ui::Rect out = ui::craftOutputRect(L, 3);
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Crafting, 3,
+                       out.x + 1.0f, out.y + 1.0f) == ui::UiSlot::craftOutput());
+
+    ui::Rect recipe = ui::recipeReferenceSlotRect(L, 4);
+    CHECK(ui::recipeReferenceSlotAt(L, recipe.x + 1.0f, recipe.y + 1.0f) == 4);
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Crafting, 3,
+                       recipe.x + 1.0f, recipe.y + 1.0f) ==
+          ui::UiSlot::recipeReference(4));
+
+    ui::Rect input = ui::furnaceSlotRect(L, ui::FurnaceSlot::Input);
+    ui::Rect fuel = ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel);
+    ui::Rect output = ui::furnaceSlotRect(L, ui::FurnaceSlot::Output);
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Furnace, 2,
+                       input.x + 1.0f, input.y + 1.0f) ==
+          ui::UiSlot::furnace(ui::FurnaceSlot::Input));
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Furnace, 2,
+                       fuel.x + 1.0f, fuel.y + 1.0f) ==
+          ui::UiSlot::furnace(ui::FurnaceSlot::Fuel));
+    CHECK(ui::uiSlotAt(L, ui::InventorySurface::Furnace, 2,
+                       output.x + 1.0f, output.y + 1.0f) ==
+          ui::UiSlot::furnace(ui::FurnaceSlot::Output));
+}
+
 static void testMenuUiShiftClickDestinations() {
     Inventory inv;
     crafting::CraftingGrid craftGrid = grid(2);
@@ -2118,6 +2152,20 @@ static void testMenuUiShiftClickDestinations() {
     CHECK(ui::quickMoveInventoryToFurnace(fuelInv, 0, furnace));
     CHECK(furnace.fuel.item == ItemId::Coal && furnace.fuel.count == 3);
     CHECK(fuelInv.slots[0].empty());
+
+    Inventory rawInv;
+    FurnaceState rawFurnace;
+    rawInv.slots[0] = makeItemStack(ItemId::RawIron, 2);
+    CHECK(ui::quickMoveInventoryToFurnace(rawInv, 0, rawFurnace));
+    CHECK(rawFurnace.input.item == ItemId::RawIron && rawFurnace.input.count == 2);
+    CHECK(rawInv.slots[0].empty());
+
+    Inventory junkInv;
+    FurnaceState junkFurnace;
+    junkInv.slots[0] = makeItemStack(ItemId::Stick, 3);
+    CHECK(!ui::quickMoveInventoryToFurnace(junkInv, 0, junkFurnace));
+    CHECK(junkFurnace.input.empty() && junkFurnace.fuel.empty());
+    CHECK(junkInv.slots[0].item == ItemId::Stick && junkInv.slots[0].count == 3);
 }
 
 static void testMenuUiRecipeReferenceEnumeratesCraftingTable() {
@@ -2241,6 +2289,7 @@ int main() {
     testMenuUiInventoryHelpers();
     testMenuUiStackClickHelpers();
     testMenuUiCraftingSlotsAndOutput();
+    testMenuUiSurfaceHitTesting();
     testMenuUiShiftClickDestinations();
     testMenuUiRecipeReferenceEnumeratesCraftingTable();
     testTickClockRunsFixedTicksAndAlpha();
