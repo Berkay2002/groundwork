@@ -380,7 +380,7 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
             const ItemStack& s = app.inv.slots[i];
             if (!s.empty()) {
                 hud.drawTile(x + pad, y + pad, icon, tileFor(s.block, 4), sel ? 1.0f : 0.8f);
-                if (s.count > 1) {
+                { // always show the count, "1" included — it's the ammo gauge
                     char cnt[4];
                     std::snprintf(cnt, sizeof(cnt), "%d", s.count);
                     float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
@@ -412,7 +412,7 @@ void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
         const ItemStack& s = app.inv.slots[i];
         if (s.empty()) continue;
         hud.drawTile(x + L.pad, y + L.pad, L.slot - 2 * L.pad, tileFor(s.block, 4));
-        if (s.count > 1) {
+        { // count always shown, matching the hotbar
             char cnt[4];
             std::snprintf(cnt, sizeof(cnt), "%d", s.count);
             float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
