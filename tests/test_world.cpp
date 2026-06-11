@@ -8,6 +8,7 @@
 #include "sim/Inventory.h"
 #include "sim/Entity.h"
 #include "sim/Mining.h"
+#include "sim/Crafting.h"
 #include "sim/PlayerSave.h"
 #include "world/WorldSave.h"
 #include "world/DayCycle.h"
@@ -1169,6 +1170,130 @@ static void testMiningProgressResetsAndBreakEvent() {
     CHECK(!state.active);
 }
 
+static crafting::CraftingGrid grid(int size) {
+    crafting::CraftingGrid g;
+    g.width = size;
+    g.height = size;
+    return g;
+}
+
+static void testCraftingRecipeMatching() {
+    using namespace crafting;
+    CHECK(recipeCount() == 17);
+
+    CraftingGrid g2 = grid(2);
+    g2.at(1, 1) = makeItemStack(ItemId::LogBlock, 1);
+    CHECK(craftingOutput(g2).item == ItemId::PlanksBlock);
+    CHECK(craftingOutput(g2).count == 4);
+
+    CraftingGrid g3 = grid(3);
+    g3.at(2, 0) = makeItemStack(ItemId::LogBlock, 1);
+    CHECK(craftingOutput(g3).item == ItemId::PlanksBlock);
+
+    g2 = grid(2);
+    g2.at(0, 0) = makeItemStack(ItemId::PlanksBlock, 1);
+    g2.at(0, 1) = makeItemStack(ItemId::PlanksBlock, 1);
+    CHECK(craftingOutput(g2).item == ItemId::Stick);
+    CHECK(craftingOutput(g2).count == 4);
+
+    g2 = grid(2);
+    g2.at(0, 0) = makeItemStack(ItemId::PlanksBlock, 1);
+    g2.at(1, 0) = makeItemStack(ItemId::PlanksBlock, 1);
+    g2.at(0, 1) = makeItemStack(ItemId::PlanksBlock, 1);
+    g2.at(1, 1) = makeItemStack(ItemId::PlanksBlock, 1);
+    CHECK(craftingOutput(g2).item == ItemId::CraftingTableBlock);
+
+    g2 = grid(2);
+    g2.at(1, 0) = makeItemStack(ItemId::Coal, 1);
+    g2.at(1, 1) = makeItemStack(ItemId::Stick, 1);
+    CHECK(craftingOutput(g2).item == ItemId::TorchBlock);
+    CHECK(craftingOutput(g2).count == 4);
+
+    g3 = grid(3);
+    for (int y = 0; y < 3; ++y)
+        for (int x = 0; x < 3; ++x)
+            if (!(x == 1 && y == 1))
+                g3.at(x, y) = makeItemStack(ItemId::CobblestoneBlock, 1);
+    CHECK(craftingOutput(g3).item == ItemId::FurnaceBlock);
+
+    g2 = grid(2);
+    g2.at(0, 0) = makeItemStack(ItemId::CobblestoneBlock, 1);
+    g2.at(1, 0) = makeItemStack(ItemId::CobblestoneBlock, 1);
+    g2.at(0, 1) = makeItemStack(ItemId::CobblestoneBlock, 1);
+    g2.at(1, 1) = makeItemStack(ItemId::CobblestoneBlock, 1);
+    CHECK(craftingOutput(g2).empty());
+
+    struct ToolCase { ItemId material, pickaxe, axe, shovel; };
+    const ToolCase tools[] = {
+        {ItemId::PlanksBlock, ItemId::WoodPickaxe, ItemId::WoodAxe, ItemId::WoodShovel},
+        {ItemId::CobblestoneBlock, ItemId::StonePickaxe, ItemId::StoneAxe, ItemId::StoneShovel},
+        {ItemId::IronIngot, ItemId::IronPickaxe, ItemId::IronAxe, ItemId::IronShovel},
+        {ItemId::Diamond, ItemId::DiamondPickaxe, ItemId::DiamondAxe, ItemId::DiamondShovel},
+    };
+    for (const ToolCase& t : tools) {
+        g3 = grid(3);
+        for (int x = 0; x < 3; ++x) g3.at(x, 0) = makeItemStack(t.material, 1);
+        g3.at(1, 1) = makeItemStack(ItemId::Stick, 1);
+        g3.at(1, 2) = makeItemStack(ItemId::Stick, 1);
+        ItemStack out = craftingOutput(g3);
+        CHECK(out.item == t.pickaxe);
+        CHECK(out.durability == itemDef(t.pickaxe).maxDurability);
+
+        g3 = grid(3);
+        g3.at(0, 0) = makeItemStack(t.material, 1);
+        g3.at(1, 0) = makeItemStack(t.material, 1);
+        g3.at(0, 1) = makeItemStack(t.material, 1);
+        g3.at(1, 1) = makeItemStack(ItemId::Stick, 1);
+        g3.at(1, 2) = makeItemStack(ItemId::Stick, 1);
+        out = craftingOutput(g3);
+        CHECK(out.item == t.axe);
+        CHECK(out.durability == itemDef(t.axe).maxDurability);
+
+        g3 = grid(3);
+        g3.at(1, 0) = makeItemStack(t.material, 1);
+        g3.at(1, 1) = makeItemStack(ItemId::Stick, 1);
+        g3.at(1, 2) = makeItemStack(ItemId::Stick, 1);
+        out = craftingOutput(g3);
+        CHECK(out.item == t.shovel);
+        CHECK(out.durability == itemDef(t.shovel).maxDurability);
+    }
+
+    g3 = grid(3);
+    g3.at(0, 0) = makeItemStack(ItemId::PlanksBlock, 1);
+    g3.at(2, 2) = makeItemStack(ItemId::Stick, 1);
+    CHECK(craftingOutput(g3).empty());
+}
+
+static void testCraftingConsumptionAndCursorOutput() {
+    using namespace crafting;
+    CraftingGrid g = grid(2);
+    g.at(0, 0) = makeItemStack(ItemId::LogBlock, 3);
+    ItemStack cursor;
+    CHECK(craftToCursor(g, cursor));
+    CHECK(cursor.item == ItemId::PlanksBlock && cursor.count == 4);
+    CHECK(g.at(0, 0).item == ItemId::LogBlock && g.at(0, 0).count == 2);
+
+    CHECK(craftToCursor(g, cursor));
+    CHECK(cursor.item == ItemId::PlanksBlock && cursor.count == 8);
+    CHECK(g.at(0, 0).count == 1);
+
+    cursor = makeItemStack(ItemId::Coal, 1);
+    ItemStack beforeInput = g.at(0, 0);
+    CHECK(!craftToCursor(g, cursor));
+    CHECK(cursor.item == ItemId::Coal && cursor.count == 1);
+    CHECK(g.at(0, 0).item == beforeInput.item && g.at(0, 0).count == beforeInput.count);
+
+    CraftingGrid pick = grid(3);
+    for (int x = 0; x < 3; ++x) pick.at(x, 0) = makeItemStack(ItemId::IronIngot, 2);
+    pick.at(1, 1) = makeItemStack(ItemId::Stick, 2);
+    pick.at(1, 2) = makeItemStack(ItemId::Stick, 2);
+    cursor = {};
+    CHECK(craftToCursor(pick, cursor));
+    CHECK(cursor.item == ItemId::IronPickaxe && cursor.durability == itemDef(ItemId::IronPickaxe).maxDurability);
+    CHECK(pick.at(0, 0).count == 1 && pick.at(1, 0).count == 1 && pick.at(2, 0).count == 1);
+    CHECK(pick.at(1, 1).count == 1 && pick.at(1, 2).count == 1);
+}
+
 static void testItemEntityFallsAndLands() {
     std::filesystem::remove_all("test_ent_save");
     World w(1337, "test_ent_save");
@@ -1804,6 +1929,8 @@ int main() {
     testMiningRequiredTicksAndDrops();
     testMiningDurabilityUse();
     testMiningProgressResetsAndBreakEvent();
+    testCraftingRecipeMatching();
+    testCraftingConsumptionAndCursorOutput();
     testItemEntityFallsAndLands();
     testItemPickup();
     testItemPickupPreservesDurabilityAndRemainder();

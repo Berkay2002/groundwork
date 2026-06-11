@@ -2,10 +2,9 @@
 
 ## STATUS
 
-- Current: M3 / Task 6
-- Last verified: M2 milestone reviews approved after fixes
-  (`cmake --build build -j` exit 0, warning-free; `.\build\world_tests.exe`
-  -> `all tests passed`, 2026-06-11)
+- Current: M3 / Task 7
+- Last verified: M3/T6 validation green (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 3
 
@@ -100,3 +99,10 @@
   helper before more producers arrive; block-item reverse mapping duplicates
   `placeBlock` metadata and should eventually derive or be more generically
   guarded. M2 milestone gate cleared.
+- [2026-06-11] M3/T6 DONE. Added pure data-shaped crafting recipes for 2x2
+  and 3x3 surfaces, including logs to planks, sticks, crafting table, torches,
+  furnace, and wood/stone/iron/diamond pickaxe/axe/shovel recipes. Crafting
+  matching, output construction, full-durability tool output, cursor merge
+  checks, and exact ingredient consumption are covered headlessly. Validation:
+  `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
+  0 and printed `all tests passed`.
