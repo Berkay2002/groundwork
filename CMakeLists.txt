@@ -17,6 +17,7 @@ add_executable(minecraft
   src/World.cpp
   src/Player.cpp
   src/Physics.cpp
+  src/Entity.cpp
   src/Texture.cpp
   src/Hud.cpp
   src/Terrain.cpp
@@ -35,6 +36,7 @@ add_executable(world_tests
   src/Terrain.cpp
   src/Player.cpp
   src/Physics.cpp
+  src/Entity.cpp
 )
 target_compile_definitions(world_tests PRIVATE GL_GLEXT_PROTOTYPES)
 target_link_libraries(world_tests PRIVATE GL Threads::Threads)

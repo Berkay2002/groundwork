@@ -5,6 +5,7 @@
 #include "../src/Physics.h"
 #include "../src/Player.h"
 #include "../src/Inventory.h"
+#include "../src/Entity.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -718,6 +719,68 @@ static void testInventory() {
     CHECK(full.add(Block::Stone, 10) == 10);
 }
 
+static void testItemEntityFallsAndLands() {
+    std::filesystem::remove_all("test_ent_save");
+    World w(1337, "test_ent_save");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    w.setBlock(0, 70, 0, Block::Stone);
+    Entities ents;
+    ents.spawnItem(glm::vec3(0.5f, 75.0f, 0.5f), glm::vec3(0.0f), Block::Dirt, 1);
+    glm::vec3 farAway(500.0f, 50.0f, 500.0f); // out of magnet range
+    for (int i = 0; i < 100; ++i) ents.tick(w, farAway, nullptr, 0.05f);
+    CHECK(ents.items().size() == 1);
+    const ItemEntity& e = *ents.items()[0];
+    CHECK(e.body.onGround);
+    CHECK(std::abs(e.body.pos.y - 71.0f) < 1e-3f);
+    std::filesystem::remove_all("test_ent_save");
+}
+
+static void testItemPickup() {
+    std::filesystem::remove_all("test_ent_save2");
+    World w(1337, "test_ent_save2");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    w.setBlock(0, 70, 0, Block::Stone);
+    Entities ents;
+    Inventory inv;
+    ents.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f), Block::Dirt, 1);
+    glm::vec3 playerPos(1.5f, 71.0f, 0.5f); // one block away: in magnet range
+    for (int i = 0; i < 60 && !ents.items().empty(); ++i)
+        ents.tick(w, playerPos, &inv, 0.05f);
+    CHECK(ents.items().empty()); // magnetized in and collected
+    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 1);
+    std::filesystem::remove_all("test_ent_save2");
+}
+
+static void testItemFrozenInUnloadedChunk() {
+    std::filesystem::remove_all("test_ent_save3");
+    World w(1337, "test_ent_save3");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    Entities ents;
+    glm::vec3 farPos(1000.5f, 50.0f, 1000.5f); // chunk never loaded
+    ents.spawnItem(farPos, glm::vec3(0.0f), Block::Stone, 1);
+    for (int i = 0; i < 20; ++i) ents.tick(w, glm::vec3(0.0f), nullptr, 0.05f);
+    CHECK(ents.items()[0]->body.pos == farPos); // no physics in the void
+    std::filesystem::remove_all("test_ent_save3");
+}
+
+static void testEntityBucketsAndDrops() {
+    std::filesystem::remove_all("test_ent_save4");
+    World w(1337, "test_ent_save4");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 2, 10000);
+    Entities ents;
+    // Registry-driven drops: Grass drops Dirt, Leaves drop nothing.
+    ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Grass);
+    ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Leaves);
+    CHECK(ents.items().size() == 1);
+    CHECK(ents.items()[0]->item == Block::Dirt);
+    // Bucket query: a second item two chunks away is not "near".
+    ents.spawnItem(glm::vec3(40.5f, 70.0f, 0.5f), glm::vec3(0.0f), Block::Stone, 1);
+    ents.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(ents.itemsNear(glm::vec3(0.5f, 70.0f, 0.5f), 8.0f).size() == 1);
+    CHECK(ents.itemsNear(glm::vec3(40.5f, 70.0f, 0.5f), 8.0f).size() == 1);
+    std::filesystem::remove_all("test_ent_save4");
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -746,6 +809,10 @@ int main() {
     testBodyPhysics();
     testPlayerLandsOnPlatform();
     testInventory();
+    testItemEntityFallsAndLands();
+    testItemPickup();
+    testItemFrozenInUnloadedChunk();
+    testEntityBucketsAndDrops();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }
