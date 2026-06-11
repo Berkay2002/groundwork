@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M1 milestone review recheck
-- Last verified: M1 compliance fix validation green (`cmake --build build -j` exit 0;
+- Current: M1 code-quality review
+- Last verified: M1 spec-compliance review approved after fix (`cmake --build build -j` exit 0;
   `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -49,3 +49,5 @@
   durability as compatible while stack max 1 still prevents tool merging.
   Validation rerun: `cmake --build build -j && .\build\world_tests.exe` exit
   0; tests printed `all tests passed`.
+- [2026-06-11] M1 spec-compliance re-review round 2: APPROVED. Prior issue
+  M1-SPEC-001 resolved; no findings.
