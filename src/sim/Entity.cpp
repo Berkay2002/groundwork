@@ -18,15 +18,19 @@ float Entities::rand01() {
     return float(rng_ >> 8) / float(1u << 24);
 }
 
-void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, Block item, int count) {
+void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemId item, int count) {
+    spawnItem(pos, vel, ItemStack{item, uint8_t(count), itemDef(item).maxDurability});
+}
+
+void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack stack) {
+    if (stack.empty()) return;
     auto e = std::make_unique<ItemEntity>();
     e->body.pos = pos;
     e->body.vel = vel;
     e->body.halfWidth = 0.125f;
     e->body.height = 0.25f;
     e->prevPos = pos;
-    e->item = item;
-    e->count = count;
+    e->stack = stack;
     e->spinSeed = rng_;
     items_.push_back(std::move(e));
 }
@@ -36,7 +40,8 @@ void Entities::spawnBlockDrop(const glm::ivec3& blockPos, Block broken) {
     if (drop == Block::Air) return;
     float a = rand01() * 6.2831853f;
     spawnItem(glm::vec3(blockPos) + glm::vec3(0.5f, 0.4f, 0.5f),
-              glm::vec3(std::cos(a) * 1.5f, 3.5f, std::sin(a) * 1.5f), drop, 1);
+              glm::vec3(std::cos(a) * 1.5f, 3.5f, std::sin(a) * 1.5f),
+              itemForBlock(drop), 1);
 }
 
 void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* inv, float dt) {
@@ -61,9 +66,9 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         moveBody(world, e.body, dt);
         center = e.body.pos + glm::vec3(0, e.body.height * 0.5f, 0);
         if (canPick && glm::distance(center, target) < PICKUP_RADIUS) {
-            int leftover = inv->add(e.item, e.count);
+            int leftover = inv->addStack(e.stack);
             if (leftover == 0) e.dead = true;
-            else e.count = leftover; // inventory full: keep the remainder
+            else e.stack.count = uint8_t(leftover); // inventory full: keep the remainder
         }
         if (e.age > DESPAWN_SECONDS) e.dead = true;
     }

@@ -4,6 +4,7 @@
 #include "world/Terrain.h"
 #include "sim/Physics.h"
 #include "sim/Player.h"
+#include "sim/Item.h"
 #include "sim/Inventory.h"
 #include "sim/Entity.h"
 #include "sim/PlayerSave.h"
@@ -897,23 +898,59 @@ static void testPlayerLandsOnPlatform() {
 static void testInventory() {
     Inventory inv;
     // Fills hotbar-first, stacks to 64, overflows into the next slot.
-    CHECK(inv.add(Block::Dirt, 70) == 0);
-    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 64);
-    CHECK(inv.slots[1].block == Block::Dirt && inv.slots[1].count == 6);
+    CHECK(inv.add(ItemId::DirtBlock, 70) == 0);
+    CHECK(inv.slots[0].item == ItemId::DirtBlock && inv.slots[0].count == 64);
+    CHECK(inv.slots[1].item == ItemId::DirtBlock && inv.slots[1].count == 6);
     // Tops up existing stacks before opening a new one.
-    CHECK(inv.add(Block::Dirt, 58) == 0);
+    CHECK(inv.add(ItemId::DirtBlock, 58) == 0);
     CHECK(inv.slots[1].count == 64 && inv.slots[2].empty());
     // Different block goes to the first empty slot.
-    CHECK(inv.add(Block::Stone, 1) == 0);
-    CHECK(inv.slots[2].block == Block::Stone && inv.slots[2].count == 1);
+    CHECK(inv.add(ItemId::StoneBlock, 1) == 0);
+    CHECK(inv.slots[2].item == ItemId::StoneBlock && inv.slots[2].count == 1);
     // consumeOne decrements and empties.
     CHECK(inv.consumeOne(2));
     CHECK(inv.slots[2].empty());
     CHECK(!inv.consumeOne(2));
+    // Tools are durable, non-stackable, and use separate slots.
+    CHECK(inv.add(ItemId::WoodPickaxe, 2) == 0);
+    CHECK(inv.slots[2].item == ItemId::WoodPickaxe && inv.slots[2].count == 1);
+    CHECK(inv.slots[2].durability == itemDef(ItemId::WoodPickaxe).maxDurability);
+    CHECK(inv.slots[3].item == ItemId::WoodPickaxe && inv.slots[3].count == 1);
     // Full inventory reports leftover.
     Inventory full;
-    for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(full.add(Block::Stone, 64) == 0);
-    CHECK(full.add(Block::Stone, 10) == 10);
+    for (int i = 0; i < Inventory::SLOTS; ++i) CHECK(full.add(ItemId::StoneBlock, 64) == 0);
+    CHECK(full.add(ItemId::StoneBlock, 10) == 10);
+}
+
+static void testItemRegistry() {
+    for (int i = 0; i < ITEM_TYPES; ++i) {
+        ItemId id = ItemId(i);
+        const ItemDef& d = itemDef(id);
+        CHECK(d.name != nullptr && d.name[0] != '\0');
+        CHECK(d.stackMax >= 1 && d.stackMax <= Inventory::STACK_MAX);
+        if (d.maxDurability > 0) CHECK(d.stackMax == 1);
+        if (d.toolClass != ToolClass::None) {
+            CHECK(d.toolTier != ToolTier::Hand);
+            CHECK(d.miningSpeed > 1.0f);
+            CHECK(d.maxDurability > 0);
+        }
+        if (d.placeBlock != Block::Air) CHECK(itemForBlock(d.placeBlock) == id);
+    }
+    CHECK(itemDef(ItemId::Coal).fuelTicks == 1600);
+    CHECK(itemDef(ItemId::WoodPickaxe).toolClass == ToolClass::Pickaxe);
+    CHECK(itemDef(ItemId::WoodPickaxe).toolTier == ToolTier::Wood);
+    CHECK(itemDef(ItemId::WoodPickaxe).maxDurability == 59);
+    CHECK(itemDef(ItemId::DiamondShovel).miningSpeed == 8.0f);
+    CHECK(itemDef(ItemId::DiamondShovel).maxDurability == 1561);
+    CHECK(itemForBlock(Block::Dirt) == ItemId::DirtBlock);
+    CHECK(placeBlockForItem(ItemId::TorchBlock) == Block::Torch);
+    CHECK(placeBlockForItem(ItemId::Coal) == Block::Air);
+
+    ItemStack a = makeToolStack(ItemId::StoneAxe);
+    ItemStack b = makeToolStack(ItemId::StoneAxe);
+    CHECK(a.durability == itemDef(ItemId::StoneAxe).maxDurability);
+    CHECK(!stacksCompatible(a, b)); // durable items do not merge for this batch
+    CHECK(stacksCompatible({ItemId::Coal, 3, 0}, {ItemId::Coal, 4, 0}));
 }
 
 static void testItemEntityFallsAndLands() {
@@ -922,7 +959,7 @@ static void testItemEntityFallsAndLands() {
     w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
     w.setBlock(0, 70, 0, Block::Stone);
     Entities ents;
-    ents.spawnItem(glm::vec3(0.5f, 75.0f, 0.5f), glm::vec3(0.0f), Block::Dirt, 1);
+    ents.spawnItem(glm::vec3(0.5f, 75.0f, 0.5f), glm::vec3(0.0f), ItemId::DirtBlock, 1);
     glm::vec3 farAway(500.0f, 50.0f, 500.0f); // out of magnet range
     for (int i = 0; i < 100; ++i) ents.tick(w, farAway, nullptr, 0.05f);
     CHECK(ents.items().size() == 1);
@@ -939,12 +976,12 @@ static void testItemPickup() {
     w.setBlock(0, 70, 0, Block::Stone);
     Entities ents;
     Inventory inv;
-    ents.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f), Block::Dirt, 1);
+    ents.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f), ItemId::DirtBlock, 1);
     glm::vec3 playerPos(1.5f, 71.0f, 0.5f); // one block away: in magnet range
     for (int i = 0; i < 60 && !ents.items().empty(); ++i)
         ents.tick(w, playerPos, &inv, 0.05f);
     CHECK(ents.items().empty()); // magnetized in and collected
-    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 1);
+    CHECK(inv.slots[0].item == ItemId::DirtBlock && inv.slots[0].count == 1);
     std::filesystem::remove_all("test_ent_save2");
 }
 
@@ -954,7 +991,7 @@ static void testItemFrozenInUnloadedChunk() {
     w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
     Entities ents;
     glm::vec3 farPos(1000.5f, 50.0f, 1000.5f); // chunk never loaded
-    ents.spawnItem(farPos, glm::vec3(0.0f), Block::Stone, 1);
+    ents.spawnItem(farPos, glm::vec3(0.0f), ItemId::StoneBlock, 1);
     for (int i = 0; i < 20; ++i) ents.tick(w, glm::vec3(0.0f), nullptr, 0.05f);
     CHECK(ents.items()[0]->body.pos == farPos); // no physics in the void
     std::filesystem::remove_all("test_ent_save3");
@@ -969,9 +1006,9 @@ static void testEntityBucketsAndDrops() {
     ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Grass);
     ents.spawnBlockDrop(glm::ivec3(0, 70, 0), Block::Leaves);
     CHECK(ents.items().size() == 1);
-    CHECK(ents.items()[0]->item == Block::Dirt);
+    CHECK(ents.items()[0]->stack.item == ItemId::DirtBlock);
     // Bucket query: a second item two chunks away is not "near".
-    ents.spawnItem(glm::vec3(40.5f, 70.0f, 0.5f), glm::vec3(0.0f), Block::Stone, 1);
+    ents.spawnItem(glm::vec3(40.5f, 70.0f, 0.5f), glm::vec3(0.0f), ItemId::StoneBlock, 1);
     ents.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
     CHECK(ents.itemsNear(glm::vec3(0.5f, 70.0f, 0.5f), 8.0f).size() == 1);
     CHECK(ents.itemsNear(glm::vec3(40.5f, 70.0f, 0.5f), 8.0f).size() == 1);
@@ -986,15 +1023,15 @@ static void testPlayerSaveV2Roundtrip() {
     a.pitch = -45.0f;
     a.flying = true;
     a.hotbarSlot = 3;
-    a.inv.add(Block::Dirt, 70);
-    a.inv.add(Block::Torch, 5);
+    a.inv.add(ItemId::DirtBlock, 70);
+    a.inv.add(ItemId::TorchBlock, 5);
     CHECK(savePlayerFile("test_psave/player.bin", a));
     PlayerState b;
     CHECK(loadPlayerFile("test_psave/player.bin", b));
     CHECK(b.pos == a.pos && b.yaw == a.yaw && b.pitch == a.pitch);
     CHECK(b.flying && b.hotbarSlot == 3);
     for (int i = 0; i < Inventory::SLOTS; ++i) {
-        CHECK(b.inv.slots[i].block == a.inv.slots[i].block);
+        CHECK(b.inv.slots[i].item == a.inv.slots[i].item);
         CHECK(b.inv.slots[i].count == a.inv.slots[i].count);
     }
     std::filesystem::remove_all("test_psave");
@@ -1270,20 +1307,20 @@ static void testMenuUiInventoryHelpers() {
     CHECK(ui::inventorySlotAt(w, h, L.x0 - 1.0f, L.y0 - 1.0f) == -1);
 
     Inventory inv;
-    ItemStack cursor{Block::Dirt, 10};
+    ItemStack cursor{ItemId::DirtBlock, 10, 0};
     ui::clickInventorySlot(inv, cursor, 0);
-    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 10);
+    CHECK(inv.slots[0].item == ItemId::DirtBlock && inv.slots[0].count == 10);
     CHECK(cursor.empty());
 
-    cursor = {Block::Dirt, 60};
+    cursor = {ItemId::DirtBlock, 60, 0};
     ui::clickInventorySlot(inv, cursor, 0);
     CHECK(inv.slots[0].count == Inventory::STACK_MAX);
-    CHECK(cursor.block == Block::Dirt && cursor.count == 6);
+    CHECK(cursor.item == ItemId::DirtBlock && cursor.count == 6);
 
-    inv.slots[1] = {Block::Stone, 3};
+    inv.slots[1] = {ItemId::StoneBlock, 3, 0};
     ui::clickInventorySlot(inv, cursor, 1);
-    CHECK(inv.slots[1].block == Block::Dirt && inv.slots[1].count == 6);
-    CHECK(cursor.block == Block::Stone && cursor.count == 3);
+    CHECK(inv.slots[1].item == ItemId::DirtBlock && inv.slots[1].count == 6);
+    CHECK(cursor.item == ItemId::StoneBlock && cursor.count == 3);
 }
 
 static void testTickClockRunsFixedTicksAndAlpha() {
@@ -1362,6 +1399,7 @@ int main() {
     testMoveBodyAxisFlushBoundaries();
     testPlayerOwnsCanonicalBody();
     testPlayerLandsOnPlatform();
+    testItemRegistry();
     testInventory();
     testItemEntityFallsAndLands();
     testItemPickup();

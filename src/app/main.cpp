@@ -133,7 +133,7 @@ App app;
 Block heldBlock() {
     if (!app.survival) return HOTBAR[app.hotbarSlot];
     const ItemStack& s = app.inv.slots[app.hotbarSlot];
-    return s.empty() ? Block::Air : s.block;
+    return s.empty() ? Block::Air : placeBlockForItem(s.item);
 }
 
 // ---- Inventory UI (survival): rows 1..3 on top, hotbar row 0 below a gap ----
@@ -141,10 +141,11 @@ Block heldBlock() {
 void closeInventory(GLFWwindow* w) {
     app.invOpen = false;
     if (!app.cursorStack.empty()) { // never destroy items on close
-        int leftover = app.inv.add(app.cursorStack.block, app.cursorStack.count);
+        int leftover = app.inv.addStack(app.cursorStack);
         if (leftover > 0)
             app.entities.spawnItem(app.player.eyePos(), app.player.lookDir() * 3.0f,
-                                   app.cursorStack.block, leftover);
+                                   ItemStack{app.cursorStack.item, uint8_t(leftover),
+                                             app.cursorStack.durability});
         app.cursorStack = {};
     }
     app.mouseCaptured = true;
@@ -448,7 +449,9 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
         if (app.survival) {
             const ItemStack& s = app.inv.slots[i];
             if (!s.empty()) {
-                hud.drawTile(x + pad, y + pad, icon, tileFor(s.block, 4), sel ? 1.0f : 0.8f);
+                Block b = placeBlockForItem(s.item);
+                if (b != Block::Air)
+                    hud.drawTile(x + pad, y + pad, icon, tileFor(b, 4), sel ? 1.0f : 0.8f);
                 { // always show the count, "1" included — it's the ammo gauge
                     char cnt[4];
                     std::snprintf(cnt, sizeof(cnt), "%d", s.count);
@@ -479,7 +482,9 @@ void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
         hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, 0.9f);
         const ItemStack& s = app.inv.slots[i];
         if (s.empty()) continue;
-        hud.drawTile(r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad, tileFor(s.block, 4));
+        Block b = placeBlockForItem(s.item);
+        if (b != Block::Air)
+            hud.drawTile(r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad, tileFor(b, 4));
         { // count always shown, matching the hotbar
             char cnt[4];
             std::snprintf(cnt, sizeof(cnt), "%d", s.count);
@@ -490,7 +495,9 @@ void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
     if (!app.cursorStack.empty()) { // stack riding the mouse
         double mx, my;
         glfwGetCursorPos(w, &mx, &my);
-        hud.drawTile(float(mx) - 20, float(my) - 20, 40, tileFor(app.cursorStack.block, 4));
+        Block b = placeBlockForItem(app.cursorStack.item);
+        if (b != Block::Air)
+            hud.drawTile(float(mx) - 20, float(my) - 20, 40, tileFor(b, 4));
         if (app.cursorStack.count > 1) {
             char cnt[4];
             std::snprintf(cnt, sizeof(cnt), "%d", app.cursorStack.count);
@@ -645,16 +652,16 @@ int main(int argc, char** argv) {
 
     if (demoItems) { // a small row of drops in front of the viewpoint
         glm::vec3 base = app.player.eyePos() + app.player.lookDir() * 3.0f;
-        app.entities.spawnItem(base, glm::vec3(0.0f), Block::Dirt, 1);
-        app.entities.spawnItem(base + glm::vec3(1, 0, 0), glm::vec3(0.0f), Block::Stone, 1);
-        app.entities.spawnItem(base + glm::vec3(-1, 0, 0), glm::vec3(0.0f), Block::Wood, 1);
+        app.entities.spawnItem(base, glm::vec3(0.0f), ItemId::DirtBlock, 1);
+        app.entities.spawnItem(base + glm::vec3(1, 0, 0), glm::vec3(0.0f), ItemId::StoneBlock, 1);
+        app.entities.spawnItem(base + glm::vec3(-1, 0, 0), glm::vec3(0.0f), ItemId::LogBlock, 1);
     }
     if (demoInv) {
         app.survival = true;
-        app.inv.add(Block::Dirt, 80);
-        app.inv.add(Block::Stone, 64);
-        app.inv.add(Block::Wood, 5);
-        app.inv.add(Block::Torch, 3);
+        app.inv.add(ItemId::DirtBlock, 80);
+        app.inv.add(ItemId::StoneBlock, 64);
+        app.inv.add(ItemId::LogBlock, 5);
+        app.inv.add(ItemId::TorchBlock, 3);
         app.invOpen = true;
         app.mouseCaptured = false;
         glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);

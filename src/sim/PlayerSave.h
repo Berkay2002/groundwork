@@ -7,8 +7,9 @@
 #include <string>
 
 // Player persistence, v2: the v1 fields + 32 inventory slots (block byte,
-// count byte). v1 files still load (with an empty inventory) so existing
-// saves keep their position — only unknown magic/version is rejected.
+// count byte). Inventory is item-based in memory; v2 remains block-backed
+// until the v3 migration task lands. v1 files still load with an empty
+// inventory so existing saves keep their position.
 struct PlayerState {
     glm::vec3 pos{0.5f, 50.0f, 0.5f};
     float yaw = -90.0f, pitch = 0.0f;
@@ -31,7 +32,8 @@ inline bool savePlayerFile(const std::string& path, const PlayerState& s) {
         f.write(reinterpret_cast<const char*>(&flying), 1);
         f.write(reinterpret_cast<const char*>(&s.hotbarSlot), 1);
         for (int i = 0; i < Inventory::SLOTS; ++i) {
-            uint8_t b = uint8_t(s.inv.slots[i].block);
+            Block pb = placeBlockForItem(s.inv.slots[i].item);
+            uint8_t b = uint8_t(pb);
             uint8_t c = s.inv.slots[i].count;
             f.write(reinterpret_cast<const char*>(&b), 1);
             f.write(reinterpret_cast<const char*>(&c), 1);
@@ -66,7 +68,7 @@ inline bool loadPlayerFile(const std::string& path, PlayerState& s) {
             f.read(reinterpret_cast<char*>(&c), 1);
             if (!f) return false;
             if (b >= BLOCK_TYPES) { b = 0; c = 0; } // clamp unknown ids, like chunk load
-            s.inv.slots[i] = {Block(b), b == 0 ? uint8_t(0) : c};
+            s.inv.slots[i] = {itemForBlock(Block(b)), b == 0 ? uint8_t(0) : c, 0};
         }
     }
     return true;

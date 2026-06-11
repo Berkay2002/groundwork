@@ -112,7 +112,9 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         glm::mat4 mvp = viewProj * m;
         glUniformMatrix4fv(locMVP_, 1, GL_FALSE, glm::value_ptr(mvp));
         float layers[6];
-        for (int f = 0; f < 6; ++f) layers[f] = float(tileFor(e.item, f));
+        Block b = placeBlockForItem(e.stack.item);
+        if (b == Block::Air) b = Block::Stone; // non-block billboards arrive in a later task
+        for (int f = 0; f < 6; ++f) layers[f] = float(tileFor(b, f));
         glUniform1fv(locLayers_, 6, layers);
         int wx = (int)std::floor(p.x), wy = (int)std::floor(p.y + 0.2f),
             wz = (int)std::floor(p.z);

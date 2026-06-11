@@ -14,8 +14,7 @@
 struct ItemEntity {
     Body body;             // halfWidth 0.125, height 0.25
     glm::vec3 prevPos{0};  // previous-tick position for render interpolation
-    Block item = Block::Air;
-    int count = 1;
+    ItemStack stack;
     float age = 0.0f;      // seconds since spawn (pickup delay, despawn)
     uint32_t spinSeed = 0; // de-syncs bob/spin phase between items
     bool dead = false;
@@ -28,7 +27,8 @@ struct ItemEntity {
 // persisted across runs (documented Batch G limitation).
 class Entities {
 public:
-    void spawnItem(const glm::vec3& pos, const glm::vec3& vel, Block item, int count = 1);
+    void spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemId item, int count = 1);
+    void spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack stack);
     // Drop for a broken block: the registry's `drop`, tossed from the block
     // center with a small pseudo-random horizontal kick. No-op for Air drops.
     void spawnBlockDrop(const glm::ivec3& blockPos, Block broken);

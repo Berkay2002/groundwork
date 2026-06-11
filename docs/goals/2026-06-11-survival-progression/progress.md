@@ -2,8 +2,9 @@
 
 ## STATUS
 
-- Current: native goal registered; starting M1 / Task 1
-- Last verified: spec/plan review approved (round 3, 2026-06-11)
+- Current: M1 / Task 2
+- Last verified: M1/T1 validation green (`cmake --build build -j` exit 0;
+  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
 
@@ -33,3 +34,7 @@
 - [2026-06-11] Spec/plan re-review round 3: APPROVED. Prior issues
   GDD-SPEC-003 and GDD-SPEC-005 resolved; no findings. Native goal registered
   from the approved stopping condition.
+- [2026-06-11] M1/T1 DONE. Added item registry, item-based stacks with
+  durability, item-aware inventory stacking, block-item mappings for current
+  gameplay, and stack-based item entities. Validation: `cmake --build build -j`
+  exit 0; `.\build\world_tests.exe` exit 0 and printed `all tests passed`.

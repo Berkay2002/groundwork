@@ -210,10 +210,10 @@ inline void clickInventorySlot(Inventory& inv, ItemStack& cursor, int slot) {
     if (cursor.empty()) {
         cursor = s;
         s = {};
-    } else if (s.empty() || s.block != cursor.block) {
+    } else if (s.empty() || !stacksCompatible(s, cursor)) {
         std::swap(s, cursor);
     } else {
-        int space = Inventory::STACK_MAX - int(s.count);
+        int space = int(itemDef(s.item).stackMax) - int(s.count);
         int moved = std::min(space, int(cursor.count));
         s.count = uint8_t(s.count + moved);
         cursor.count = uint8_t(cursor.count - moved);
