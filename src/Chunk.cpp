@@ -139,36 +139,41 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
         if (zp) return s.edgeZp.empty() ? Block::Air : s.edgeZp[y * CS + x];
         return s.blocks[(y * CS + z) * CS + x];
     };
-    // Combined light level (max of sun and block light) of a cell. Missing
+    // Packed light (sun low nibble, block high nibble) of a cell. Missing
     // data (above the world, absent neighbor, bare test snapshot) counts as
-    // fully sunlit.
-    auto lightAt = [&](int x, int y, int z) -> int {
-        auto lvl = [](uint8_t p) { int sl = p & 0x0F, bl = p >> 4; return sl > bl ? sl : bl; };
-        if (y >= CHUNK_HEIGHT) return 15;
+    // fully sunlit with no block light.
+    auto lightAt = [&](int x, int y, int z) -> uint8_t {
+        if (y >= CHUNK_HEIGHT) return 0x0F;
         if (y < 0) return 0;
         bool xn = x < 0, xp = x >= CS, zn = z < 0, zp = z >= CS;
         if ((xn || xp) && (zn || zp)) {
             const std::vector<uint8_t>& c =
                 xn ? (zn ? s.cornerLightXnZn : s.cornerLightXnZp)
                    : (zn ? s.cornerLightXpZn : s.cornerLightXpZp);
-            return c.empty() ? 15 : lvl(c[y]);
+            return c.empty() ? 0x0F : c[y];
         }
-        if (xn) return s.lightXn.empty() ? 15 : lvl(s.lightXn[y * CS + z]);
-        if (xp) return s.lightXp.empty() ? 15 : lvl(s.lightXp[y * CS + z]);
-        if (zn) return s.lightZn.empty() ? 15 : lvl(s.lightZn[y * CS + x]);
-        if (zp) return s.lightZp.empty() ? 15 : lvl(s.lightZp[y * CS + x]);
-        return s.light.empty() ? 15 : lvl(s.light[(y * CS + z) * CS + x]);
+        if (xn) return s.lightXn.empty() ? 0x0F : s.lightXn[y * CS + z];
+        if (xp) return s.lightXp.empty() ? 0x0F : s.lightXp[y * CS + z];
+        if (zn) return s.lightZn.empty() ? 0x0F : s.lightZn[y * CS + x];
+        if (zp) return s.lightZp.empty() ? 0x0F : s.lightZp[y * CS + x];
+        return s.light.empty() ? 0x0F : s.light[(y * CS + z) * CS + x];
     };
 
     // Per-vertex brightness of one face cell: directional face shade x smooth
-    // light x ambient occlusion, quantized to a byte. Each corner samples the
+    // light x ambient occlusion, quantized to a byte — separately for the sun
+    // and block-light channels (qs/qb), so the shader can dim sunlight with
+    // the day/night cycle while torches keep glowing. Each corner samples the
     // four cells around it in the plane the face looks into; water keeps flat
-    // per-face light (a lake stays one even sheet). The quantized tuple is
+    // per-face light (a lake stays one even sheet). The quantized tuples are
     // also the greedy merge key, so equal tuples shade identically.
-    auto shadeFace = [&](int f, int nx, int ny, int nz, bool water, uint8_t q[4]) {
+    auto shadeFace = [&](int f, int nx, int ny, int nz, bool water,
+                         uint8_t qs[4], uint8_t qb[4]) {
         if (water) {
-            float br = FACES[f].light * LIGHT_CURVE[lightAt(nx, ny, nz)];
-            q[0] = q[1] = q[2] = q[3] = uint8_t(std::lround(br * 255.0f));
+            uint8_t p = lightAt(nx, ny, nz);
+            float fs = FACES[f].light * LIGHT_CURVE[p & 0x0F];
+            float fb = FACES[f].light * LIGHT_CURVE[p >> 4];
+            qs[0] = qs[1] = qs[2] = qs[3] = uint8_t(std::lround(fs * 255.0f));
+            qb[0] = qb[1] = qb[2] = qb[3] = uint8_t(std::lround(fb * 255.0f));
             return;
         }
         const FaceDef& fd = FACES[f];
@@ -189,15 +194,21 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
             // Smooth light: average the open cells around the corner. The
             // diagonal is skipped when both sides block it, so light can't
             // leak around an edge.
-            float sum = LIGHT_CURVE[lightAt(nx, ny, nz)];
+            uint8_t p = lightAt(nx, ny, nz);
+            float sunSum = LIGHT_CURVE[p & 0x0F], blkSum = LIGHT_CURVE[p >> 4];
             int cnt = 1;
-            if (!o1) { sum += LIGHT_CURVE[lightAt(c1[0], c1[1], c1[2])]; ++cnt; }
-            if (!o2) { sum += LIGHT_CURVE[lightAt(c2[0], c2[1], c2[2])]; ++cnt; }
-            if (!oc && !(o1 && o2)) {
-                sum += LIGHT_CURVE[lightAt(cc[0], cc[1], cc[2])]; ++cnt;
-            }
-            float br = FACES[f].light * (sum / cnt) * AO_CURVE[ao];
-            q[v] = uint8_t(std::lround(br * 255.0f));
+            auto add = [&](int x, int y, int z) {
+                uint8_t q = lightAt(x, y, z);
+                sunSum += LIGHT_CURVE[q & 0x0F];
+                blkSum += LIGHT_CURVE[q >> 4];
+                ++cnt;
+            };
+            if (!o1) add(c1[0], c1[1], c1[2]);
+            if (!o2) add(c2[0], c2[1], c2[2]);
+            if (!oc && !(o1 && o2)) add(cc[0], cc[1], cc[2]);
+            float base = FACES[f].light * AO_CURVE[ao] / cnt;
+            qs[v] = uint8_t(std::lround(base * sunSum * 255.0f));
+            qb[v] = uint8_t(std::lround(base * blkSum * 255.0f));
         }
     };
 
@@ -211,7 +222,7 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
     // wrapping makes the integer offset between cells invisible).
     auto emitQuad = [](std::vector<ChunkVertex>& verts, std::vector<uint32_t>& inds,
                        int f, int n, int gu, int gv, int w, int h,
-                       int tile, const uint8_t q[4]) {
+                       int tile, const uint8_t qs[4], const uint8_t qb[4]) {
         const FaceAxes& A = AXES[f];
         int plane = n + (A.ns > 0 ? 1 : 0);
         uint32_t base = uint32_t(verts.size());
@@ -224,11 +235,13 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
             verts.push_back({uint16_t(pos[0] * 16), uint16_t(pos[1] * 16),
                              uint16_t(pos[2] * 16),
                              uint16_t(fu * w * 16), uint16_t(fv * h * 16),
-                             q[v], uint8_t(tile)});
+                             qs[v], qb[v], uint8_t(tile), 0});
         }
         // Split the quad along the diagonal with the smaller brightness sum,
         // so AO corners shade as corners instead of bleeding across the whole
-        // face (anisotropy fix).
+        // face (anisotropy fix). Daytime brightness (sun dominates) decides.
+        uint8_t q[4];
+        for (int v = 0; v < 4; ++v) q[v] = std::max(qs[v], qb[v]);
         if (int(q[0]) + q[2] > int(q[1]) + q[3]) {
             inds.push_back(base + 0); inds.push_back(base + 1); inds.push_back(base + 3);
             inds.push_back(base + 1); inds.push_back(base + 2); inds.push_back(base + 3);
@@ -255,12 +268,16 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
     // maximal rectangles of equal keys. Equal keys mean equal tile and equal
     // shading at every cell, so the merged quad renders the same.
     const int STRIDE[3] = {1, CS * CS, CS}; // flat-index step per axis
+    // Merge key: block id + the 4-corner tuple of BOTH light channels
+    // (first carries the visible flag, block, and sun bytes; second the
+    // block-light bytes) — 12 shading bytes no longer fit one uint64.
+    using Key = std::pair<uint64_t, uint64_t>;
     for (int f = 0; f < 6; ++f) {
         const FaceAxes& A = AXES[f];
         const int NU = AXIS_SIZE[A.ua], NN = AXIS_SIZE[A.na];
         const int NV = A.va == 1 ? topY + 1 : AXIS_SIZE[A.va];
         const int NNlim = A.na == 1 ? topY + 1 : NN;
-        std::vector<uint64_t> mask(size_t(NU) * NV);
+        std::vector<Key> mask(size_t(NU) * NV);
         for (int n = 0; n < NNlim; ++n) {
             // The face's neighbor cell leaves the chunk only on the outermost
             // slice; everywhere else it is a direct strided index away.
@@ -271,7 +288,7 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                 int p[3]; p[A.na] = n; p[A.ua] = 0; p[A.va] = gv;
                 int idx = (p[1] * CS + p[2]) * CS + p[0];
                 for (int gu = 0; gu < NU; ++gu, idx += STRIDE[A.ua]) {
-                    uint64_t key = 0;
+                    Key key{0, 0};
                     Block b = s.blocks[idx];
                     if (b != Block::Air && b != Block::Torch) {
                         p[A.ua] = gu;
@@ -286,11 +303,13 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                         bool visible = water ? !(nb == Block::Water || isOpaque(nb))
                                              : !isOpaque(nb);
                         if (visible) {
-                            uint8_t q[4];
-                            shadeFace(f, np[0], np[1], np[2], water, q);
-                            key = (1ull << 40) | (uint64_t(b) << 32) |
-                                  (uint64_t(q[0]) << 24) | (uint64_t(q[1]) << 16) |
-                                  (uint64_t(q[2]) << 8) | q[3];
+                            uint8_t qs[4], qb[4];
+                            shadeFace(f, np[0], np[1], np[2], water, qs, qb);
+                            key.first = (1ull << 40) | (uint64_t(b) << 32) |
+                                        (uint64_t(qs[0]) << 24) | (uint64_t(qs[1]) << 16) |
+                                        (uint64_t(qs[2]) << 8) | qs[3];
+                            key.second = (uint64_t(qb[0]) << 24) | (uint64_t(qb[1]) << 16) |
+                                         (uint64_t(qb[2]) << 8) | qb[3];
                             any = true;
                         }
                     }
@@ -300,8 +319,8 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
             if (!any) continue;
             for (int gv = 0; gv < NV; ++gv) {
                 for (int gu = 0; gu < NU;) {
-                    uint64_t key = mask[size_t(gv) * NU + gu];
-                    if (!key) { ++gu; continue; }
+                    Key key = mask[size_t(gv) * NU + gu];
+                    if (!key.first) { ++gu; continue; }
                     int w = 1;
                     while (gu + w < NU && mask[size_t(gv) * NU + gu + w] == key) ++w;
                     int h = 1;
@@ -313,14 +332,16 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                     }
                     for (int j = 0; j < h; ++j)
                         for (int i = 0; i < w; ++i)
-                            mask[size_t(gv + j) * NU + gu + i] = 0;
-                    Block b = Block((key >> 32) & 0xFF);
-                    uint8_t q[4] = {uint8_t(key >> 24), uint8_t(key >> 16),
-                                    uint8_t(key >> 8), uint8_t(key)};
+                            mask[size_t(gv + j) * NU + gu + i] = {0, 0};
+                    Block b = Block((key.first >> 32) & 0xFF);
+                    uint8_t qs[4] = {uint8_t(key.first >> 24), uint8_t(key.first >> 16),
+                                     uint8_t(key.first >> 8), uint8_t(key.first)};
+                    uint8_t qb[4] = {uint8_t(key.second >> 24), uint8_t(key.second >> 16),
+                                     uint8_t(key.second >> 8), uint8_t(key.second)};
                     bool water = (b == Block::Water);
                     emitQuad(water ? md.waterVerts : md.verts,
                              water ? md.waterInds : md.inds,
-                             f, n, gu, gv, w, h, tileFor(b, f), q);
+                             f, n, gu, gv, w, h, tileFor(b, f), qs, qb);
                     gu += w;
                 }
             }
@@ -334,12 +355,15 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
         for (int z = 0; z < CS; ++z) {
             for (int x = 0; x < CS; ++x) {
                 if (s.blocks[(y * CS + z) * CS + x] != Block::Torch) continue;
-                // Lit by its own cell (at least its emission); no directional
-                // shading so the flame glows evenly.
-                int level = lightAt(x, y, z);
-                if (int(lightEmission(Block::Torch)) > level)
-                    level = lightEmission(Block::Torch);
-                uint8_t light = uint8_t(std::lround(LIGHT_CURVE[level] * 255.0f));
+                // Lit by its own cell — the block channel at least its own
+                // emission, so the flame glows through the night; no
+                // directional shading so it glows evenly.
+                uint8_t p = lightAt(x, y, z);
+                int bl = p >> 4;
+                if (int(lightEmission(Block::Torch)) > bl)
+                    bl = lightEmission(Block::Torch);
+                uint8_t qsun = uint8_t(std::lround(LIGHT_CURVE[p & 0x0F] * 255.0f));
+                uint8_t qblk = uint8_t(std::lround(LIGHT_CURVE[bl] * 255.0f));
                 for (int f = 0; f < 6; ++f) {
                     // The bottom face is usually flush with the ground.
                     if (f == 3 && isOpaque(blockAt(x, y - 1, z))) continue;
@@ -355,7 +379,7 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                              uint16_t(y * 16 + int(fd.corners[v][1]) * 10),
                              uint16_t(z * 16 + 7 + int(fd.corners[v][2]) * 2),
                              uint16_t(7 + 2 * fu), uint16_t(vv),
-                             light, uint8_t(tileFor(Block::Torch, f))});
+                             qsun, qblk, uint8_t(tileFor(Block::Torch, f)), 0});
                     }
                     md.inds.push_back(base + 0); md.inds.push_back(base + 1); md.inds.push_back(base + 2);
                     md.inds.push_back(base + 0); md.inds.push_back(base + 2); md.inds.push_back(base + 3);
@@ -380,13 +404,13 @@ void uploadOne(unsigned& vao, unsigned& vbo, unsigned& ebo,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, inds.size() * sizeof(uint32_t), inds.data(), GL_STATIC_DRAW);
 
-    // Integer attributes (the shader unpacks): position, uv, light+layer.
+    // Integer attributes (the shader unpacks): position, uv, sun+blk+layer.
     const GLsizei stride = sizeof(ChunkVertex);
     glVertexAttribIPointer(0, 3, GL_UNSIGNED_SHORT, stride, (void*)0);
     glEnableVertexAttribArray(0);
     glVertexAttribIPointer(1, 2, GL_UNSIGNED_SHORT, stride, (void*)6);
     glEnableVertexAttribArray(1);
-    glVertexAttribIPointer(2, 2, GL_UNSIGNED_BYTE, stride, (void*)10);
+    glVertexAttribIPointer(2, 3, GL_UNSIGNED_BYTE, stride, (void*)10);
     glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 }

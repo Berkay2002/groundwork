@@ -16,6 +16,7 @@
 #include "Audio.h"
 #include "Block.h"
 #include "Chunk.h"
+#include "DayCycle.h"
 #include "Entity.h"
 #include "Frustum.h"
 #include "Hud.h"
@@ -37,7 +38,6 @@ constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
 constexpr float TICK_DT = 0.05f;          // 20 TPS simulation tick
 constexpr int MAX_TICKS_PER_FRAME = 5;    // stall guard: drop time, don't spiral
 constexpr uint32_t WORLD_SEED = 1337;
-const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
 
 const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
@@ -52,17 +52,19 @@ const char* CHUNK_VS = R"(
 #version 330 core
 layout(location = 0) in ivec3 aPos;
 layout(location = 1) in ivec2 aUV;
-layout(location = 2) in ivec2 aLightLayer;
+layout(location = 2) in ivec3 aLightLayer; // sun, block light, tex layer
 uniform mat4 uViewProj;
 uniform vec3 uOrigin;
+uniform float uSunLevel; // day/night: scales the sun channel only
 out vec2 vUV;
 flat out float vLayer;
 out float vLight;
 out float vDist;
 void main() {
     vUV = vec2(aUV) / 16.0;
-    vLayer = float(aLightLayer.y);
-    vLight = float(aLightLayer.x) / 255.0;
+    vLayer = float(aLightLayer.z);
+    vLight = max(float(aLightLayer.x) / 255.0 * uSunLevel,
+                 float(aLightLayer.y) / 255.0);
     vec4 p = uViewProj * vec4(uOrigin + vec3(aPos) / 16.0, 1.0);
     vDist = length(p.xyz);
     gl_Position = p;
@@ -500,12 +502,12 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
     std::snprintf(buf, sizeof(buf),
         "%.0f fps (%.1f ms)\n"
         "pos %.1f %.1f %.1f\n"
-        "chunk %d,%d  drawn %d/%d\n"
+        "chunk %d,%d  drawn %d/%d  day %.2f\n"
         "gen %.1fms q%d  mesh %.1fms q%d up%d\n"
         "target: %s%s%s",
         fps, frameMs,
         p.pos.x, p.pos.y, p.pos.z,
-        pcx, pcz, st.drawn, st.loaded,
+        pcx, pcz, st.drawn, st.loaded, dayFraction(world.dayTime()),
         st.genMs, st.genQueued, st.meshMs, st.meshQueued, st.uploads,
         hit.hit ? blockName(world.getBlock(hit.block.x, hit.block.y, hit.block.z)) : "-",
         lightBuf, p.flying ? "\n[FLY]" : "");
@@ -600,10 +602,12 @@ int main(int argc, char** argv) {
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
+    float startTime = -1.0f;    // --time <0..1>: day fraction override
     for (int i = 1; i < argc; ++i) {
         if (i < argc - 1) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
             if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
+            if (std::strcmp(argv[i], "--time") == 0) startTime = float(std::atof(argv[i + 1]));
         }
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
         if (std::strcmp(argv[i], "--demo-inv") == 0) demoInv = true;
@@ -659,6 +663,8 @@ int main(int argc, char** argv) {
     GLuint cubeVao = makeCubeLines(cubeVbo);
 
     World world(WORLD_SEED, SAVE_DIR);
+    if (startTime >= 0.0f) // --time: pin the day clock for screenshots
+        world.setDayTime(startTime * DAY_LENGTH);
 
     // Audio stays silent if disabled at build time or no device opens.
     app.audio.init();
@@ -794,25 +800,32 @@ int main(int argc, char** argv) {
         app.breakPressed = app.placePressed = false;
 
         // --- Render world ---
+        // Day/night: the sky (and the fog, which fades into it) follows the
+        // world's day clock; sunlight is dimmed in the shader via uSunLevel.
+        if (!paused) world.setDayTime(world.dayTime() + dt);
+        const glm::vec3 sky = skyColorAt(world.dayTime());
+        const float sunLevel = sunLevelAt(world.dayTime());
+
         glViewport(0, 0, width, height);
-        glClearColor(SKY_COLOR.r, SKY_COLOR.g, SKY_COLOR.b, 1.0f);
+        glClearColor(sky.r, sky.g, sky.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         float fogEnd = float(settings.renderDistance * CHUNK_SIZE);
         chunkShader.use();
         chunkShader.setMat4("uViewProj", viewProj);
-        chunkShader.setVec3("uSky", SKY_COLOR);
+        chunkShader.setVec3("uSky", sky);
         chunkShader.setFloat("uFogStart", fogEnd * 0.7f);
         chunkShader.setFloat("uFogEnd", fogEnd * 0.98f);
         chunkShader.setInt("uAtlas", 0);
         chunkShader.setFloat("uAlpha", 1.0f);
+        chunkShader.setFloat("uSunLevel", sunLevel);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures);
         world.drawChunks(frustum, eye, originLoc);
 
         // Item entities: after opaque (normal depth test), before water so
         // submerged drops blend correctly under the surface.
-        itemRenderer.draw(world, app.entities, viewProj, alpha, float(gameTime));
+        itemRenderer.draw(world, app.entities, viewProj, alpha, float(gameTime), sunLevel);
 
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.

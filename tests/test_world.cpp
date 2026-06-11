@@ -7,6 +7,7 @@
 #include "../src/Inventory.h"
 #include "../src/Entity.h"
 #include "../src/PlayerSave.h"
+#include "../src/DayCycle.h"
 #include "../src/Settings.h"
 #include "../src/Sounds.h"
 #include <algorithm>
@@ -281,11 +282,15 @@ static int findQuad(const std::vector<ChunkVertex>& vs, Pred pred) {
     return found;
 }
 
+// Daytime brightness of a vertex (sun channel at full scale vs block light)
+// — identical to the single combined light byte the format had pre-day/night.
+static int dayLight(const ChunkVertex& v) { return std::max(v.sun, v.blk); }
+
 // Light byte of the vertex at exact packed position (x,y,z) inside quad q.
 static int lightAtVert(const std::vector<ChunkVertex>& vs, int quad, int x, int y, int z) {
     for (int i = 0; i < 4; ++i) {
         const ChunkVertex& v = vs[size_t(quad) * 4 + i];
-        if (v.x == x && v.y == y && v.z == z) return v.light;
+        if (v.x == x && v.y == y && v.z == z) return dayLight(v);
     }
     return -1;
 }
@@ -354,7 +359,7 @@ static void testGreedyMerging() {
     int umax = -1, vmax = -1;
     for (int i = 0; i < 4; ++i) {
         const ChunkVertex& v = md.verts[size_t(top) * 4 + i];
-        CHECK(v.light == 255); // full sun, AO open, top shade 1.0
+        CHECK(v.sun == 255); // full sun, AO open, top shade 1.0
         CHECK(v.layer == 3);   // stone tile
         umax = std::max(umax, int(v.u)); vmax = std::max(vmax, int(v.v));
     }
@@ -368,7 +373,7 @@ static void testGreedyMerging() {
     CHECK(md.verts.size() > 6u * 4);
     bool darkened = false;
     for (size_t i = 0; i < md.verts.size(); ++i)
-        if (md.verts[i].y == 41 * 16 && md.verts[i].light < 255) darkened = true;
+        if (md.verts[i].y == 41 * 16 && dayLight(md.verts[i]) < 255) darkened = true;
     CHECK(darkened);
 
     // Same input twice -> bit-identical mesh (worker scheduling can't change
@@ -392,7 +397,7 @@ static void testAmbientOcclusion() {
     int open = lightAtVert(md.verts, top, 8 * 16, 41 * 16, 8 * 16);
     CHECK(open > 0);
     for (int i = 1; i < 4; ++i)
-        CHECK(int(md.verts[size_t(top) * 4 + i].light) == int(md.verts[size_t(top) * 4].light));
+        CHECK(dayLight(md.verts[size_t(top) * 4 + i]) == dayLight(md.verts[size_t(top) * 4]));
 
     // A diagonal occluder above the (+X,+Z) corner darkens exactly the
     // top-face vertex whose corner cell it fills.
@@ -837,6 +842,81 @@ static void testPlayerSaveV1Migrates() {
     std::filesystem::remove_all("test_psave1");
 }
 
+static void testDayCycle() {
+    // Day at the start, night at u=0.7, smooth and continuous in between.
+    CHECK(sunLevelAt(0.0f) == 1.0f);
+    CHECK(std::fabs(sunLevelAt(0.7f * DAY_LENGTH) - NIGHT_SUN) < 1e-6f);
+    CHECK(sunLevelAt(0.2f * DAY_LENGTH) == 1.0f);
+    float prev = sunLevelAt(0.0f);
+    for (int i = 1; i <= 200; ++i) { // no jumps anywhere in the cycle
+        float t = DAY_LENGTH * i / 200.0f;
+        float v = sunLevelAt(t);
+        CHECK(v >= NIGHT_SUN - 1e-6f && v <= 1.0f + 1e-6f);
+        CHECK(std::fabs(v - prev) < 0.12f);
+        prev = v;
+    }
+    // Wraps across day boundaries (the clock only ever grows).
+    CHECK(std::fabs(sunLevelAt(2.3f * DAY_LENGTH) - sunLevelAt(0.3f * DAY_LENGTH)) < 1e-6f);
+    // Sky follows: bright at noon, dark at midnight, reddish at dusk.
+    glm::vec3 noon = skyColorAt(0.2f * DAY_LENGTH);
+    glm::vec3 mid = skyColorAt(0.7f * DAY_LENGTH);
+    glm::vec3 dusk = skyColorAt(0.45f * DAY_LENGTH);
+    CHECK(noon.b > 0.8f && mid.b < 0.1f);
+    CHECK(dusk.r > dusk.b); // horizon tint
+}
+
+static void testLightChannelSplit() {
+    // A torch-lit cell next to a sunlit one: the mesh must carry the two
+    // channels separately so night can dim sun without dimming the torch.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    s.light.assign(Chunk::rawSize(), 0);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    s.blocks[at(8, 40, 8)] = Block::Stone;
+    s.light[at(8, 41, 8)] = uint8_t(14 << 4); // strong block light, no sun
+    MeshData md = buildMeshData(s);
+    int top = topQuadOf(md.verts, 8, 40, 8);
+    CHECK(top >= 0);
+    const ChunkVertex& v = md.verts[size_t(top) * 4];
+    CHECK(v.blk > v.sun);  // torch-lit: block channel dominates
+    CHECK(v.sun > 0);      // dark-sun floor, not zero
+
+    s.light[at(8, 41, 8)] = 15; // full sun instead
+    md = buildMeshData(s);
+    top = topQuadOf(md.verts, 8, 40, 8);
+    const ChunkVertex& w = md.verts[size_t(top) * 4];
+    CHECK(w.sun > w.blk);
+}
+
+static void testLevelDayTime() {
+    const char* dir = "test_saves_day";
+    std::filesystem::remove_all(dir);
+    {
+        World w(7, dir);
+        CHECK(w.dayTime() == 0.0f); // fresh world starts in the morning
+        w.setDayTime(123.5f);
+        w.saveAllModified();
+    }
+    {
+        World w(7, dir);
+        CHECK(std::fabs(w.dayTime() - 123.5f) < 1e-6f); // clock persisted
+    }
+    // A v1 level.bin (no day clock) migrates: seed kept, clock at morning.
+    {
+        std::ofstream f(std::string(dir) + "/level.bin", std::ios::binary);
+        f.write("MCLV", 4);
+        uint32_t ver = 1, seed = 4242;
+        f.write(reinterpret_cast<const char*>(&ver), 4);
+        f.write(reinterpret_cast<const char*>(&seed), 4);
+    }
+    {
+        World w(7, dir);
+        CHECK(w.seed() == 4242);
+        CHECK(w.dayTime() == 0.0f);
+    }
+    std::filesystem::remove_all(dir);
+}
+
 static void testKeyBinds() {
     CHECK(keys::fromName("W") == 'W');
     CHECK(keys::fromName("w") == 'W'); // case-insensitive
@@ -919,6 +999,9 @@ int main() {
     testPlayerSaveV1Migrates();
     testKeyBinds();
     testSoundSynthesis();
+    testDayCycle();
+    testLightChannelSplit();
+    testLevelDayTime();
     if (failures == 0) std::printf("all tests passed\n");
     return failures == 0 ? 0 : 1;
 }

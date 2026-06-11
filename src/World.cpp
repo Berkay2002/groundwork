@@ -29,16 +29,22 @@ void ema(std::atomic<float>& avg, float sample) {
 
 World::World(uint32_t seed, std::string saveDir)
     : seed_(loadOrCreateSeed(saveDir, seed)), terrain_(seed_),
-      saveDir_(std::move(saveDir)), pool_(workerCount()) {}
+      saveDir_(std::move(saveDir)), pool_(workerCount()) {
+    loadDayTime();
+}
 
 namespace {
 constexpr char LEVEL_MAGIC[4] = {'M', 'C', 'L', 'V'};
-constexpr uint32_t LEVEL_VERSION = 1;
+// v1: magic + version + seed. v2 appends the day clock (float seconds);
+// v1 files load fine (seed kept, clock starts at morning).
+constexpr uint32_t LEVEL_VERSION = 2;
 }
 
 // The seed lives in level.bin so a save directory stays valid even if the
 // caller's default seed changes (unmodified chunks regenerate from the seed).
-// Missing or bad file: adopt the fallback and (re)write it.
+// Missing or corrupt file: adopt the fallback and (re)write it. Old versions
+// migrate — rewriting them with the fallback would silently swap the
+// terrain under an existing save.
 uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback) {
     std::filesystem::create_directories(saveDir);
     std::string path = saveDir + "/level.bin";
@@ -50,19 +56,46 @@ uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback) 
             f.read(magic, 4);
             f.read(reinterpret_cast<char*>(&version), 4);
             f.read(reinterpret_cast<char*>(&seed), 4);
-            if (f && std::memcmp(magic, LEVEL_MAGIC, 4) == 0 && version == LEVEL_VERSION)
+            if (f && std::memcmp(magic, LEVEL_MAGIC, 4) == 0 &&
+                version >= 1 && version <= LEVEL_VERSION)
                 return seed;
-            std::fprintf(stderr, "warning: bad/old level.bin, rewriting with seed %u\n",
+            std::fprintf(stderr, "warning: bad level.bin, rewriting with seed %u\n",
                          fallback);
         }
     }
     if (!atomicSave(path, [&](std::ofstream& f) {
+            float dayTime = 0.0f;
             f.write(LEVEL_MAGIC, 4);
             f.write(reinterpret_cast<const char*>(&LEVEL_VERSION), 4);
             f.write(reinterpret_cast<const char*>(&fallback), 4);
+            f.write(reinterpret_cast<const char*>(&dayTime), 4);
         }))
         std::fprintf(stderr, "warning: failed to write level.bin\n");
     return fallback;
+}
+
+void World::loadDayTime() {
+    std::ifstream f(saveDir_ + "/level.bin", std::ios::binary);
+    if (!f) return;
+    char magic[4];
+    uint32_t version = 0, seed = 0;
+    float t = 0.0f;
+    f.read(magic, 4);
+    f.read(reinterpret_cast<char*>(&version), 4);
+    f.read(reinterpret_cast<char*>(&seed), 4);
+    if (!f || std::memcmp(magic, LEVEL_MAGIC, 4) != 0 || version < 2) return;
+    f.read(reinterpret_cast<char*>(&t), 4);
+    if (f) dayTime_ = t;
+}
+
+void World::saveLevel() const {
+    if (!atomicSave(saveDir_ + "/level.bin", [&](std::ofstream& f) {
+            f.write(LEVEL_MAGIC, 4);
+            f.write(reinterpret_cast<const char*>(&LEVEL_VERSION), 4);
+            f.write(reinterpret_cast<const char*>(&seed_), 4);
+            f.write(reinterpret_cast<const char*>(&dayTime_), 4);
+        }))
+        std::fprintf(stderr, "warning: failed to write level.bin\n");
 }
 
 World::~World() { saveAllModified(); }
@@ -595,6 +628,7 @@ void World::saveAllModified() {
             chunk->modified = false;
         }
     }
+    saveLevel(); // keeps the day clock current (cheap: 16 bytes, atomic)
 }
 
 WorldStats World::stats() const {

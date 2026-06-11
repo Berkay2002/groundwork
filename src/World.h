@@ -90,11 +90,18 @@ public:
     // default seed constant in main.cpp changes.
     uint32_t seed() const { return seed_; }
 
+    // World day clock in seconds (drives the day/night cycle); persisted in
+    // level.bin (v2) by saveAllModified so a save resumes at its time of day.
+    float dayTime() const { return dayTime_; }
+    void setDayTime(float t) { dayTime_ = t; }
+
     static int floorDiv(int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
     static int mod(int a, int b) { int m = a % b; return m < 0 ? m + b : m; }
 
 private:
     static uint32_t loadOrCreateSeed(const std::string& saveDir, uint32_t fallback);
+    void loadDayTime();
+    void saveLevel() const;
     Chunk* getChunk(int cx, int cz) const;
     void saveChunk(const Chunk& c);
     bool loadChunkFromDisk(Chunk& c) const;
@@ -114,6 +121,7 @@ private:
     void seedChunkBorderLight(int cx, int cz);
 
     uint32_t seed_;
+    float dayTime_ = 0.0f; // seconds; 0 = morning
     Terrain terrain_;
     std::string saveDir_;
     std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash> chunks_;

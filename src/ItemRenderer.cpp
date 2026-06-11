@@ -2,6 +2,7 @@
 #include "Block.h"
 #include "Entity.h"
 #include "World.h"
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <glm/gtc/matrix_transform.hpp>
@@ -94,7 +95,8 @@ ItemRenderer::~ItemRenderer() {
 }
 
 void ItemRenderer::draw(const World& world, const Entities& entities,
-                        const glm::mat4& viewProj, float alpha, float time) {
+                        const glm::mat4& viewProj, float alpha, float time,
+                        float sunLevel) {
     if (entities.items().empty()) return;
     shader_.use();
     glBindVertexArray(vao_);
@@ -114,9 +116,11 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         glUniform1fv(locLayers_, 6, layers);
         int wx = (int)std::floor(p.x), wy = (int)std::floor(p.y + 0.2f),
             wz = (int)std::floor(p.z);
-        int level = std::max(world.sunLightAt(wx, wy, wz),
-                             world.blockLightAt(wx, wy, wz));
-        glUniform1f(locLight_, std::pow(0.85f, float(15 - level)));
+        // Same channel split as chunk lighting: sunlight dims with the
+        // day/night cycle, torch light doesn't.
+        float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
+        float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
+        glUniform1f(locLight_, std::max(sunBr * sunLevel, blkBr));
         glDrawArrays(GL_TRIANGLES, 0, 36);
     }
     glEnable(GL_CULL_FACE);

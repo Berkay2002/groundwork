@@ -16,8 +16,9 @@ public:
     ItemRenderer(const ItemRenderer&) = delete;
     ItemRenderer& operator=(const ItemRenderer&) = delete;
 
+    // sunLevel: day/night scale applied to the sun light channel.
     void draw(const World& world, const Entities& entities,
-              const glm::mat4& viewProj, float alpha, float time);
+              const glm::mat4& viewProj, float alpha, float time, float sunLevel);
 
 private:
     Shader shader_;

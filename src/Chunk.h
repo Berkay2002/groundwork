@@ -12,13 +12,19 @@ constexpr int CHUNK_HEIGHT = 80; // Y
 // 1/16-tile units and may span several tiles on greedy-merged faces — the
 // block textures live in a GL texture array (one tile per layer, REPEAT
 // wrapping), with `layer` selecting the tile.
+// Sun and block light are baked as separate brightness channels so the
+// day/night cycle can dim sunlight in the shader (light = max(sun *
+// uSunLevel, blk)) without relighting or remeshing anything. Each channel
+// already includes the face shade, smooth lighting, and AO factors.
 struct ChunkVertex {
     uint16_t x, y, z;  // chunk-local position * 16
     uint16_t u, v;     // tile UV * 16 (wraps per tile on merged faces)
-    uint8_t light;     // brightness * 255 (shade x smooth light x AO baked)
+    uint8_t sun;       // sun-channel brightness * 255
+    uint8_t blk;       // block-light-channel brightness * 255
     uint8_t layer;     // texture-array layer = atlas tile index
+    uint8_t pad = 0;   // keep the stride even
 };
-static_assert(sizeof(ChunkVertex) == 12, "ChunkVertex must stay tightly packed");
+static_assert(sizeof(ChunkVertex) == 14, "ChunkVertex must stay tightly packed");
 
 // CPU-side mesh, built on any thread, uploaded on the GL thread.
 // Water lives in its own arrays: it is drawn in a separate translucent pass
