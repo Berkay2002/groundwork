@@ -71,7 +71,7 @@ struct Settings {
     void save(const std::string& path) const {
         std::ofstream f(path);
         if (!f) return;
-        f << "# Minecraft clone settings\n"
+        f << "# Groundwork settings\n"
           << "mouse_sensitivity=" << mouseSensitivity << "\n"
           << "fov=" << fov << "\n"
           << "render_distance=" << renderDistance << "\n"

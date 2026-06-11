@@ -11,7 +11,7 @@ cmake --build build -j        # must be warning-free (-Wall)
 
 ```sh
 rm -rf saves screenshot.*                      # only if saves/ is your own test state!
-timeout 90 ./build/minecraft --frames 300      # auto-exits, writes screenshot.ppm
+timeout 90 ./build/groundwork --frames 300      # auto-exits, writes screenshot.ppm
 python3 -c "from PIL import Image; Image.open('screenshot.ppm').save('screenshot.png')"
 ```
 
@@ -30,7 +30,7 @@ import struct
 # MCPL v1: pos(3f) yaw(f) pitch(f) flying(u8) slot(u8)
 d = b'MCPL' + struct.pack('<I', 1) + struct.pack('<5f', 250.0, 60.0, 250.0, 40.0, -12.0) + bytes([1, 0])
 open('saves/world1/player.bin','wb').write(d)"
-timeout 90 ./build/minecraft --frames 600      # 600 frames lets chunks stream in
+timeout 90 ./build/groundwork --frames 600      # 600 frames lets chunks stream in
 ```
 
 ## Staged screenshot scenes (lighting, structures)
@@ -61,8 +61,8 @@ Breaking blocks can't be scripted in a `--frames` run, so two debug flags
 stage the Batch G features for screenshots:
 
 ```sh
-./build/minecraft --demo-items --frames 300   # 3 item cubes 3m ahead of the viewpoint
-./build/minecraft --demo-inv --frames 120     # survival + stocked inventory, UI open
+./build/groundwork --demo-items --frames 300   # 3 item cubes 3m ahead of the viewpoint
+./build/groundwork --demo-inv --frames 120     # survival + stocked inventory, UI open
 ```
 
 Run both from a temp dir (fresh world spawns on land; the real save's

@@ -1,4 +1,4 @@
-# Minecraft Clone (C++ / OpenGL)
+# Groundwork (C++ / OpenGL)
 
 A small voxel game: walk around a procedurally generated chunk world, break and
 place blocks, and your edits persist between sessions.
@@ -9,7 +9,7 @@ place blocks, and your edits persist between sessions.
 sudo apt install build-essential cmake pkg-config libglfw3-dev libglm-dev
 cmake -B build -S .
 cmake --build build -j
-./build/minecraft
+./build/groundwork
 ```
 
 That's the whole install — the binary is self-contained (every texture, font,
@@ -20,7 +20,7 @@ OpenGL 3.3.
 For a stripped release binary:
 
 ```sh
-cmake --install build --strip --prefix dist   # -> dist/bin/minecraft
+cmake --install build --strip --prefix dist   # -> dist/bin/groundwork
 ```
 
 Sound can be compiled out with `-DENABLE_AUDIO=OFF` at configure time (the
@@ -28,8 +28,8 @@ game also simply stays silent when no audio device can be opened).
 
 Run the headless world-logic tests with `./build/world_tests`.
 
-`./build/minecraft --frames 300` runs 300 frames, saves `screenshot.ppm`, and
-exits (useful for automated checks). `./build/minecraft --bench 300` runs 300
+`./build/groundwork --frames 300` runs 300 frames, saves `screenshot.ppm`, and
+exits (useful for automated checks). `./build/groundwork --bench 300` runs 300
 frames with vsync forced off, prints performance counters (fps, chunks
 drawn/loaded, mesh uploads, worker timings), and exits.
 
@@ -37,7 +37,7 @@ drawn/loaded, mesh uploads, worker timings), and exits.
 test (`tests/golden_screenshot.py`) that renders a fixed viewpoint and
 compares it against `tests/golden/reference.png`; it skips without a display.
 After an intentional visual change, regenerate the reference with
-`python3 tests/golden_screenshot.py --update build/minecraft tests/golden/reference.png`.
+`python3 tests/golden_screenshot.py --update build/groundwork tests/golden/reference.png`.
 
 ## Controls
 

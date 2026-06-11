@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A Minecraft-style voxel game in C++17/OpenGL 3.3, grown incrementally from an
-MVP. Work is organized in user-approved batches tracked in `TODO.md`; session
+Groundwork — a Minecraft-style voxel game in C++17/OpenGL 3.3, grown
+incrementally from an MVP. Work is organized in user-approved batches tracked in `TODO.md`; session
 state, workflow, and hard-won gotchas live in `docs/handoff/`. Read
 `docs/handoff/STATUS.md` first when resuming work.
 
@@ -15,8 +15,8 @@ state, workflow, and hard-won gotchas live in `docs/handoff/`. Read
 cmake -B build -S .                 # configure (once, or after CMakeLists edits)
 cmake --build build -j              # build both targets
 ./build/world_tests                 # headless logic tests (no GL context needed)
-./build/minecraft                   # run the game (needs a display)
-./build/minecraft --frames 300      # run N frames, dump screenshot.ppm, exit
+./build/groundwork                  # run the game (needs a display)
+./build/groundwork --frames 300     # run N frames, dump screenshot.ppm, exit
 ctest --test-dir build              # same tests via ctest
 ```
 

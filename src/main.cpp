@@ -633,7 +633,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_SAMPLES, 4);
 
     int width = 1280, height = 720;
-    app.window = glfwCreateWindow(width, height, "Minecraft Clone", nullptr, nullptr);
+    app.window = glfwCreateWindow(width, height, "Groundwork", nullptr, nullptr);
     if (!app.window) {
         std::fprintf(stderr, "failed to create window\n");
         glfwTerminate();
