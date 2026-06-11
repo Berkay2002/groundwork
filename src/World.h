@@ -1,0 +1,106 @@
+#pragma once
+#include "Chunk.h"
+#include "Frustum.h"
+#include "JobQueue.h"
+#include "Terrain.h"
+#include <atomic>
+#include <glm/glm.hpp>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+struct ChunkKey {
+    int x, z;
+    bool operator==(const ChunkKey& o) const { return x == o.x && z == o.z; }
+};
+struct ChunkKeyHash {
+    size_t operator()(const ChunkKey& k) const {
+        return std::hash<int64_t>()((int64_t(k.x) << 32) ^ uint32_t(k.z));
+    }
+};
+
+struct RaycastHit {
+    bool hit = false;
+    glm::ivec3 block{};   // the solid block that was hit
+    glm::ivec3 adjacent{};// the air block in front of the hit face
+};
+
+struct WorldStats {
+    int loaded = 0;       // chunks in memory
+    int drawn = 0;        // chunks drawn last frame (after frustum culling)
+    int uploads = 0;      // meshes uploaded last frame
+    int genQueued = 0;    // generation jobs in flight
+    int meshQueued = 0;   // mesh jobs in flight
+    float genMs = 0;      // moving average per-chunk generation time
+    float meshMs = 0;     // moving average per-chunk mesh build time
+};
+
+// Chunk lifecycle: missing -> pendingGen (worker generates/loads) ->
+// loaded+dirty -> meshInFlight (worker builds vertices) -> uploaded.
+// Edits set dirty again; unload saves modified chunks.
+// All chunk-map mutation and GL work happens on the main thread; workers
+// only see freshly created chunks or immutable snapshots.
+class World {
+public:
+    World(uint32_t seed, std::string saveDir);
+    ~World();
+
+    Block getBlock(int wx, int wy, int wz) const;
+    void setBlock(int wx, int wy, int wz, Block b); // marks chunks dirty + modified
+
+    // Streaming: integrate finished generation jobs, request missing chunks
+    // around the player, unload distant ones.
+    void update(const glm::vec3& playerPos, int renderDistance);
+
+    // Mesh pipeline: upload finished meshes (GL!), enqueue dirty chunks.
+    void processMeshing(int enqueueBudget);
+
+    // True when all chunks within `radius` of pos are in memory.
+    bool isAreaReady(const glm::vec3& pos, int radius) const;
+    // Pump update() until the area is ready (no GL needed; usable in tests).
+    void waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs);
+
+    void drawChunks(const Frustum& frustum);
+
+    RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
+
+    void saveAllModified();
+    WorldStats stats() const;
+
+    static int floorDiv(int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
+    static int mod(int a, int b) { int m = a % b; return m < 0 ? m + b : m; }
+
+private:
+    Chunk* getChunk(int cx, int cz) const;
+    void saveChunk(const Chunk& c);
+    bool loadChunkFromDisk(Chunk& c) const;
+    std::string chunkPath(int cx, int cz) const;
+    void markNeighborsDirty(int cx, int cz);
+    ChunkSnapshot snapshot(const Chunk& c) const;
+
+    uint32_t seed_;
+    Terrain terrain_;
+    std::string saveDir_;
+    std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash> chunks_;
+
+    // Generation pipeline (pendingGen_ is main-thread only).
+    std::unordered_set<ChunkKey, ChunkKeyHash> pendingGen_;
+    std::mutex genM_;
+    std::vector<std::pair<ChunkKey, std::unique_ptr<Chunk>>> genDone_;
+
+    // Meshing pipeline.
+    int meshInFlight_ = 0; // main-thread counter of jobs in the pipeline
+    std::mutex meshM_;
+    std::vector<std::pair<ChunkKey, MeshData>> meshDone_;
+
+    // Perf counters (workers store, main thread reads).
+    std::atomic<float> genMs_{0.0f}, meshMs_{0.0f};
+    int drawn_ = 0, uploads_ = 0;
+
+    // Declared last: destroyed (joined) first, so workers can't touch
+    // queues or terrain after they're gone.
+    JobQueue pool_;
+};
