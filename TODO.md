@@ -30,15 +30,16 @@ break/place, streaming, saving, debug-in-title.
       (main thread only uploads finished meshes; chunk lifecycle states)
 - [x] Performance counters in debug overlay (mesh time, gen time, draw count)
 
-## Batch D — Lighting (Phase 6 pulled forward: biggest visual win)
+## Batch D — Lighting (Phase 6 pulled forward: biggest visual win) — DONE
 
-- [ ] Per-block light storage in chunks (4-bit sunlight + 4-bit block light)
-- [ ] Sunlight: top-down column fill, then BFS spread into overhangs/caves
-- [ ] Incremental relight on block place/break (BFS add, unlight-BFS remove)
-- [ ] Cross-chunk-border propagation (relight neighbors, like mesh dirtying)
-- [ ] Bake light into mesh vertices; combine with existing face shading
-- [ ] Torch block (first light-emitting block, new atlas tile, hotbar slot)
-- [ ] Save light or recompute on load (decide: recompute keeps save format v1)
+- [x] Per-block light storage in chunks (4-bit sunlight + 4-bit block light)
+- [x] Sunlight: top-down column fill, then BFS spread into overhangs/caves
+- [x] Incremental relight on block place/break (BFS add, unlight-BFS remove)
+- [x] Cross-chunk-border propagation (relight neighbors, like mesh dirtying)
+- [x] Bake light into mesh vertices; combine with existing face shading
+- [x] Torch block (first light-emitting block, new atlas tile, hotbar slot;
+      rendered as a 3D post, walk-through, doesn't block light)
+- [x] Save light or recompute on load (decided: recompute — save format stays v1)
 
 ## Batch E — Underground & Richer Terrain (Phase 5)
 

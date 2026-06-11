@@ -14,11 +14,15 @@ struct MeshData {
 
 // Self-contained copy of everything mesh building needs: the chunk's blocks
 // plus one-block-deep slices of the four side neighbors. Workers read only
-// this, never live chunks.
+// this, never live chunks. Light bytes pack sunlight in the low nibble and
+// block light in the high nibble; empty light vectors mean "fully sunlit"
+// (manual test snapshots, missing neighbors).
 struct ChunkSnapshot {
     int cx = 0, cz = 0;
     std::vector<Block> blocks;                       // [(y*CS+z)*CS+x]
     std::vector<Block> edgeXn, edgeXp, edgeZn, edgeZp; // [y*CS + (z or x)]
+    std::vector<uint8_t> light;
+    std::vector<uint8_t> lightXn, lightXp, lightZn, lightZp;
 };
 
 MeshData buildMeshData(const ChunkSnapshot& s);
@@ -44,6 +48,39 @@ public:
         blocks_[index(x, y, z)] = b;
     }
 
+    // Light access (sun = low nibble, block light = high nibble). Light is
+    // never saved: it is recomputed on generation/load and patched
+    // incrementally on edits.
+    uint8_t sunLight(int x, int y, int z) const {
+        if (y >= CHUNK_HEIGHT) return 15;
+        if (y < 0) return 0;
+        return light_[index(x, y, z)] & 0x0F;
+    }
+    uint8_t blockLight(int x, int y, int z) const {
+        if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+        return light_[index(x, y, z)] >> 4;
+    }
+    void setSunLight(int x, int y, int z, uint8_t v) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return;
+        uint8_t& l = light_[index(x, y, z)];
+        l = (l & 0xF0) | v;
+    }
+    void setBlockLight(int x, int y, int z, uint8_t v) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return;
+        uint8_t& l = light_[index(x, y, z)];
+        l = (l & 0x0F) | uint8_t(v << 4);
+    }
+    uint8_t packedLight(int x, int y, int z) const {
+        if (y >= CHUNK_HEIGHT) return 0x0F; // open sky
+        if (y < 0) return 0;
+        return light_[index(x, y, z)];
+    }
+
+    // Sunlight column fill + in-chunk BFS for both channels. Pure CPU work on
+    // this chunk only, so generation workers may call it on fresh chunks;
+    // cross-border propagation happens later on the main thread.
+    void computeInitialLight();
+
     // Lifecycle flags (all owned by the main thread).
     bool dirty = true;          // blocks changed since last mesh enqueue
     bool meshInFlight = false;  // a mesh job for this chunk is in the pipeline
@@ -65,6 +102,7 @@ private:
 
     int cx_, cz_;
     std::vector<Block> blocks_;
+    std::vector<uint8_t> light_;
 
     unsigned vao_ = 0, vbo_ = 0, ebo_ = 0;
     int indexCount_ = 0;

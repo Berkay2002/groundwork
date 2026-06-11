@@ -49,7 +49,11 @@ public:
     ~World();
 
     Block getBlock(int wx, int wy, int wz) const;
-    void setBlock(int wx, int wy, int wz, Block b); // marks chunks dirty + modified
+    void setBlock(int wx, int wy, int wz, Block b); // marks chunks dirty + modified, relights
+
+    // Light queries (0..15). Above the world: full sun; missing chunk: 0.
+    uint8_t sunLightAt(int wx, int wy, int wz) const;
+    uint8_t blockLightAt(int wx, int wy, int wz) const;
 
     // Streaming: integrate finished generation jobs, request missing chunks
     // around the player, unload distant ones.
@@ -80,6 +84,16 @@ private:
     std::string chunkPath(int cx, int cz) const;
     void markNeighborsDirty(int cx, int cz);
     ChunkSnapshot snapshot(const Chunk& c) const;
+
+    // Cross-chunk light BFS (main thread only: walks live chunks, marks them
+    // dirty). Workers compute per-chunk initial light; everything that can
+    // cross a border goes through these.
+    enum class LightChan { Sun, Block };
+    uint8_t getLight(LightChan ch, int wx, int wy, int wz) const;
+    void setLight(LightChan ch, int wx, int wy, int wz, uint8_t v);
+    void addLight(LightChan ch, std::vector<glm::ivec3> seeds);
+    void removeLight(LightChan ch, const glm::ivec3& pos);
+    void seedChunkBorderLight(int cx, int cz);
 
     uint32_t seed_;
     Terrain terrain_;

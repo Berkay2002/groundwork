@@ -76,6 +76,19 @@ RGB bedrockPixel(int x, int y) {
     float n = 0.5f + 0.7f * noise01(x / 2, y / 2, 12);
     return shade({80, 80, 84}, n);
 }
+RGB torchPixel(int x, int y) {
+    // Classic torch: wooden stick up the middle, flame on top. y counts from
+    // the bottom of the face (v=0). The torch model samples the central 2px
+    // strip (x 7..8): stick rows 0..5, flame rows 6..9, flame cap rows 8..9.
+    bool core = x >= 7 && x <= 8;
+    if (core && y <= 5)
+        return shade({118, 92, 51}, 0.78f + 0.35f * noise01(x, y, 14)); // stick
+    if (core && (y == 7 || y == 8))
+        return shade({255, 244, 180}, 0.92f + 0.16f * noise01(x, y, 13)); // hot core
+    if (x >= 6 && x <= 9 && y >= 5 && y <= 10)
+        return shade({252, 150, 28}, 0.85f + 0.3f * noise01(x, y, 13)); // flame
+    return shade({26, 26, 30}, 0.8f + 0.3f * noise01(x, y, 15)); // background
+}
 }
 
 unsigned createBlockAtlas() {
@@ -96,7 +109,8 @@ unsigned createBlockAtlas() {
                 case 5: c = woodTopPixel(tx, y); break;
                 case 6: c = leavesPixel(tx, y); break;
                 case 7: c = sandPixel(tx, y); break;
-                default: c = bedrockPixel(tx, y); break;
+                case 8: c = bedrockPixel(tx, y); break;
+                default: c = torchPixel(tx, y); break;
             }
             size_t i = (size_t(y) * W + x) * 3;
             img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;

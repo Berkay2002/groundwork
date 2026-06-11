@@ -33,7 +33,7 @@ bool Player::collidesAt(World& world, const glm::vec3& p) const {
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x)
-                if (isSolid(world.getBlock(x, y, z))) return true;
+                if (isCollidable(world.getBlock(x, y, z))) return true;
     return false;
 }
 

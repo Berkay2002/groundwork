@@ -30,13 +30,14 @@ exits (useful for automated checks).
 | Left Ctrl | Sprint |
 | Left click | Break block |
 | Right click | Place block |
-| 1–6, scroll wheel | Select hotbar slot |
+| 1–7, scroll wheel | Select hotbar slot |
 | F | Toggle fly mode |
 | Esc | Release mouse, then quit |
 
 A debug overlay (FPS, position, current chunk, drawn/loaded chunk counts,
-generation and meshing timings with queue depths, targeted block) is drawn in
-the top-left corner, and a hotbar with the selected block at the bottom.
+generation and meshing timings with queue depths, targeted block and the
+sun/torch light at its face) is drawn in the top-left corner, and a hotbar
+with the selected block at the bottom.
 
 ## Settings
 
@@ -58,9 +59,17 @@ the top-left corner, and a hotbar with the selected block at the bottom.
   the only synchronization. Lifecycle: missing → generating → loaded+dirty →
   meshing → uploaded; edits set dirty again.
 - **Chunk** (`src/Chunk.h/.cpp`) — 16×80×16 block storage plus mesh building:
-  only faces adjacent to air are emitted, with per-face shading baked into the
+  only faces adjacent to non-opaque cells are emitted, with per-face shading
+  and the light level of the cell each face looks into baked into the
   vertices. Chunks are marked dirty on edits (including neighbors across
-  borders) and rebuilt with a per-frame budget.
+  borders) and rebuilt with a per-frame budget. Torches are meshed as thin
+  3D posts rather than cubes.
+- **Lighting** — every cell stores 4-bit sunlight + 4-bit block light.
+  Sunlight column-fills from the sky (level 15 falls without attenuation)
+  and BFS-spreads into overhangs; torches emit block light 14 that fades by
+  one per block. Breaking/placing blocks relights incrementally (flood-fill
+  add, unlight-BFS remove), propagating across chunk borders. Light is never
+  saved — it is recomputed when a chunk is generated or loaded.
 - **Terrain** (`src/Terrain.cpp`, `src/Noise.h`) — deterministic and a pure
   function of world coordinates + seed: rolling value-noise plains plus
   occasional hill regions selected by a low-frequency mask; sandy basins below

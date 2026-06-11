@@ -30,7 +30,7 @@ const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
 
 const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
-                        Block::Wood, Block::Leaves, Block::Sand};
+                        Block::Wood, Block::Leaves, Block::Sand, Block::Torch};
 constexpr int HOTBAR_SLOTS = int(sizeof(HOTBAR) / sizeof(HOTBAR[0]));
 
 const char* CHUNK_VS = R"(
@@ -170,6 +170,7 @@ const char* blockName(Block b) {
         case Block::Leaves:  return "Leaves";
         case Block::Sand:    return "Sand";
         case Block::Bedrock: return "Bedrock";
+        case Block::Torch:   return "Torch";
         default:             return "Air";
     }
 }
@@ -256,19 +257,24 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
     int pcx = World::floorDiv((int)std::floor(p.pos.x), CHUNK_SIZE);
     int pcz = World::floorDiv((int)std::floor(p.pos.z), CHUNK_SIZE);
     WorldStats st = world.stats();
+    char lightBuf[48] = "";
+    if (hit.hit) // light of the air cell the targeted face looks into
+        std::snprintf(lightBuf, sizeof(lightBuf), "  sun %d torch %d",
+                      world.sunLightAt(hit.adjacent.x, hit.adjacent.y, hit.adjacent.z),
+                      world.blockLightAt(hit.adjacent.x, hit.adjacent.y, hit.adjacent.z));
     char buf[512];
     std::snprintf(buf, sizeof(buf),
         "%.0f fps (%.1f ms)\n"
         "pos %.1f %.1f %.1f\n"
         "chunk %d,%d  drawn %d/%d\n"
         "gen %.1fms q%d  mesh %.1fms q%d up%d\n"
-        "target: %s%s",
+        "target: %s%s%s",
         fps, frameMs,
         p.pos.x, p.pos.y, p.pos.z,
         pcx, pcz, st.drawn, st.loaded,
         st.genMs, st.genQueued, st.meshMs, st.meshQueued, st.uploads,
         hit.hit ? blockName(world.getBlock(hit.block.x, hit.block.y, hit.block.z)) : "-",
-        p.flying ? "\n[FLY]" : "");
+        lightBuf, p.flying ? "\n[FLY]" : "");
     // Drop shadow then text, for readability over bright sky.
     hud.drawText(11, 11, 2.0f, buf, 0, 0, 0, 0.6f);
     hud.drawText(10, 10, 2.0f, buf);
@@ -418,10 +424,14 @@ int main(int argc, char** argv) {
         glBindTexture(GL_TEXTURE_2D, atlas);
         world.drawChunks(Frustum::fromMatrix(viewProj));
 
-        // Selected block outline
+        // Selected block outline (shrunk to the post for torches)
         if (hit.hit) {
             lineShader.use();
             glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(hit.block));
+            if (world.getBlock(hit.block.x, hit.block.y, hit.block.z) == Block::Torch) {
+                model = glm::translate(model, glm::vec3(7.0f / 16.0f, 0.0f, 7.0f / 16.0f));
+                model = glm::scale(model, glm::vec3(2.0f / 16.0f, 10.0f / 16.0f, 2.0f / 16.0f));
+            }
             lineShader.setMat4("uMVP", viewProj * model);
             lineShader.setVec3("uColor", glm::vec3(0.05f));
             glBindVertexArray(cubeVao);

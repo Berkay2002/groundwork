@@ -162,9 +162,78 @@ static void testMeshData() {
     CHECK(md.inds.size() == 5u * 6);
 }
 
+static int surfaceY(World& w, int x, int z) {
+    for (int y = CHUNK_HEIGHT - 1; y >= 0; --y)
+        if (isSolid(w.getBlock(x, y, z))) return y;
+    return -1;
+}
+
+static void testSunlight() {
+    const char* dir = "test_saves_light";
+    std::filesystem::remove_all(dir);
+    { // scope: ~World saves modified chunks, so it must run before cleanup
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+    int top = surfaceY(w, 8, 8);
+    CHECK(top > 0);
+    CHECK(w.sunLightAt(8, top + 1, 8) == 15);   // open sky
+    CHECK(w.sunLightAt(8, top, 8) == 0);        // inside the surface block
+    CHECK(w.blockLightAt(8, top + 1, 8) == 0);  // no emitters in raw terrain
+
+    // A floating block shadows the column below to 14 (sideways refill)...
+    w.setBlock(8, top + 8, 8, Block::Stone);
+    CHECK(w.sunLightAt(8, top + 9, 8) == 15);
+    CHECK(w.sunLightAt(8, top + 7, 8) == 14);
+    CHECK(w.sunLightAt(8, top + 1, 8) == 14);
+    // ...and breaking it restores full sun all the way down.
+    w.setBlock(8, top + 8, 8, Block::Air);
+    CHECK(w.sunLightAt(8, top + 7, 8) == 15);
+    CHECK(w.sunLightAt(8, top + 1, 8) == 15);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+static void testTorchLight() {
+    const char* dir = "test_saves_torch";
+    std::filesystem::remove_all(dir);
+    {
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+    int top = surfaceY(w, 8, 8);
+    w.setBlock(8, top + 1, 8, Block::Torch);
+    CHECK(w.blockLightAt(8, top + 1, 8) == 14); // the torch cell itself
+    CHECK(w.blockLightAt(8, top + 2, 8) == 13); // one step of attenuation
+    CHECK(w.blockLightAt(8, top + 3, 8) == 12);
+    CHECK(w.sunLightAt(8, top + 1, 8) == 15);   // torch doesn't block sun
+    w.setBlock(8, top + 1, 8, Block::Air);
+    CHECK(w.blockLightAt(8, top + 1, 8) == 0);  // unlight BFS cleaned up
+    CHECK(w.blockLightAt(8, top + 2, 8) == 0);
+    CHECK(w.sunLightAt(8, top + 1, 8) == 15);   // sun column restored
+    }
+    std::filesystem::remove_all(dir);
+}
+
+static void testCrossBorderTorch() {
+    const char* dir = "test_saves_border";
+    std::filesystem::remove_all(dir);
+    {
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(0, 40, 8), 1, 5000); // chunks (-1..1, -1..1)
+    int top = surfaceY(w, 0, 8);
+    // Make sure the cell across the chunk border is air, then light it.
+    if (isSolid(w.getBlock(-1, top + 1, 8))) w.setBlock(-1, top + 1, 8, Block::Air);
+    w.setBlock(0, top + 1, 8, Block::Torch);
+    CHECK(w.blockLightAt(-1, top + 1, 8) == 13); // crossed into chunk (-1,0)
+    }
+    std::filesystem::remove_all(dir);
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
+    testSunlight();
+    testTorchLight();
+    testCrossBorderTorch();
     testTerrainDeterminism();
     testTerrainShape();
     testTreeBorderConsistency();
