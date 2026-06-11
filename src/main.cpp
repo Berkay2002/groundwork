@@ -102,6 +102,8 @@ out vec4 FragColor;
 void main() { FragColor = vec4(uColor, 1.0); }
 )";
 
+enum class Menu { None, Main, Settings }; // pause-menu state
+
 struct App {
     GLFWwindow* window = nullptr;
     Player player;
@@ -110,6 +112,9 @@ struct App {
     Inventory inv;          // survival-mode item storage (row 0 = hotbar)
     ItemStack cursorStack;  // stack carried by the mouse in the inventory UI
     Entities entities;
+    Settings settings;
+    Audio audio;
+    Menu menu = Menu::None;
     bool survival = false;
     bool invOpen = false;
     bool mouseCaptured = true;
@@ -187,11 +192,150 @@ void closeInventory(GLFWwindow* w) {
     glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 }
 
+// ---- Pause menu: Esc opens it, gameplay freezes behind a dim overlay.
+// Every settings change applies live and is written back to settings.cfg.
+
+struct Rect {
+    float x = 0, y = 0, w = 0, h = 0;
+    bool contains(float mx, float my) const {
+        return mx >= x && mx < x + w && my >= y && my < y + h;
+    }
+};
+
+const char* const MENU_BUTTONS[] = {"Resume", "Settings", "Quit"};
+constexpr int MENU_BUTTON_COUNT = 3;
+const char* const SETTING_LABELS[] = {
+    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync"};
+constexpr int SETTING_COUNT = 5;
+
+Rect menuButtonRect(int w, int h, int i) {
+    const float bw = 260, bh = 44, gap = 14;
+    float y0 = h * 0.5f - (MENU_BUTTON_COUNT * (bh + gap) - gap) * 0.5f;
+    return {(w - bw) * 0.5f, y0 + i * (bh + gap), bw, bh};
+}
+
+// Settings rows: label left, [-] value [+] right; a Back button sits in the
+// extra row slot below.
+Rect settingsRowRect(int w, int h, int i) {
+    const float rw = 460, rh = 40, gap = 10;
+    float y0 = h * 0.5f - ((SETTING_COUNT + 1) * (rh + gap) - gap) * 0.5f;
+    return {(w - rw) * 0.5f, y0 + i * (rh + gap), rw, rh};
+}
+Rect settingsDecRect(const Rect& row) { return {row.x + row.w - 160, row.y + 4, 32, row.h - 8}; }
+Rect settingsIncRect(const Rect& row) { return {row.x + row.w - 36, row.y + 4, 32, row.h - 8}; }
+Rect settingsBackRect(int w, int h) {
+    Rect slot = settingsRowRect(w, h, SETTING_COUNT);
+    return {(w - 260) * 0.5f, slot.y, 260.0f, 44.0f};
+}
+
+void settingValueText(int row, char* buf, size_t n) {
+    const Settings& s = app.settings;
+    switch (row) {
+        case 0: std::snprintf(buf, n, "%d", s.renderDistance); break;
+        case 1: std::snprintf(buf, n, "%.0f", s.fov); break;
+        case 2: std::snprintf(buf, n, "%.2f", s.mouseSensitivity); break;
+        case 3: std::snprintf(buf, n, "%d%%", int(s.volume * 100.0f + 0.5f)); break;
+        case 4: std::snprintf(buf, n, "%s", s.vsync ? "on" : "off"); break;
+    }
+}
+
+void adjustSetting(int row, int dir) {
+    Settings& s = app.settings;
+    switch (row) {
+        case 0: s.renderDistance = std::min(16, std::max(2, s.renderDistance + dir)); break;
+        case 1: s.fov = std::min(110.0f, std::max(30.0f, s.fov + 5.0f * dir)); break;
+        case 2:
+            s.mouseSensitivity = std::min(0.5f, std::max(0.02f, s.mouseSensitivity + 0.02f * dir));
+            app.player.sensitivity = s.mouseSensitivity;
+            break;
+        case 3:
+            s.volume = std::min(1.0f, std::max(0.0f, s.volume + 0.1f * dir));
+            app.audio.setVolume(s.volume);
+            break;
+        case 4: s.vsync = !s.vsync; glfwSwapInterval(s.vsync ? 1 : 0); break;
+    }
+    s.save("settings.cfg");
+}
+
+void openMenu() {
+    app.menu = Menu::Main;
+    app.mouseCaptured = false;
+    glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+}
+
+void closeMenu() {
+    app.menu = Menu::None;
+    app.mouseCaptured = true;
+    app.firstMouse = true;
+    glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+}
+
+void menuClick(int w, int h, float mx, float my) {
+    if (app.menu == Menu::Main) {
+        for (int i = 0; i < MENU_BUTTON_COUNT; ++i) {
+            if (!menuButtonRect(w, h, i).contains(mx, my)) continue;
+            if (i == 0) closeMenu();
+            else if (i == 1) app.menu = Menu::Settings;
+            else glfwSetWindowShouldClose(app.window, GLFW_TRUE);
+            return;
+        }
+    } else if (app.menu == Menu::Settings) {
+        for (int i = 0; i < SETTING_COUNT; ++i) {
+            Rect row = settingsRowRect(w, h, i);
+            if (settingsDecRect(row).contains(mx, my)) { adjustSetting(i, -1); return; }
+            if (settingsIncRect(row).contains(mx, my)) { adjustSetting(i, +1); return; }
+        }
+        if (settingsBackRect(w, h).contains(mx, my)) app.menu = Menu::Main;
+    }
+}
+
+void drawMenuButton(Hud& hud, const Rect& r, const char* label,
+                    float mx, float my, float scale = 2.0f) {
+    bool hover = r.contains(mx, my);
+    hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, hover ? 0.95f : 0.8f);
+    float tw = std::strlen(label) * Hud::GLYPH * scale;
+    hud.drawText(r.x + (r.w - tw) * 0.5f, r.y + (r.h - Hud::GLYPH * scale) * 0.5f,
+                 scale, label);
+}
+
+void drawPauseMenu(Hud& hud, GLFWwindow* w, int sw, int sh) {
+    double mx, my;
+    glfwGetCursorPos(w, &mx, &my);
+    hud.drawRect(0, 0, float(sw), float(sh), 0, 0, 0, 0.55f);
+    const char* title = app.menu == Menu::Main ? "Paused" : "Settings";
+    float tw = std::strlen(title) * Hud::GLYPH * 3.0f;
+    float topY = (app.menu == Menu::Main ? menuButtonRect(sw, sh, 0).y
+                                         : settingsRowRect(sw, sh, 0).y);
+    hud.drawText((sw - tw) * 0.5f, topY - 56.0f, 3.0f, title);
+    if (app.menu == Menu::Main) {
+        for (int i = 0; i < MENU_BUTTON_COUNT; ++i)
+            drawMenuButton(hud, menuButtonRect(sw, sh, i), MENU_BUTTONS[i],
+                           float(mx), float(my));
+        return;
+    }
+    for (int i = 0; i < SETTING_COUNT; ++i) {
+        Rect row = settingsRowRect(sw, sh, i);
+        hud.drawRect(row.x, row.y, row.w, row.h, 0.1f, 0.1f, 0.1f, 0.7f);
+        hud.drawText(row.x + 10, row.y + (row.h - Hud::GLYPH * 2.0f) * 0.5f, 2.0f,
+                     SETTING_LABELS[i]);
+        drawMenuButton(hud, settingsDecRect(row), "-", float(mx), float(my));
+        drawMenuButton(hud, settingsIncRect(row), "+", float(mx), float(my));
+        char val[16];
+        settingValueText(i, val, sizeof(val));
+        // Value centered between the - and + buttons.
+        float vx0 = settingsDecRect(row).x + 32, vx1 = settingsIncRect(row).x;
+        float vw = std::strlen(val) * Hud::GLYPH * 2.0f;
+        hud.drawText(vx0 + (vx1 - vx0 - vw) * 0.5f,
+                     row.y + (row.h - Hud::GLYPH * 2.0f) * 0.5f, 2.0f, val);
+    }
+    drawMenuButton(hud, settingsBackRect(sw, sh), "Back", float(mx), float(my));
+}
+
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     if (action == GLFW_PRESS) {
         switch (key) {
             case GLFW_KEY_E:
-                if (!app.survival) break;
+                if (!app.survival || app.menu != Menu::None) break;
                 if (app.invOpen) {
                     closeInventory(w);
                 } else {
@@ -202,22 +346,32 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
                 break;
             case GLFW_KEY_ESCAPE:
                 if (app.invOpen) { closeInventory(w); break; }
-                if (app.mouseCaptured) {
-                    app.mouseCaptured = false;
-                    glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                } else {
-                    glfwSetWindowShouldClose(w, GLFW_TRUE);
-                }
+                if (app.menu == Menu::Settings) { app.menu = Menu::Main; break; }
+                if (app.menu == Menu::Main) { closeMenu(); break; }
+                openMenu();
                 break;
-            case GLFW_KEY_F: app.player.flying = !app.player.flying; break;
+            case GLFW_KEY_F:
+                if (app.menu == Menu::None) app.player.flying = !app.player.flying;
+                break;
             default:
-                if (key >= GLFW_KEY_1 && key < GLFW_KEY_1 + HOTBAR_SLOTS)
+                if (app.menu == Menu::None &&
+                    key >= GLFW_KEY_1 && key < GLFW_KEY_1 + HOTBAR_SLOTS)
                     app.hotbarSlot = key - GLFW_KEY_1;
         }
     }
 }
 
 void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
+    if (app.menu != Menu::None) { // clicks operate the pause menu
+        if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+            double mx, my;
+            glfwGetCursorPos(w, &mx, &my);
+            int ww, wh;
+            glfwGetWindowSize(w, &ww, &wh);
+            menuClick(ww, wh, float(mx), float(my));
+        }
+        return;
+    }
     if (app.invOpen) { // clicks move stacks instead of recapturing the mouse
         if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
             double mx, my;
@@ -449,6 +603,7 @@ int main(int argc, char** argv) {
     bool bench = false;
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
+    Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
     for (int i = 1; i < argc; ++i) {
         if (i < argc - 1) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
@@ -456,9 +611,12 @@ int main(int argc, char** argv) {
         }
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
         if (std::strcmp(argv[i], "--demo-inv") == 0) demoInv = true;
+        if (std::strcmp(argv[i], "--demo-menu") == 0) demoMenu = Menu::Main;
+        if (std::strcmp(argv[i], "--demo-settings") == 0) demoMenu = Menu::Settings;
     }
 
-    Settings settings = Settings::load("settings.cfg");
+    app.settings = Settings::load("settings.cfg");
+    Settings& settings = app.settings; // pause menu edits it live
     app.player.sensitivity = settings.mouseSensitivity;
     app.survival = settings.survival;
 
@@ -506,9 +664,9 @@ int main(int argc, char** argv) {
 
     World world(WORLD_SEED, SAVE_DIR);
 
-    Audio audio; // stays silent if disabled at build time or no device opens
-    audio.init();
-    audio.setVolume(settings.volume);
+    // Audio stays silent if disabled at build time or no device opens.
+    app.audio.init();
+    app.audio.setVolume(settings.volume);
 
     bool restored = loadPlayer();
     // Pre-load the area around the player so they don't fall through.
@@ -531,6 +689,11 @@ int main(int argc, char** argv) {
         app.invOpen = true;
         app.mouseCaptured = false;
         glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+
+    if (demoMenu != Menu::None) {
+        openMenu();
+        app.menu = demoMenu;
     }
 
     double lastTime = glfwGetTime();
@@ -559,8 +722,14 @@ int main(int argc, char** argv) {
         // --- Update ---
         // Simulation runs at a fixed 20 TPS (multiplayer insurance: ticks
         // are frame-rate independent); rendering interpolates by alpha.
-        accumulator += dt;
-        gameTime += dt;
+        // Pause menu open: time simply stops accumulating (items freeze
+        // mid-bob, no ticks run), while streaming/rendering continue so
+        // render-distance changes apply behind the menu.
+        const bool paused = app.menu != Menu::None;
+        if (!paused) {
+            accumulator += dt;
+            gameTime += dt;
+        }
         int ticksRun = 0;
         while (accumulator >= TICK_DT) {
             if (++ticksRun > MAX_TICKS_PER_FRAME) { accumulator = 0.0; break; }
@@ -572,7 +741,7 @@ int main(int argc, char** argv) {
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
                 if (stepDist > 2.2f) { // roughly one stride
                     stepDist = 0.0f;
-                    audio.playVaried(Sound::Footstep, 0.6f);
+                    app.audio.playVaried(Sound::Footstep, 0.6f);
                 }
             }
             app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
@@ -611,7 +780,7 @@ int main(int argc, char** argv) {
             isBreakable(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
             Block broken = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
             world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
-            audio.playVaried(Sound::Break);
+            app.audio.playVaried(Sound::Break);
             // Creative destroys outright; survival drops the registry item.
             if (app.survival) app.entities.spawnBlockDrop(hit.block, broken);
         }
@@ -622,7 +791,7 @@ int main(int argc, char** argv) {
                 !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
                 if (!app.survival || app.inv.consumeOne(app.hotbarSlot)) {
                     world.setBlock(p.x, p.y, p.z, held);
-                    audio.playVaried(Sound::Place, 0.8f);
+                    app.audio.playVaried(Sound::Place, 0.8f);
                 }
             }
         }
@@ -684,10 +853,11 @@ int main(int argc, char** argv) {
             fpsTimer = 0.0;
         }
         hud.begin(width, height);
-        if (!app.invOpen) drawCrosshair(hud, width, height);
+        if (!app.invOpen && !paused) drawCrosshair(hud, width, height);
         drawDebugOverlay(hud, world, fps, frameMs, hit);
         drawHotbar(hud, width, height);
         if (app.invOpen) drawInventory(hud, app.window, width, height);
+        if (paused) drawPauseMenu(hud, app.window, width, height);
         hud.end();
 
         glfwSwapBuffers(app.window);
