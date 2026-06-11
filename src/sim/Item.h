@@ -164,7 +164,7 @@ inline ItemStack makeToolStack(ItemId id) {
 inline bool stacksCompatible(const ItemStack& a, const ItemStack& b) {
     if (a.empty() || b.empty()) return false;
     const ItemDef& d = itemDef(a.item);
-    if (a.item != b.item || d.stackMax <= 1) return false;
-    if (d.maxDurability > 0 && a.durability != b.durability) return false;
-    return true;
+    if (a.item != b.item) return false;
+    if (d.maxDurability > 0) return a.durability == b.durability;
+    return d.stackMax > 1;
 }

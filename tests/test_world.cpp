@@ -951,7 +951,9 @@ static void testItemRegistry() {
     ItemStack a = makeToolStack(ItemId::StoneAxe);
     ItemStack b = makeToolStack(ItemId::StoneAxe);
     CHECK(a.durability == itemDef(ItemId::StoneAxe).maxDurability);
-    CHECK(!stacksCompatible(a, b)); // durable items do not merge for this batch
+    CHECK(stacksCompatible(a, b)); // compatible, but stackMax 1 prevents merging
+    --b.durability;
+    CHECK(!stacksCompatible(a, b));
     CHECK(stacksCompatible({ItemId::Coal, 3, 0}, {ItemId::Coal, 4, 0}));
 }
 

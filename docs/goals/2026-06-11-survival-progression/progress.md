@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M1 milestone review
-- Last verified: M1/T2 validation green (`cmake --build build -j` exit 0;
+- Current: M1 milestone review recheck
+- Last verified: M1 compliance fix validation green (`cmake --build build -j` exit 0;
   `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
@@ -43,3 +43,9 @@
   inventory, and v2 block-stack saves migrate slot-for-slot with Stone ->
   Cobblestone item. Validation: `cmake --build build -j &&
   .\build\world_tests.exe` exit 0; tests printed `all tests passed`.
+- [2026-06-11] M1 spec-compliance review round 1: REJECTED. Finding
+  M1-SPEC-001: `stacksCompatible` rejected matching durable stacks, contrary
+  to the Task 1 helper contract. Fixed helper to treat same item + same
+  durability as compatible while stack max 1 still prevents tool merging.
+  Validation rerun: `cmake --build build -j && .\build\world_tests.exe` exit
+  0; tests printed `all tests passed`.
