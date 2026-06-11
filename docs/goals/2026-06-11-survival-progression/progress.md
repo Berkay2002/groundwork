@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M3 spec-compliance re-review
-- Last verified: M3 spec-review fixes validation green (`cmake --build build -j` exit 0,
+- Current: M3 code-quality review
+- Last verified: M3 spec-compliance re-review approved after fixes (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 3
@@ -127,3 +127,6 @@
   blocked/missing input, and clearing the output store on bad/malformed loads.
   Validation rerun: `cmake --build build -j` exit 0 warning-free;
   `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
+- [2026-06-11] M3 spec-compliance re-review round 2: APPROVED. Prior findings
+  M3-SPEC-001 and M3-SPEC-002 resolved; no new Critical or Important
+  spec-compliance findings.
