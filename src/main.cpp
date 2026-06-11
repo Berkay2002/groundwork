@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -123,10 +124,82 @@ Block heldBlock() {
     return s.empty() ? Block::Air : s.block;
 }
 
+// ---- Inventory UI (survival): rows 1..3 on top, hotbar row 0 below a gap ----
+
+struct InvLayout { float slot = 56.0f, pad = 4.0f; float x0 = 0, y0 = 0; };
+
+InvLayout invLayout(int w, int h) {
+    InvLayout L;
+    float gw = Inventory::COLS * L.slot + (Inventory::COLS - 1) * L.pad;
+    float gh = Inventory::ROWS * L.slot + (Inventory::ROWS - 1) * L.pad + 14.0f;
+    L.x0 = (w - gw) * 0.5f;
+    L.y0 = (h - gh) * 0.5f;
+    return L;
+}
+
+float invSlotY(const InvLayout& L, int row) { // row 0 = hotbar, drawn last
+    if (row == 0) return L.y0 + 3 * (L.slot + L.pad) + 14.0f;
+    return L.y0 + (row - 1) * (L.slot + L.pad);
+}
+
+int invSlotAt(int w, int h, float mx, float my) {
+    InvLayout L = invLayout(w, h);
+    for (int i = 0; i < Inventory::SLOTS; ++i) {
+        float x = L.x0 + (i % Inventory::COLS) * (L.slot + L.pad);
+        float y = invSlotY(L, i / Inventory::COLS);
+        if (mx >= x && mx < x + L.slot && my >= y && my < y + L.slot) return i;
+    }
+    return -1;
+}
+
+// Left click: pick up / put down / swap; same block merges into the slot.
+void invClick(int slot) {
+    if (slot < 0) return;
+    ItemStack& s = app.inv.slots[slot];
+    ItemStack& c = app.cursorStack;
+    if (c.empty()) {
+        c = s;
+        s = {};
+    } else if (s.empty() || s.block != c.block) {
+        std::swap(s, c);
+    } else {
+        int space = Inventory::STACK_MAX - int(s.count);
+        int moved = std::min(space, int(c.count));
+        s.count = uint8_t(s.count + moved);
+        c.count = uint8_t(c.count - moved);
+        if (c.count == 0) c = {};
+    }
+}
+
+void closeInventory(GLFWwindow* w) {
+    app.invOpen = false;
+    if (!app.cursorStack.empty()) { // never destroy items on close
+        int leftover = app.inv.add(app.cursorStack.block, app.cursorStack.count);
+        if (leftover > 0)
+            app.entities.spawnItem(app.player.eyePos(), app.player.lookDir() * 3.0f,
+                                   app.cursorStack.block, leftover);
+        app.cursorStack = {};
+    }
+    app.mouseCaptured = true;
+    app.firstMouse = true;
+    glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+}
+
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
     if (action == GLFW_PRESS) {
         switch (key) {
+            case GLFW_KEY_E:
+                if (!app.survival) break;
+                if (app.invOpen) {
+                    closeInventory(w);
+                } else {
+                    app.invOpen = true;
+                    app.mouseCaptured = false;
+                    glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
+                break;
             case GLFW_KEY_ESCAPE:
+                if (app.invOpen) { closeInventory(w); break; }
                 if (app.mouseCaptured) {
                     app.mouseCaptured = false;
                     glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
@@ -143,6 +216,16 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
 }
 
 void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
+    if (app.invOpen) { // clicks move stacks instead of recapturing the mouse
+        if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+            double mx, my;
+            glfwGetCursorPos(w, &mx, &my);
+            int ww, wh;
+            glfwGetWindowSize(w, &ww, &wh); // cursor coords are window coords
+            invClick(invSlotAt(ww, wh, float(mx), float(my)));
+        }
+        return;
+    }
     if (!app.mouseCaptured) {
         if (action == GLFW_PRESS) {
             app.mouseCaptured = true;
@@ -331,6 +414,36 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
     }
 }
 
+void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
+    hud.drawRect(0, 0, float(screenW), float(screenH), 0, 0, 0, 0.55f);
+    InvLayout L = invLayout(screenW, screenH);
+    hud.drawText(L.x0, L.y0 - 26.0f, 2.0f, "Inventory");
+    for (int i = 0; i < Inventory::SLOTS; ++i) {
+        float x = L.x0 + (i % Inventory::COLS) * (L.slot + L.pad);
+        float y = invSlotY(L, i / Inventory::COLS);
+        hud.drawRect(x, y, L.slot, L.slot, 0.15f, 0.15f, 0.15f, 0.9f);
+        const ItemStack& s = app.inv.slots[i];
+        if (s.empty()) continue;
+        hud.drawTile(x + L.pad, y + L.pad, L.slot - 2 * L.pad, tileFor(s.block, 4));
+        if (s.count > 1) {
+            char cnt[4];
+            std::snprintf(cnt, sizeof(cnt), "%d", s.count);
+            float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
+            hud.drawText(x + L.slot - cw - 4, y + L.slot - 16, 1.5f, cnt);
+        }
+    }
+    if (!app.cursorStack.empty()) { // stack riding the mouse
+        double mx, my;
+        glfwGetCursorPos(w, &mx, &my);
+        hud.drawTile(float(mx) - 20, float(my) - 20, 40, tileFor(app.cursorStack.block, 4));
+        if (app.cursorStack.count > 1) {
+            char cnt[4];
+            std::snprintf(cnt, sizeof(cnt), "%d", app.cursorStack.count);
+            hud.drawText(float(mx) + 6, float(my) + 6, 1.5f, cnt);
+        }
+    }
+}
+
 void drawCrosshair(Hud& hud, int screenW, int screenH) {
     float cx = screenW * 0.5f, cy = screenH * 0.5f;
     const float len = 9.0f, th = 2.0f;
@@ -347,12 +460,14 @@ int main(int argc, char** argv) {
     long maxFrames = -1;
     bool bench = false;
     bool demoItems = false; // spawn a few item entities for screenshot checks
+    bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
     for (int i = 1; i < argc; ++i) {
         if (i < argc - 1) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
             if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
         }
         if (std::strcmp(argv[i], "--demo-items") == 0) demoItems = true;
+        if (std::strcmp(argv[i], "--demo-inv") == 0) demoInv = true;
     }
 
     Settings settings = Settings::load("settings.cfg");
@@ -415,6 +530,16 @@ int main(int argc, char** argv) {
         app.entities.spawnItem(base + glm::vec3(1, 0, 0), glm::vec3(0.0f), Block::Stone, 1);
         app.entities.spawnItem(base + glm::vec3(-1, 0, 0), glm::vec3(0.0f), Block::Wood, 1);
     }
+    if (demoInv) {
+        app.survival = true;
+        app.inv.add(Block::Dirt, 80);
+        app.inv.add(Block::Stone, 64);
+        app.inv.add(Block::Wood, 5);
+        app.inv.add(Block::Torch, 3);
+        app.invOpen = true;
+        app.mouseCaptured = false;
+        glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 
     double lastTime = glfwGetTime();
     double accumulator = 0.0; // fixed-timestep simulation accumulator
@@ -447,7 +572,8 @@ int main(int argc, char** argv) {
         while (accumulator >= TICK_DT) {
             if (++ticksRun > MAX_TICKS_PER_FRAME) { accumulator = 0.0; break; }
             app.player.beginTick();
-            app.player.update(world, app.input, TICK_DT);
+            // Inventory open: keep simulating (gravity), drop movement intent.
+            app.player.update(world, app.invOpen ? PlayerInput{} : app.input, TICK_DT);
             app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
             accumulator -= TICK_DT;
         }
@@ -554,9 +680,10 @@ int main(int argc, char** argv) {
             fpsTimer = 0.0;
         }
         hud.begin(width, height);
-        drawCrosshair(hud, width, height);
+        if (!app.invOpen) drawCrosshair(hud, width, height);
         drawDebugOverlay(hud, world, fps, frameMs, hit);
         drawHotbar(hud, width, height);
+        if (app.invOpen) drawInventory(hud, app.window, width, height);
         hud.end();
 
         glfwSwapBuffers(app.window);
