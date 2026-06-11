@@ -129,16 +129,25 @@ what was actually built.
 - [x] Inventory persistence in player.bin (save bumped to v2; v1 files
       migrate with an empty inventory instead of being rejected)
 
-## Batch H — Polish & Distribution
+## Batch H — Polish & Distribution — DONE
 
-- [ ] Audio (block break/place, footsteps; miniaudio or OpenAL, keep optional)
-- [ ] Pause menu (resume / settings / quit; settings editable in-game and
-      written back to settings.cfg)
-- [ ] Key rebinding via settings.cfg
-- [ ] Day/night cycle (sky color + sun light level over time; fog color from
-      the Batch D addenda follows the sky)
-- [ ] Release build packaging (strip, assets-free binary, README quickstart;
-      test build on a clean machine/container)
+- [x] Audio: break/place/footstep effects synthesized at startup (no asset
+      files), mixed by a small voice pool over the vendored miniaudio header;
+      `-DENABLE_AUDIO=OFF` compiles it out, a missing device just means
+      silence; `volume` in settings.cfg
+- [x] Pause menu: Esc pauses the simulation behind a dim overlay
+      (resume / settings / quit); the settings page edits render distance,
+      FOV, sensitivity, volume, vsync live and writes settings.cfg on every
+      change
+- [x] Key rebinding via `key_*` entries in settings.cfg (movement, jump,
+      sneak, sprint, fly, inventory; names per `KeyBinds.h`)
+- [x] Day/night cycle: 10-minute world day drives sky/fog color and a
+      sun-level uniform; vertex light carries separate sun/block channels so
+      night needs no relighting/remeshing and torches stay bright; day clock
+      persisted in level.bin v2 (v1 migrates keeping its seed)
+- [x] Release packaging: `cmake --install build --strip --prefix dist`
+      (449 KB self-contained binary), README quickstart, verified from
+      scratch in a clean ubuntu:24.04 container
 
 ## Far later (only with a working foundation)
 

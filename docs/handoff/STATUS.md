@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11, after Batch G)
+# Status (last updated: 2026-06-11, after Batch H)
 
 ## Where the project stands
 
-All planned batches through G **plus all A–D addenda** are done and verified:
+All planned batches through H **plus all A–D addenda** are done and verified:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -15,6 +15,55 @@ All planned batches through G **plus all A–D addenda** are done and verified:
 | A–D addenda | level.bin seed file, atomic saves, autosave; block registry table; `--bench` + golden-screenshot test; per-vertex AO + smooth lighting (fog pre-existed) | done |
 | Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
 | Batch G | Fixed 20 TPS simulation tick + interpolated rendering, shared `Body` AABB physics, item entities (drops, magnetized pickup, bob/spin rendering), survival mode (finite stacked placement, hotbar counts), 4×8 inventory UI, player save v2 with inventory | done |
+| Batch H | Procedural audio (miniaudio, optional), pause menu with live-editable settings, key rebinding, day/night cycle (split sun/block vertex light channels, level.bin v2), release packaging (stripped 449 KB binary, clean-container build verified) | done |
+
+### Batch H implementation notes (2026-06-11)
+
+- **Audio**: `src/Sounds.h` synthesizes break/place/footstep PCM at startup
+  (filtered xorshift noise, deterministic, headless-tested); `src/Audio.cpp`
+  mixes a 16-voice pool in a miniaudio device callback (mono f32 44.1 kHz,
+  mutex-guarded voices, atomic master volume). miniaudio 0.11.21 is vendored
+  in `third_party/` (SYSTEM include so -Wall stays ours; MA_NO_* trims the
+  build; links ${CMAKE_DL_LIBS} + m). `ENABLE_AUDIO=OFF` swaps in silent
+  stubs — call sites have no #ifdefs. init() failure = silence, never fatal.
+  Footsteps fire per ~2.2 m of on-ground horizontal travel in the tick loop;
+  `playVaried` jitters pitch 0.9–1.1 via an LCG.
+- **Pause menu** (main.cpp): `Menu::{None,Main,Settings}` in App; Esc opens/
+  backs out (inventory still closes first), gameplay freezes by simply not
+  accumulating tick/gameTime while open (streaming + rendering continue, so
+  render-distance edits apply live behind the menu). Settings/audio handles
+  moved into the App global so callbacks and `adjustSetting` reach them;
+  every change applies immediately and rewrites settings.cfg. Hit-testing
+  mirrors drawing via shared Rect helpers (same pattern as the inventory).
+  `--demo-menu`/`--demo-settings` stage the pages for screenshots. NOTE:
+  Esc-Esc no longer quits — quitting is the menu's Quit button.
+- **Key rebinding**: `key_*` entries in settings.cfg, parsed through
+  `KeyBinds.h` (key names → GLFW codes written as plain ints so Settings
+  stays GLFW-free and testable; bad names warn and keep defaults).
+  keyCallback became if/else (case labels can't be runtime values). Esc,
+  hotbar digits, and mouse buttons are deliberately fixed.
+- **Day/night**: `ChunkVertex` grew 12 → 14 bytes — the single brightness
+  byte split into `sun`/`blk` channel bytes (each still bakes shade × smooth
+  light × AO). The shader computes `max(sun × uSunLevel, blk)`, so time of
+  day is one uniform: no relighting, no remeshing, torches glow all night.
+  At `uSunLevel = 1` the output is bit-identical to the old combined byte
+  (curve is monotonic ⇒ max(curve(s),curve(b)) = curve(max(s,b))) — the
+  golden test passed unchanged. The greedy merge key became a
+  pair<uint64,uint64> (12 shading bytes no longer fit in one). ItemRenderer
+  applies the same split on the CPU. `DayCycle.h` (pure, tested): 600 s day,
+  u<0.40 day / 0.50 dusk / 0.90 night / 1.0 dawn, smoothstepped; NIGHT_SUN
+  0.15 moonlight floor; sky lerps day↔night with an orange tint peaking
+  mid-transition; fog follows uSky as before. Day clock lives in World,
+  persisted by saveAllModified into level.bin **v2** (v1 migrates keeping
+  its seed — rewriting with the fallback would have swapped terrain under
+  old saves; only bad magic regenerates). `--time <0..1>` pins the clock
+  for screenshots; overlay shows `day N.NN`. Bench: 713 fps fresh-world
+  (no regression from the wider vertex).
+- **Packaging**: `install(TARGETS minecraft)` + `cmake --install build
+  --strip --prefix dist` → 449 KB self-contained binary. README rewritten
+  with a quickstart (single apt line + 3 commands), rebinding/pause-menu
+  docs, day/night + audio sections. Verified from scratch in a clean
+  ubuntu:24.04 container (apt line → build → tests pass → stripped install).
 
 ### Batch G implementation notes (2026-06-11)
 
@@ -196,11 +245,11 @@ All planned batches through G **plus all A–D addenda** are done and verified:
 
 ## What's next
 
-**Batch H — Polish & Distribution** is next per the agreed order
-(`TODO.md`): audio, pause menu, key rebinding, day/night cycle, release
-packaging. The Block registry's `hardness` column is still unused (no break
-times yet) — a natural survival-mode follow-up if the user wants it before
-H. The Batch G plan lives at `docs/plans/batch-g-items-entities.md`.
+All planned batches (A–H) are **done**. What remains is the "Far later"
+list in `TODO.md`: crafting, mobs, multiplayer, modding — each a major,
+user-approved undertaking. Smaller natural follow-ups if asked: survival
+break times (the registry's `hardness` column is still unused), persisting
+item entities, sounds for more events (splash, inventory clicks).
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -213,7 +262,23 @@ H. The Batch G plan lives at `docs/plans/batch-g-items-entities.md`.
 - World seed fixed at 1337 in `main.cpp`.
 - Internet access works (font8x8 was fetched via curl).
 
-## Recent verification snapshot (Batch G)
+## Recent verification snapshot (Batch H)
+
+Warning-free build with audio ON and OFF; `world_tests` (new: sound
+synthesis bounds/determinism, key-bind parsing + roundtrip, day-cycle
+continuity/wrap/sky, sun-vs-block channel split, level.bin v2 roundtrip +
+v1 seed-keeping migration) passes 3× and under TSAN (ASLR workaround).
+Golden screenshot passes **unchanged** (daytime output bit-identical by
+construction). Verified visually: pause menu + settings page (demo flags),
+dusk orange sky, night with moonlight floor, torch glowing at full
+strength at night (probe-staged scene, `--time 0.7`). Verified live
+(user + xdotool): menu clicks edit settings.cfg; rebound fly key G works,
+unbound F inert. Audio device opens and plays on the user's machine
+(probe). Bench 713 fps fresh-world, mesh 0.34 ms/chunk. Clean
+ubuntu:24.04 container: apt line → build → tests → 449 KB stripped
+install, all green.
+
+## Older verification snapshot (Batch G)
 
 Warning-free build; `world_tests` (new: body physics incl. exact-landing,
 player-on-Body regression, inventory stacking, item fall/land, magnet

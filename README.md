@@ -3,16 +3,28 @@
 A small voxel game: walk around a procedurally generated chunk world, break and
 place blocks, and your edits persist between sessions.
 
-## Build & Run
-
-Requires a C++17 compiler, CMake, GLFW 3, GLM, and OpenGL 3.3
-(Ubuntu: `sudo apt install build-essential cmake libglfw3-dev libglm-dev`).
+## Quickstart
 
 ```sh
+sudo apt install build-essential cmake pkg-config libglfw3-dev libglm-dev
 cmake -B build -S .
 cmake --build build -j
 ./build/minecraft
 ```
+
+That's the whole install — the binary is self-contained (every texture, font,
+and sound effect is generated at startup; there are no asset files to ship
+alongside it). Requires a C++17 compiler, CMake ≥ 3.16, GLFW 3, GLM, and
+OpenGL 3.3.
+
+For a stripped release binary:
+
+```sh
+cmake --install build --strip --prefix dist   # -> dist/bin/minecraft
+```
+
+Sound can be compiled out with `-DENABLE_AUDIO=OFF` at configure time (the
+game also simply stays silent when no audio device can be opened).
 
 Run the headless world-logic tests with `./build/world_tests`.
 
@@ -41,7 +53,13 @@ After an intentional visual change, regenerate the reference with
 | 1–8, scroll wheel | Select hotbar slot |
 | E | Open/close inventory (survival mode) |
 | F | Toggle fly mode |
-| Esc | Close inventory / release mouse, then quit |
+| Esc | Pause menu — resume / settings / quit (closes the inventory first) |
+
+Movement, jump, sneak, sprint, fly, and inventory are rebindable through the
+`key_*` entries in `settings.cfg` (single letters/digits or names like
+`SPACE`, `TAB`, `LSHIFT`, `LCTRL`, `CAPSLOCK`). The pause menu's Settings
+page edits render distance, FOV, mouse sensitivity, volume, and vsync live
+and writes them back to `settings.cfg`.
 
 A debug overlay (FPS, position, current chunk, drawn/loaded chunk counts,
 generation and meshing timings with queue depths, targeted block and the
@@ -51,7 +69,9 @@ with the selected block at the bottom.
 ## Settings
 
 `settings.cfg` is created next to the executable on first run:
-`mouse_sensitivity`, `fov`, `render_distance` (chunks), `vsync`, `survival`.
+`mouse_sensitivity`, `fov`, `render_distance` (chunks), `vsync`, `survival`,
+`volume` (0–1), and the `key_*` bindings listed above. Most of these are
+also editable in-game from the pause menu (Esc → Settings).
 
 `survival=0` (the default) is creative mode: the hotbar is a fixed palette of
 infinite blocks and breaking destroys blocks outright. `survival=1` makes
@@ -88,9 +108,10 @@ swap, or merge stacks; the hotbar is the bottom row).
   darkens by the classic 3-neighbor AO rule, so block edges and corners read
   as soft contact shadows. A greedy mesher then merges coplanar faces of the
   same block — but only when their corner AO/light values match exactly, so
-  merging never changes the shading — and vertices are packed into 12 bytes
-  (integer positions/UVs in 1/16 units, brightness byte, texture layer),
-  cutting a chunk's vertex data by roughly 10×. Block textures live in a
+  merging never changes the shading — and vertices are packed into 14 bytes
+  (integer positions/UVs in 1/16 units, separate sun and block-light
+  brightness bytes, texture layer), cutting a chunk's vertex data by
+  roughly 10×. Block textures live in a
   texture array with repeat wrapping so merged faces can tile them. Chunks
   are marked dirty on edits (including neighbors across borders, diagonals
   included) and rebuilt nearest-first with a per-frame budget. Opaque chunks
@@ -107,6 +128,20 @@ swap, or merge stacks; the hotbar is the bottom row).
   relights incrementally (flood-fill add, unlight-BFS remove), propagating
   across chunk borders. Light is never saved — it is recomputed when a chunk
   is generated or loaded.
+- **Day/night cycle** (`src/DayCycle.h`) — a 10-minute world day drives the
+  sky/fog color (blue noon, orange dusk and dawn, near-black night) and a
+  sun-level factor. Sun and block light are baked into the mesh as separate
+  channels, and the shader takes `max(sun × sunLevel, block)` — so night
+  falls over the whole world without relighting or remeshing a single chunk,
+  and torches keep their full glow after dark. Moonlight keeps night terrain
+  barely readable instead of pitch black. The day clock persists in
+  `level.bin`, so a save resumes at the time of day you left it.
+- **Audio** (`src/Audio.cpp`, `src/Sounds.h`) — block break/place sounds and
+  footsteps, synthesized at startup (filtered noise bursts — no sound files,
+  matching the no-assets rule) and mixed by a small voice pool on a
+  [miniaudio](https://miniaud.io) playback device (vendored single header).
+  Pitch varies slightly per play so repeats don't sound mechanical;
+  `volume` in settings.cfg (or the pause menu) scales everything.
 - **Terrain** (`src/Terrain.cpp`, `src/Noise.h`) — deterministic and a pure
   function of world coordinates + seed: rolling value-noise plains plus
   occasional hill regions selected by a low-frequency mask; sandy basins below
@@ -150,8 +185,9 @@ swap, or merge stacks; the hotbar is the bottom row).
 - **Saving** — modified chunks are written as versioned block dumps
   (`MCCH` magic + version header) to `saves/world1/c_<x>_<z>.bin` on unload,
   on a 30-second autosave timer, and on exit; untouched chunks are
-  regenerated from the seed, which lives in `saves/world1/level.bin` so the
-  world survives changes to the built-in default seed. Player position, look
+  regenerated from the seed, which lives in `saves/world1/level.bin`
+  (alongside the day clock) so the world survives changes to the built-in
+  default seed. Player position, look
   direction, fly mode, hotbar slot, and the survival inventory persist in
   `saves/world1/player.bin` (format v2; v1 files load with an empty
   inventory so old saves keep their position). All save files are written

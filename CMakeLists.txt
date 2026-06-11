@@ -40,6 +40,10 @@ if(ENABLE_AUDIO)
   target_link_libraries(minecraft PRIVATE ${CMAKE_DL_LIBS} m)
 endif()
 
+# Release packaging: `cmake --install build --strip --prefix dist` yields a
+# stripped, self-contained binary (all assets are generated at startup).
+install(TARGETS minecraft RUNTIME DESTINATION bin)
+
 enable_testing()
 add_executable(world_tests
   tests/test_world.cpp
