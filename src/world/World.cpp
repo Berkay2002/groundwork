@@ -527,6 +527,17 @@ const FurnaceState* World::furnaceAt(glm::ivec3 pos) const {
     return blockEntities_.furnaceAt(pos);
 }
 
+std::vector<ItemStack> World::takeFurnaceContents(glm::ivec3 pos) {
+    std::vector<ItemStack> out;
+    FurnaceState* f = blockEntities_.furnaceAt(pos);
+    if (!f) return out;
+    if (!f->input.empty()) out.push_back(f->input);
+    if (!f->fuel.empty()) out.push_back(f->fuel);
+    if (!f->output.empty()) out.push_back(f->output);
+    blockEntities_.removeFurnace(pos);
+    return out;
+}
+
 void World::tickBlockEntities() {
     blockEntities_.tickFurnaces();
 }

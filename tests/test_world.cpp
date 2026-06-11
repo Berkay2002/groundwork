@@ -1401,6 +1401,47 @@ static void testWorldOwnsFurnaceState() {
     std::filesystem::remove_all("test_world_be");
 }
 
+static void testFurnaceBreakTakesContents() {
+    std::filesystem::remove_all("test_world_furnace_break");
+    World w(1337, "test_world_furnace_break");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    glm::ivec3 pos(0, 70, 0);
+    w.setBlock(pos.x, pos.y, pos.z, Block::Furnace);
+    FurnaceState& f = w.getOrCreateFurnace(pos);
+    f.input = makeItemStack(ItemId::RawIron, 3);
+    f.fuel = makeItemStack(ItemId::Coal, 2);
+    f.output = makeItemStack(ItemId::IronIngot, 1);
+
+    CHECK(mining::miningDrop(Block::Furnace,
+                             mining::miningToolForStack(makeToolStack(ItemId::WoodPickaxe))).item
+          == ItemId::FurnaceBlock);
+    std::vector<ItemStack> contents = w.takeFurnaceContents(pos);
+    CHECK(contents.size() == 3);
+    CHECK(contents[0].item == ItemId::RawIron && contents[0].count == 3);
+    CHECK(contents[1].item == ItemId::Coal && contents[1].count == 2);
+    CHECK(contents[2].item == ItemId::IronIngot && contents[2].count == 1);
+    CHECK(w.furnaceAt(pos) == nullptr);
+    CHECK(w.takeFurnaceContents(pos).empty());
+    std::filesystem::remove_all("test_world_furnace_break");
+}
+
+static void testWrongToolFurnaceBreakStillTakesContents() {
+    std::filesystem::remove_all("test_world_furnace_wrong");
+    World w(1337, "test_world_furnace_wrong");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    glm::ivec3 pos(0, 70, 0);
+    w.setBlock(pos.x, pos.y, pos.z, Block::Furnace);
+    FurnaceState& f = w.getOrCreateFurnace(pos);
+    f.output = makeItemStack(ItemId::IronIngot, 4);
+
+    CHECK(mining::miningDrop(Block::Furnace, mining::miningToolForStack(ItemStack{})).empty());
+    std::vector<ItemStack> contents = w.takeFurnaceContents(pos);
+    CHECK(contents.size() == 1);
+    CHECK(contents[0].item == ItemId::IronIngot && contents[0].count == 4);
+    CHECK(w.furnaceAt(pos) == nullptr);
+    std::filesystem::remove_all("test_world_furnace_wrong");
+}
+
 static void testItemEntityFallsAndLands() {
     std::filesystem::remove_all("test_ent_save");
     World w(1337, "test_ent_save");
@@ -2042,6 +2083,8 @@ int main() {
     testFurnaceBlockedAndMissingInputBurns();
     testFurnaceSaveLoadAndRemoval();
     testWorldOwnsFurnaceState();
+    testFurnaceBreakTakesContents();
+    testWrongToolFurnaceBreakStillTakesContents();
     testItemEntityFallsAndLands();
     testItemPickup();
     testItemPickupPreservesDurabilityAndRemainder();

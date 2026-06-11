@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M3 / Task 8
-- Last verified: M3/T7 validation green (`cmake --build build -j` exit 0,
+- Current: M3 milestone review
+- Last verified: M3/T8 validation green (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 3
@@ -111,5 +111,11 @@
   accounting, output-blocked/missing-input burn behavior, `MCBE` v1
   `block_entities.bin` save/load through atomic save helpers, and World
   ownership for load/save/tick/removal on furnace block removal. Validation:
+  `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
+  0 and printed `all tests passed`.
+- [2026-06-11] M3/T8 DONE. Furnace breaking now separates useful block drops
+  from contents: correct pickaxe harvest can drop the Furnace item, wrong/no
+  pickaxe drops no Furnace item, and both paths can extract input/fuel/output
+  stacks from world-owned furnace state for item-entity spawning. Validation:
   `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
   0 and printed `all tests passed`.

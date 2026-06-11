@@ -91,6 +91,7 @@ public:
     FurnaceState& getOrCreateFurnace(glm::ivec3 pos);
     FurnaceState* furnaceAt(glm::ivec3 pos);
     const FurnaceState* furnaceAt(glm::ivec3 pos) const;
+    std::vector<ItemStack> takeFurnaceContents(glm::ivec3 pos);
     void tickBlockEntities();
 
     // The world's actual seed: read from saves/<dir>/level.bin when present

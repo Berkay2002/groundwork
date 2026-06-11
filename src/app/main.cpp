@@ -159,6 +159,8 @@ void survivalMiningTick(World& world) {
                                      targetBlock, held);
     if (!ev.removed) return;
 
+    std::vector<ItemStack> contents;
+    if (targetBlock == Block::Furnace) contents = world.takeFurnaceContents(hit.block);
     world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
     app.audio.playBreak(soundMaterial(targetBlock));
 
@@ -169,6 +171,7 @@ void survivalMiningTick(World& world) {
 
     ItemStack drop = mining::miningDrop(targetBlock, mining::miningToolForStack(held));
     if (!drop.empty()) app.entities.spawnBlockDrop(hit.block, drop);
+    for (ItemStack stack : contents) app.entities.spawnBlockDrop(hit.block, stack);
 }
 
 // ---- Inventory UI (survival): rows 1..3 on top, hotbar row 0 below a gap ----
