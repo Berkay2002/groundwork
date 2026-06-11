@@ -1,0 +1,35 @@
+# Progress: Batch I Survival Progression
+
+## STATUS
+
+- Current: native goal registered; starting M1 / Task 1
+- Last verified: spec/plan review approved (round 3, 2026-06-11)
+- Blockers: none
+- Minor issues parked: 0
+
+## Log
+
+- [2026-06-11] User approved the Batch I direction through the grill-me design
+  pass: Minecraft-like survival progression; item registry; crafting and
+  furnace included; survival default; mode toggle `M`; strict harvest rules;
+  tool tiers wood/stone/iron/diamond; pickaxe/axe/shovel; procedural icons and
+  crack overlay; persistent furnace block entities; item entity merging; docs
+  and screenshot verification required.
+- [2026-06-11] Wrote `goal.md`, `spec.md`, and `plan.md`. Native goal
+  registration deliberately held until after spec/plan review per user
+  request.
+- [2026-06-11] Spec/plan review round 1: REJECTED. Blocking findings:
+  mining rules lacked exact numeric formula/table; recipes lacked shapes and
+  counts; furnace timing/persistence was underdefined; axe/shovel roles were
+  weak; inventory click and item-merge behavior were not verifiable; plan file
+  ownership used open-ended paths. Fixed in one batch by adding exact hardness,
+  tick, recipe, furnace, click, merge, and file-ownership contracts.
+- [2026-06-11] Spec/plan re-review round 2: REJECTED. Remaining findings:
+  furnace output-blocked behavior conflicted between spec and plan, and
+  shift-click quick-move needed to be explicitly recorded as approved scope.
+  Fixed by making lit furnaces consume burn ticks every furnace tick while cook
+  progress only advances when smelting can proceed, and by recording
+  right-click plus shift-click inventory behavior in `goal.md`.
+- [2026-06-11] Spec/plan re-review round 3: APPROVED. Prior issues
+  GDD-SPEC-003 and GDD-SPEC-005 resolved; no findings. Native goal registered
+  from the approved stopping condition.

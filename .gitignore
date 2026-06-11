@@ -9,4 +9,6 @@ screenshot.png
 settings.cfg
 test_saves_tmp*/
 
-docs/goals
+docs/goals/*
+!docs/goals/2026-06-11-survival-progression/
+!docs/goals/2026-06-11-survival-progression/**
