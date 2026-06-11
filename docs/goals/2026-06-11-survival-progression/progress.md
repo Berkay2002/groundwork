@@ -2,8 +2,8 @@
 
 ## STATUS
 
-- Current: M3 / Task 7
-- Last verified: M3/T6 validation green (`cmake --build build -j` exit 0,
+- Current: M3 / Task 8
+- Last verified: M3/T7 validation green (`cmake --build build -j` exit 0,
   warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 3
@@ -104,5 +104,12 @@
   furnace, and wood/stone/iron/diamond pickaxe/axe/shovel recipes. Crafting
   matching, output construction, full-durability tool output, cursor merge
   checks, and exact ingredient consumption are covered headlessly. Validation:
+  `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
+  0 and printed `all tests passed`.
+- [2026-06-11] M3/T7 DONE. Added `BlockEntityStore` with furnace state keyed
+  by world position, exact Raw Iron -> Iron Ingot smelting, coal fuel
+  accounting, output-blocked/missing-input burn behavior, `MCBE` v1
+  `block_entities.bin` save/load through atomic save helpers, and World
+  ownership for load/save/tick/removal on furnace block removal. Validation:
   `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe` exit
   0 and printed `all tests passed`.

@@ -66,6 +66,7 @@ World::World(uint32_t seed, std::string saveDir)
     : seed_(loadOrCreateSeed(saveDir, seed)), terrain_(seed_),
       saveDir_(std::move(saveDir)), pool_(workerCount()) {
     loadDayTime();
+    loadBlockEntitiesFile(saveDir_ + "/block_entities.bin", blockEntities_);
 }
 
 // The seed lives in level.bin so a save directory stays valid even if the
@@ -121,6 +122,8 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
     int lx = mod(wx, CHUNK_SIZE), lz = mod(wz, CHUNK_SIZE);
     Block old = c->get(lx, wy, lz);
     if (old == b) return;
+    if (old == Block::Furnace && b != Block::Furnace)
+        blockEntities_.removeFurnace({wx, wy, wz});
     c->set(lx, wy, lz, b);
     markDirty(*c);
     c->modified = true;
@@ -508,6 +511,24 @@ void World::saveAllModified() {
         }
     }
     saveLevel(); // keeps the day clock current (cheap: 16 bytes, atomic)
+    if (!saveBlockEntitiesFile(saveDir_ + "/block_entities.bin", blockEntities_))
+        std::fprintf(stderr, "warning: failed to write block_entities.bin\n");
+}
+
+FurnaceState& World::getOrCreateFurnace(glm::ivec3 pos) {
+    return blockEntities_.getOrCreateFurnace(pos);
+}
+
+FurnaceState* World::furnaceAt(glm::ivec3 pos) {
+    return blockEntities_.furnaceAt(pos);
+}
+
+const FurnaceState* World::furnaceAt(glm::ivec3 pos) const {
+    return blockEntities_.furnaceAt(pos);
+}
+
+void World::tickBlockEntities() {
+    blockEntities_.tickFurnaces();
 }
 
 WorldStats World::stats() const {

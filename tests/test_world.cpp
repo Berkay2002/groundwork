@@ -11,6 +11,7 @@
 #include "sim/Crafting.h"
 #include "sim/PlayerSave.h"
 #include "world/WorldSave.h"
+#include "world/BlockEntity.h"
 #include "world/DayCycle.h"
 #include "world/Lighting.h"
 #include "platform/Settings.h"
@@ -1294,6 +1295,112 @@ static void testCraftingConsumptionAndCursorOutput() {
     CHECK(pick.at(1, 1).count == 1 && pick.at(1, 2).count == 1);
 }
 
+static void testFurnaceSmeltingTicksAndFuel() {
+    BlockEntityStore store;
+    FurnaceState& f = store.getOrCreateFurnace({1, 2, 3});
+    f.input = makeItemStack(ItemId::RawIron, 8);
+    f.fuel = makeItemStack(ItemId::Coal, 1);
+
+    for (int i = 0; i < 199; ++i) store.tickFurnaces();
+    CHECK(f.output.empty());
+    CHECK(f.cookTicks == 199);
+    CHECK(f.burnTicksRemaining == 1401);
+    store.tickFurnaces();
+    CHECK(f.output.item == ItemId::IronIngot && f.output.count == 1);
+    CHECK(f.input.count == 7);
+    CHECK(f.fuel.empty());
+    CHECK(f.cookTicks == 0);
+    CHECK(f.burnTicksRemaining == 1400);
+
+    for (int i = 0; i < 1400; ++i) store.tickFurnaces();
+    CHECK(f.output.item == ItemId::IronIngot && f.output.count == 8);
+    CHECK(f.input.empty());
+    CHECK(f.burnTicksRemaining == 0);
+    CHECK(f.cookTicks == 0);
+}
+
+static void testFurnaceBlockedAndMissingInputBurns() {
+    BlockEntityStore store;
+    FurnaceState& blocked = store.getOrCreateFurnace({0, 1, 0});
+    blocked.input = makeItemStack(ItemId::RawIron, 1);
+    blocked.fuel = makeItemStack(ItemId::Coal, 1);
+    blocked.output = makeItemStack(ItemId::IronIngot, 64);
+    store.tickFurnaces();
+    CHECK(blocked.fuel.empty());
+    CHECK(blocked.burnTicksRemaining == 1599);
+    CHECK(blocked.cookTicks == 0);
+    CHECK(blocked.output.count == 64);
+
+    FurnaceState& missing = store.getOrCreateFurnace({1, 1, 0});
+    missing.fuel = makeItemStack(ItemId::Coal, 1);
+    store.tickFurnaces();
+    CHECK(missing.fuel.empty());
+    CHECK(missing.burnTicksRemaining == 1599);
+    CHECK(missing.cookTicks == 0);
+}
+
+static void testFurnaceSaveLoadAndRemoval() {
+    std::filesystem::remove_all("test_block_entities");
+    std::filesystem::create_directories("test_block_entities");
+    std::string path = "test_block_entities/block_entities.bin";
+
+    BlockEntityStore store;
+    FurnaceState& f = store.getOrCreateFurnace({-4, 12, 9});
+    f.input = makeItemStack(ItemId::RawIron, 3);
+    f.fuel = makeItemStack(ItemId::Coal, 2);
+    f.output = makeItemStack(ItemId::IronIngot, 5);
+    f.burnTicksRemaining = 123;
+    f.cookTicks = 45;
+    CHECK(saveBlockEntitiesFile(path, store));
+
+    BlockEntityStore loaded;
+    CHECK(loadBlockEntitiesFile(path, loaded));
+    FurnaceState* lf = loaded.furnaceAt({-4, 12, 9});
+    CHECK(lf != nullptr);
+    CHECK(lf->input.item == ItemId::RawIron && lf->input.count == 3);
+    CHECK(lf->fuel.item == ItemId::Coal && lf->fuel.count == 2);
+    CHECK(lf->output.item == ItemId::IronIngot && lf->output.count == 5);
+    CHECK(lf->burnTicksRemaining == 123 && lf->cookTicks == 45);
+
+    loaded.removeFurnace({-4, 12, 9});
+    CHECK(loaded.furnaceAt({-4, 12, 9}) == nullptr);
+
+    {
+        std::ofstream bad(path, std::ios::binary | std::ios::trunc);
+        bad.write("NOPE", 4);
+    }
+    BlockEntityStore badLoaded;
+    CHECK(!loadBlockEntitiesFile(path, badLoaded));
+    CHECK(badLoaded.furnaceCount() == 0);
+
+    std::filesystem::remove_all("test_block_entities");
+}
+
+static void testWorldOwnsFurnaceState() {
+    std::filesystem::remove_all("test_world_be");
+    {
+        World w(1337, "test_world_be");
+        w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+        w.setBlock(0, 70, 0, Block::Furnace);
+        FurnaceState& f = w.getOrCreateFurnace({0, 70, 0});
+        f.input = makeItemStack(ItemId::RawIron, 1);
+        f.fuel = makeItemStack(ItemId::Coal, 1);
+        for (int i = 0; i < 200; ++i) w.tickBlockEntities();
+        CHECK(f.output.item == ItemId::IronIngot && f.output.count == 1);
+        w.saveAllModified();
+    }
+    {
+        World w(1337, "test_world_be");
+        FurnaceState* f = w.furnaceAt({0, 70, 0});
+        CHECK(f != nullptr);
+        CHECK(f->output.item == ItemId::IronIngot && f->output.count == 1);
+        w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+        w.setBlock(0, 70, 0, Block::Air);
+        CHECK(w.furnaceAt({0, 70, 0}) == nullptr);
+    }
+    std::filesystem::remove_all("test_world_be");
+}
+
 static void testItemEntityFallsAndLands() {
     std::filesystem::remove_all("test_ent_save");
     World w(1337, "test_ent_save");
@@ -1931,6 +2038,10 @@ int main() {
     testMiningProgressResetsAndBreakEvent();
     testCraftingRecipeMatching();
     testCraftingConsumptionAndCursorOutput();
+    testFurnaceSmeltingTicksAndFuel();
+    testFurnaceBlockedAndMissingInputBurns();
+    testFurnaceSaveLoadAndRemoval();
+    testWorldOwnsFurnaceState();
     testItemEntityFallsAndLands();
     testItemPickup();
     testItemPickupPreservesDurabilityAndRemainder();

@@ -36,6 +36,7 @@ option(ENABLE_AUDIO "Build with sound effects (miniaudio)" ON)
 add_executable(groundwork
   src/app/main.cpp
   src/world/Chunk.cpp
+  src/world/BlockEntity.cpp
   src/world/Lighting.cpp
   src/world/World.cpp
   src/world/WorldSave.cpp
@@ -87,6 +88,7 @@ enable_testing()
 add_executable(world_tests
   tests/test_world.cpp
   src/world/Chunk.cpp
+  src/world/BlockEntity.cpp
   src/world/Lighting.cpp
   src/world/World.cpp
   src/world/WorldSave.cpp

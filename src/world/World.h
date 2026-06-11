@@ -3,6 +3,7 @@
 #include "render/Frustum.h"
 #include "platform/JobQueue.h"
 #include "world/Terrain.h"
+#include "world/BlockEntity.h"
 #include <atomic>
 #include <climits>
 #include <glm/glm.hpp>
@@ -87,6 +88,11 @@ public:
     void saveAllModified();
     WorldStats stats() const;
 
+    FurnaceState& getOrCreateFurnace(glm::ivec3 pos);
+    FurnaceState* furnaceAt(glm::ivec3 pos);
+    const FurnaceState* furnaceAt(glm::ivec3 pos) const;
+    void tickBlockEntities();
+
     // The world's actual seed: read from saves/<dir>/level.bin when present
     // (written on world creation), so a save stays valid even if the
     // default seed constant in main.cpp changes.
@@ -120,6 +126,7 @@ private:
     Terrain terrain_;
     std::string saveDir_;
     std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash> chunks_;
+    BlockEntityStore blockEntities_;
 
     // Generation pipeline (pendingGen_ is main-thread only).
     std::unordered_set<ChunkKey, ChunkKeyHash> pendingGen_;

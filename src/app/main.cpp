@@ -783,6 +783,7 @@ int main(int argc, char** argv) {
             // Inventory open: keep simulating (gravity), drop movement intent.
             app.player.update(world, app.invOpen ? PlayerInput{} : app.input, float(TickClock::TICK_DT));
             survivalMiningTick(world);
+            world.tickBlockEntities();
             if (app.player.onGround() && !app.player.flying) {
                 glm::vec3 d = app.player.pos() - app.player.prevPos;
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
