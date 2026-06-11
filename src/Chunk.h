@@ -6,7 +6,8 @@
 constexpr int CHUNK_SIZE = 16;   // X and Z
 constexpr int CHUNK_HEIGHT = 80; // Y
 
-// Packed chunk vertex (12 bytes vs the old 24-byte float layout). Positions
+// Packed chunk vertex (14 bytes vs the old 24-byte float layout; 12 until
+// day/night split brightness into sun/blk channels). Positions
 // are chunk-local in 1/16-block units (so the torch's fractional geometry
 // stays exact); the shader adds the chunk origin via a uniform. UVs are in
 // 1/16-tile units and may span several tiles on greedy-merged faces — the

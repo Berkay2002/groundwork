@@ -18,10 +18,29 @@ enum class Block : uint8_t {
 };
 constexpr int BLOCK_TYPES = 12;
 
-// Texture atlas tile indices (atlas is a horizontal strip of 16x16 tiles).
-// 0 grass top, 1 grass side, 2 dirt, 3 stone, 4 wood side, 5 wood top,
-// 6 leaves, 7 sand, 8 bedrock, 9 torch, 10 coal ore, 11 iron ore, 12 water
-constexpr int ATLAS_TILES = 13;
+// Texture tile identity. The numeric value is the texture-array layer and the
+// column in the HUD's horizontal strip atlas — a renderer/content ID with no
+// save-format meaning (unlike Block values, these may be reordered freely).
+// Error renders loud magenta so a bad tile mapping is obvious, never
+// silently some other block's art.
+enum class TileId : uint8_t {
+    GrassTop = 0,
+    GrassSide,
+    Dirt,
+    Stone,
+    WoodSide,
+    WoodTop,
+    Leaves,
+    Sand,
+    Bedrock,
+    Torch,
+    CoalOre,
+    IronOre,
+    Water,
+    Error,
+    Count
+};
+constexpr int ATLAS_TILES = int(TileId::Count);
 
 constexpr uint8_t UNBREAKABLE = 0xFF;
 
@@ -49,25 +68,42 @@ struct BlockDef {
     uint8_t hardness;  // relative break time; UNBREAKABLE = never breaks
     Block drop;        // what breaking yields (Batch G)
     SoundMat sound;    // break/place sound family
-    uint8_t tiles[6];  // atlas tile per face: +X -X +Y(top) -Y(bottom) +Z -Z
+    TileId tiles[6];   // tile per face: +X -X +Y(top) -Y(bottom) +Z -Z
 };
+
+namespace tiledef {
+// Row builders so BLOCK_DEFS stays a readable table: most blocks use one tile
+// on all six faces; grass/wood differ per face (mesher face order above).
+constexpr BlockDef same(const char* name, bool solid, bool collid, bool opaque,
+                        bool dimSun, uint8_t em, uint8_t hard, Block drop,
+                        SoundMat snd, TileId t) {
+    return {name, solid, collid, opaque, dimSun, em, hard, drop, snd,
+            {t, t, t, t, t, t}};
+}
+constexpr BlockDef sideTopBot(const char* name, bool solid, bool collid,
+                              bool opaque, bool dimSun, uint8_t em,
+                              uint8_t hard, Block drop, SoundMat snd,
+                              TileId side, TileId top, TileId bot) {
+    return {name, solid, collid, opaque, dimSun, em, hard, drop, snd,
+            {side, side, top, bot, side, side}};
+}
+}
 
 // Indexed by enum value — rows are append-only, like the enum.
 constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
-    //          name        solid  collid opaque dimSun em  hard  drop            sound            +X  -X  +Y  -Y  +Z  -Z
-    /*  0 */ {"Air",        false, false, false, false, 0,  0,    Block::Air,     SoundMat::None,  { 0,  0,  0,  0,  0,  0}},
-    /*  1 */ {"Grass",      true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  { 1,  1,  0,  2,  1,  1}},
-    /*  2 */ {"Dirt",       true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  { 2,  2,  2,  2,  2,  2}},
-    /*  3 */ {"Stone",      true,  true,  true,  false, 0,  6,    Block::Stone,   SoundMat::Stone, { 3,  3,  3,  3,  3,  3}},
-    /*  4 */ {"Wood",       true,  true,  true,  false, 0,  3,    Block::Wood,    SoundMat::Wood,  { 4,  4,  5,  5,  4,  4}},
-    /*  5 */ {"Leaves",     true,  true,  true,  false, 0,  1,    Block::Air,     SoundMat::Soft,  { 6,  6,  6,  6,  6,  6}},
-    /*  6 */ {"Sand",       true,  true,  true,  false, 0,  2,    Block::Sand,    SoundMat::Soft,  { 7,  7,  7,  7,  7,  7}},
-    /*  7 */ {"Bedrock",    true,  true,  true,  false, 0,  UNBREAKABLE,
-                                                            Block::Air,           SoundMat::Stone, { 8,  8,  8,  8,  8,  8}},
-    /*  8 */ {"Torch",      true,  false, false, false, 14, 1,    Block::Torch,   SoundMat::Wood,  { 9,  9,  9,  9,  9,  9}},
-    /*  9 */ {"Coal Ore",   true,  true,  true,  false, 0,  6,    Block::CoalOre, SoundMat::Stone, {10, 10, 10, 10, 10, 10}},
-    /* 10 */ {"Iron Ore",   true,  true,  true,  false, 0,  8,    Block::IronOre, SoundMat::Stone, {11, 11, 11, 11, 11, 11}},
-    /* 11 */ {"Water",      false, false, false, true,  0,  0,    Block::Air,     SoundMat::None,  {12, 12, 12, 12, 12, 12}},
+    //                       name        solid  collid opaque dimSun em  hard  drop            sound            tiles
+    /*  0 */ tiledef::same("Air",         false, false, false, false, 0,  0,    Block::Air,     SoundMat::None,  TileId::Error),
+    /*  1 */ tiledef::sideTopBot("Grass", true, true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  TileId::GrassSide, TileId::GrassTop, TileId::Dirt),
+    /*  2 */ tiledef::same("Dirt",        true,  true,  true,  false, 0,  2,    Block::Dirt,    SoundMat::Soft,  TileId::Dirt),
+    /*  3 */ tiledef::same("Stone",       true,  true,  true,  false, 0,  6,    Block::Stone,   SoundMat::Stone, TileId::Stone),
+    /*  4 */ tiledef::sideTopBot("Wood",  true,  true,  true,  false, 0,  3,    Block::Wood,    SoundMat::Wood,  TileId::WoodSide, TileId::WoodTop, TileId::WoodTop),
+    /*  5 */ tiledef::same("Leaves",      true,  true,  true,  false, 0,  1,    Block::Air,     SoundMat::Soft,  TileId::Leaves),
+    /*  6 */ tiledef::same("Sand",        true,  true,  true,  false, 0,  2,    Block::Sand,    SoundMat::Soft,  TileId::Sand),
+    /*  7 */ tiledef::same("Bedrock",     true,  true,  true,  false, 0,  UNBREAKABLE, Block::Air, SoundMat::Stone, TileId::Bedrock),
+    /*  8 */ tiledef::same("Torch",       true,  false, false, false, 14, 1,    Block::Torch,   SoundMat::Wood,  TileId::Torch),
+    /*  9 */ tiledef::same("Coal Ore",    true,  true,  true,  false, 0,  6,    Block::CoalOre, SoundMat::Stone, TileId::CoalOre),
+    /* 10 */ tiledef::same("Iron Ore",    true,  true,  true,  false, 0,  8,    Block::IronOre, SoundMat::Stone, TileId::IronOre),
+    /* 11 */ tiledef::same("Water",       false, false, false, true,  0,  0,    Block::Air,     SoundMat::None,  TileId::Water),
 };
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }
@@ -84,4 +120,5 @@ inline uint8_t lightEmission(Block b) { return blockDef(b).emission; }
 inline SoundMat soundMaterial(Block b) { return blockDef(b).sound; }
 
 // Face order used by the mesher: 0 +X, 1 -X, 2 +Y(top), 3 -Y(bottom), 4 +Z, 5 -Z
-inline int tileFor(Block b, int face) { return blockDef(b).tiles[face]; }
+// Returns the numeric tile (texture-array layer / atlas column) for rendering.
+inline int tileFor(Block b, int face) { return int(blockDef(b).tiles[face]); }

@@ -464,7 +464,7 @@ static void testBlockRegistry() {
         Block b = Block(i);
         const BlockDef& d = blockDef(b);
         CHECK(d.name != nullptr && d.name[0] != '\0');
-        for (int f = 0; f < 6; ++f) CHECK(d.tiles[f] < ATLAS_TILES);
+        for (int f = 0; f < 6; ++f) CHECK(int(d.tiles[f]) < ATLAS_TILES);
         CHECK(d.emission <= 15);
         CHECK(uint8_t(d.drop) < BLOCK_TYPES);
         CHECK(!d.collidable || d.solid);   // collidable implies solid

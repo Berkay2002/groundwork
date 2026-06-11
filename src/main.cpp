@@ -2,11 +2,13 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -208,8 +210,13 @@ struct Rect {
 const char* const MENU_BUTTONS[] = {"Resume", "Settings", "Quit"};
 constexpr int MENU_BUTTON_COUNT = 3;
 const char* const SETTING_LABELS[] = {
-    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync"};
-constexpr int SETTING_COUNT = 5;
+    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync", "Max FPS"};
+constexpr int SETTING_COUNT = 6;
+
+// Max FPS choices (the cap applies when vsync is off): common rates up to the
+// monitor's refresh, the refresh itself, then 0 = unlimited. Filled in main()
+// once the monitor is known.
+std::vector<int> fpsOptions = {0};
 
 Rect menuButtonRect(int w, int h, int i) {
     const float bw = 260, bh = 44, gap = 14;
@@ -239,6 +246,10 @@ void settingValueText(int row, char* buf, size_t n) {
         case 2: std::snprintf(buf, n, "%.2f", s.mouseSensitivity); break;
         case 3: std::snprintf(buf, n, "%d%%", int(s.volume * 100.0f + 0.5f)); break;
         case 4: std::snprintf(buf, n, "%s", s.vsync ? "on" : "off"); break;
+        case 5:
+            if (s.fpsMax == 0) std::snprintf(buf, n, "unlimited");
+            else std::snprintf(buf, n, "%d", s.fpsMax);
+            break;
     }
 }
 
@@ -256,6 +267,19 @@ void adjustSetting(int row, int dir) {
             app.audio.setVolume(s.volume);
             break;
         case 4: s.vsync = !s.vsync; glfwSwapInterval(s.vsync ? 1 : 0); break;
+        case 5: {
+            // Step through the monitor-derived choices. The cfg may hold any
+            // value, so first find where it sits in the list (unlimited = 0
+            // lives at the end and counts as the highest).
+            auto rank = [](int v) { return v == 0 ? 1 << 30 : v; };
+            int idx = 0;
+            while (idx + 1 < int(fpsOptions.size()) &&
+                   rank(fpsOptions[idx]) < rank(s.fpsMax))
+                ++idx;
+            idx = std::min(int(fpsOptions.size()) - 1, std::max(0, idx + dir));
+            s.fpsMax = fpsOptions[idx];
+            break;
+        }
     }
     s.save("settings.cfg");
 }
@@ -643,6 +667,15 @@ int main(int argc, char** argv) {
     // A benchmark must not be capped by the display's refresh rate.
     glfwSwapInterval(settings.vsync && !bench ? 1 : 0);
 
+    // Build the Max FPS menu choices around what the monitor supports.
+    const GLFWvidmode* vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    const int refresh = (vidmode && vidmode->refreshRate > 0) ? vidmode->refreshRate : 60;
+    fpsOptions.clear();
+    for (int r : {30, 60, 75, 90, 120, 144, 165, 240, 360})
+        if (r < refresh) fpsOptions.push_back(r);
+    fpsOptions.push_back(refresh);
+    fpsOptions.push_back(0); // unlimited
+
     glfwSetKeyCallback(app.window, keyCallback);
     glfwSetMouseButtonCallback(app.window, mouseButtonCallback);
     glfwSetCursorPosCallback(app.window, cursorCallback);
@@ -876,6 +909,21 @@ int main(int argc, char** argv) {
 
         glfwSwapBuffers(app.window);
 
+        // Frame limiter: with vsync off, pace frames to fps_max (0 =
+        // unlimited; vsync already paces when on). Sleep most of the wait,
+        // then spin the last fraction of a millisecond for accuracy —
+        // sleep_for alone overshoots by a scheduler quantum.
+        if (!bench && !settings.vsync && settings.fpsMax > 0) {
+            const double frameEnd = now + 1.0 / settings.fpsMax; // `now` = frame start
+            double t = glfwGetTime();
+            // The scheduler can oversleep by ~1 ms, so stop sleeping 2 ms
+            // early and spin the remainder.
+            if (frameEnd - t > 0.002)
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(frameEnd - t - 0.002));
+            while (glfwGetTime() < frameEnd) {}
+        }
+
         if (bench) {
             WorldStats st = world.stats();
             benchDrawn += st.drawn;
@@ -903,6 +951,10 @@ int main(int argc, char** argv) {
 
     world.saveAllModified();
     savePlayer();
+    glDeleteTextures(1, &atlas);
+    glDeleteTextures(1, &blockTextures);
+    glDeleteVertexArrays(1, &cubeVao);
+    glDeleteBuffers(1, &cubeVbo);
     glfwDestroyWindow(app.window);
     glfwTerminate();
     return 0;

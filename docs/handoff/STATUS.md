@@ -13,7 +13,7 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 | Batch D | 4-bit sun + block light per cell, BFS add/unlight relight on edits, cross-border propagation, light baked into mesh verts (0.85^n curve), Torch block as a 3D post (walk-through, non-opaque, emits 14), light readout in overlay | done |
 | Batch E | Spaghetti caves (two 3D noise fields, surface-pinched), Coal/Iron ore veins (depth-banded, per-8³-cell hashing), water (lake basins to SEA_LEVEL 20, translucent second mesh pass, sunlight attenuation, swim physics, hotbar slot 8) | done |
 | A–D addenda | level.bin seed file, atomic saves, autosave; block registry table; `--bench` + golden-screenshot test; per-vertex AO + smooth lighting (fog pre-existed) | done |
-| Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
+| Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices (14 since Batch H's light-channel split) + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
 | Batch G | Fixed 20 TPS simulation tick + interpolated rendering, shared `Body` AABB physics, item entities (drops, magnetized pickup, bob/spin rendering), survival mode (finite stacked placement, hotbar counts), 4×8 inventory UI, player save v2 with inventory | done |
 | Batch H | Procedural audio (miniaudio, optional), pause menu with live-editable settings, key rebinding, day/night cycle (split sun/block vertex light channels, level.bin v2), release packaging (stripped 449 KB binary, clean-container build verified) | done |
 
@@ -137,9 +137,10 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   keys); torches are excluded and keep their custom post geometry. Sweeps
   clamp to the highest non-air layer and use strided direct neighbor reads
   on interior slices: 0.40 ms/chunk (naive greedy was 1.36).
-- **Packed vertices**: `ChunkVertex` is 12 bytes — u16 x/y/z and u16 u/v in
+- **Packed vertices**: `ChunkVertex` is 14 bytes — u16 x/y/z and u16 u/v in
   **1/16 units** (chunk-local positions; torch fractions stay exact), u8
-  brightness (×255), u8 texture-array layer. The shader gets integer
+  sun + u8 block-light brightness (×255; split in Batch H, was one u8),
+  u8 texture-array layer, u8 pad. The shader gets integer
   attribs (`glVertexAttribIPointer`) plus a per-draw `uOrigin` uniform
   (location passed into `World::drawChunks`). UVs span `0..w`/`0..h` tiles
   on merged faces, wrapped by `GL_TEXTURE_2D_ARRAY` + REPEAT

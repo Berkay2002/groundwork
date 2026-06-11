@@ -89,7 +89,8 @@ what was actually built.
 - [x] Vertex size reduction: 24-byte float vertex → 12-byte packed ints
       (u16 chunk-local position and uv in 1/16 units — torch geometry stays
       exact — u8 brightness, u8 layer; the chunk origin became a per-draw
-      uniform). Combined with greedy: 222 KB → 20 KB vertex data per chunk;
+      uniform). Batch H later grew this to 14 bytes (split sun/block light
+      channels + pad). Combined with greedy: 222 KB → 20 KB vertex data per chunk;
       steady-state bench 299 → ~340 fps at render distance 6.
 - [x] Frame-budgeted main-thread work: finished meshes wait in an upload
       queue and upload within a 3 ms/frame cap (`UPLOAD_BUDGET_MS`),

@@ -114,24 +114,30 @@ RGB torchPixel(int x, int y) {
     return shade({26, 26, 30}, 0.8f + 0.3f * noise01(x, y, 15)); // background
 }
 
-// One function per atlas tile index; shared by the HUD's 2D atlas strip and
-// the chunk renderer's texture array so both show identical art.
-RGB tilePixel(int tile, int x, int y) {
+// One function per tile; shared by the HUD's 2D atlas strip and the chunk
+// renderer's texture array so both show identical art. The switch covers
+// every TileId enumerator (no default) so adding a tile without art is a
+// compiler warning, and an out-of-range tile renders the magenta Error art
+// instead of silently borrowing another block's texture.
+RGB tilePixel(TileId tile, int x, int y) {
     switch (tile) {
-        case 0: return grassTopPixel(x, y);
-        case 1: return grassSidePixel(x, y);
-        case 2: return dirtPixel(x, y);
-        case 3: return stonePixel(x, y);
-        case 4: return woodSidePixel(x, y);
-        case 5: return woodTopPixel(x, y);
-        case 6: return leavesPixel(x, y);
-        case 7: return sandPixel(x, y);
-        case 8: return bedrockPixel(x, y);
-        case 9: return torchPixel(x, y);
-        case 10: return coalOrePixel(x, y);
-        case 11: return ironOrePixel(x, y);
-        default: return waterPixel(x, y);
+        case TileId::GrassTop: return grassTopPixel(x, y);
+        case TileId::GrassSide: return grassSidePixel(x, y);
+        case TileId::Dirt: return dirtPixel(x, y);
+        case TileId::Stone: return stonePixel(x, y);
+        case TileId::WoodSide: return woodSidePixel(x, y);
+        case TileId::WoodTop: return woodTopPixel(x, y);
+        case TileId::Leaves: return leavesPixel(x, y);
+        case TileId::Sand: return sandPixel(x, y);
+        case TileId::Bedrock: return bedrockPixel(x, y);
+        case TileId::Torch: return torchPixel(x, y);
+        case TileId::CoalOre: return coalOrePixel(x, y);
+        case TileId::IronOre: return ironOrePixel(x, y);
+        case TileId::Water: return waterPixel(x, y);
+        case TileId::Error:
+        case TileId::Count: break;
     }
+    return {255, 0, 255};
 }
 }
 
@@ -141,7 +147,7 @@ unsigned createBlockAtlas() {
 
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
-            RGB c = tilePixel(x / TILE, x % TILE, y);
+            RGB c = tilePixel(TileId(x / TILE), x % TILE, y);
             size_t i = (size_t(y) * W + x) * 3;
             img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;
         }
@@ -151,7 +157,7 @@ unsigned createBlockAtlas() {
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, img.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, img.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -166,7 +172,7 @@ unsigned createBlockTextureArray() {
     for (int layer = 0; layer < ATLAS_TILES; ++layer)
         for (int y = 0; y < TILE; ++y)
             for (int x = 0; x < TILE; ++x) {
-                RGB c = tilePixel(layer, x, y);
+                RGB c = tilePixel(TileId(layer), x, y);
                 size_t i = ((size_t(layer) * TILE + y) * TILE + x) * 3;
                 img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;
             }
@@ -175,7 +181,7 @@ unsigned createBlockTextureArray() {
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, TILE, TILE, ATLAS_TILES, 0,
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB8, TILE, TILE, ATLAS_TILES, 0,
                  GL_RGB, GL_UNSIGNED_BYTE, img.data());
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

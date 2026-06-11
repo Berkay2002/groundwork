@@ -11,6 +11,9 @@ struct Settings {
     float fov = 75.0f;
     int renderDistance = 64;
     bool vsync = true;
+    // Frame cap used when vsync is off; 0 = unlimited. The pause menu offers
+    // steps up to the monitor's refresh rate.
+    int fpsMax = 0;
     // Survival-ish mode: block drops, finite stacked placement, E inventory.
     // Off = creative (the original infinite-palette behavior).
     bool survival = false;
@@ -40,6 +43,7 @@ struct Settings {
                 else if (key == "fov") s.fov = std::stof(val);
                 else if (key == "render_distance") s.renderDistance = std::stoi(val);
                 else if (key == "vsync") s.vsync = std::stoi(val) != 0;
+                else if (key == "fps_max") s.fpsMax = std::stoi(val);
                 else if (key == "survival") s.survival = std::stoi(val) != 0;
                 else if (key == "volume") s.volume = std::stof(val);
                 else if (key.rfind("key_", 0) == 0) {
@@ -63,6 +67,8 @@ struct Settings {
         if (s.renderDistance < 2) s.renderDistance = 2;
         if (s.renderDistance > 64) s.renderDistance = 64;
         if (s.mouseSensitivity <= 0.0f) s.mouseSensitivity = 0.12f;
+        if (s.fpsMax < 0) s.fpsMax = 0;
+        if (s.fpsMax > 0 && s.fpsMax < 30) s.fpsMax = 30;
         if (s.volume < 0.0f) s.volume = 0.0f;
         if (s.volume > 1.0f) s.volume = 1.0f;
         return s;
@@ -76,6 +82,8 @@ struct Settings {
           << "fov=" << fov << "\n"
           << "render_distance=" << renderDistance << "\n"
           << "vsync=" << (vsync ? 1 : 0) << "\n"
+          << "# frame cap when vsync is off; 0 = unlimited\n"
+          << "fps_max=" << fpsMax << "\n"
           << "survival=" << (survival ? 1 : 0) << "\n"
           << "volume=" << volume << "\n"
           << "# key names: letters, digits, SPACE, TAB, LSHIFT, LCTRL, ...\n"
