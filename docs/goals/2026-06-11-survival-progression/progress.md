@@ -2,10 +2,10 @@
 
 ## STATUS
 
-- Current: M2 spec-compliance re-review
-- Last verified: M2 spec-review fixes validation green (`cmake --build build
-  -j` exit 0, warning-free; `.\build\world_tests.exe` -> `all tests passed`,
-  2026-06-11)
+- Current: M2 code-quality review
+- Last verified: M2 spec-compliance re-review approved after fixes
+  (`cmake --build build -j` exit 0, warning-free; `.\build\world_tests.exe`
+  -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
 
@@ -90,3 +90,6 @@
   tick/drop assertions. Validation rerun: `cmake --build build -j` exit 0
   warning-free; `.\build\world_tests.exe` exit 0 and printed `all tests
   passed`.
+- [2026-06-11] M2 spec-compliance re-review round 2: APPROVED. Prior findings
+  M2-SPEC-001 and M2-SPEC-002 resolved; no new Critical or Important
+  spec-compliance findings.
