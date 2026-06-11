@@ -46,6 +46,8 @@ public:
     void setInt(const char* name, int v) const {
         glUniform1i(glGetUniformLocation(prog_, name), v);
     }
+    // For uniforms set in hot per-draw loops (e.g. the per-chunk origin).
+    int loc(const char* name) const { return glGetUniformLocation(prog_, name); }
 
 private:
     GLuint prog_ = 0;

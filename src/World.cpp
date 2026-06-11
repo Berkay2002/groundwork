@@ -1,5 +1,7 @@
 #include "World.h"
 #include "SaveIO.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -406,34 +408,81 @@ ChunkSnapshot World::snapshot(const Chunk& c) const {
     return s;
 }
 
-void World::processMeshing(int enqueueBudget) {
-    // 1. Upload finished meshes (GL work, main thread only).
+void World::processMeshing(int enqueueBudget, const glm::vec3& playerPos,
+                           const Frustum* frustum, float uploadBudgetMs) {
+    int pcx = floorDiv((int)std::floor(playerPos.x), CHUNK_SIZE);
+    int pcz = floorDiv((int)std::floor(playerPos.z), CHUNK_SIZE);
+    // Priority: chunks the camera can see first, then nearest-first.
+    auto priority = [&](const ChunkKey& k) {
+        int dx = k.x - pcx, dz = k.z - pcz;
+        int d2 = dx * dx + dz * dz;
+        if (!frustum) return d2;
+        glm::vec3 mn(float(k.x * CHUNK_SIZE), 0.0f, float(k.z * CHUNK_SIZE));
+        glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
+        return frustum->intersectsAABB(mn, mx) ? d2 : d2 + 1000000;
+    };
+
+    // 1. Collect finished meshes into the upload queue. The chunk's pipeline
+    //    slot frees immediately (a chunk edited while its mesh was in flight
+    //    becomes dirty again and can re-enqueue right away), but the GL
+    //    upload itself waits for a budget slot below. One entry per chunk:
+    //    a newer result replaces a queued older one.
     std::vector<std::pair<ChunkKey, MeshData>> done;
     {
         std::lock_guard<std::mutex> l(meshM_);
         done.swap(meshDone_);
     }
-    uploads_ = 0;
     for (auto& [key, md] : done) {
         --meshInFlight_;
         auto it = chunks_.find(key);
         if (it == chunks_.end()) continue; // unloaded while meshing
-        it->second->uploadMesh(md);
         it->second->meshInFlight = false;
+        bool replaced = false;
+        for (auto& q : uploadQueue_)
+            if (q.first == key) { q.second = std::move(md); replaced = true; break; }
+        if (!replaced) uploadQueue_.emplace_back(key, std::move(md));
+    }
+    // Chunks can also unload while their upload waits in the queue.
+    uploadQueue_.erase(
+        std::remove_if(uploadQueue_.begin(), uploadQueue_.end(),
+                       [&](const std::pair<ChunkKey, MeshData>& q) {
+                           return !chunks_.count(q.first);
+                       }),
+        uploadQueue_.end());
+
+    // 2. Upload within the frame budget, best priority first; always at
+    //    least one per frame so the queue drains even under a tiny budget.
+    std::sort(uploadQueue_.begin(), uploadQueue_.end(),
+              [&](const std::pair<ChunkKey, MeshData>& a,
+                  const std::pair<ChunkKey, MeshData>& b) {
+                  return priority(a.first) < priority(b.first);
+              });
+    uploads_ = 0;
+    auto t0 = Clock::now();
+    size_t did = 0;
+    for (; did < uploadQueue_.size(); ++did) {
+        if (did > 0 && msSince(t0) > uploadBudgetMs) break;
+        chunks_.at(uploadQueue_[did].first)->uploadMesh(uploadQueue_[did].second);
         ++uploads_;
     }
+    uploadQueue_.erase(uploadQueue_.begin(), uploadQueue_.begin() + did);
 
-    // 2. Enqueue dirty chunks. A chunk edited while its mesh was in flight
-    //    becomes dirty again and is re-enqueued once the stale job returns.
-    for (auto& [key, chunk] : chunks_) {
-        if (enqueueBudget <= 0) break;
-        if (!chunk->dirty || chunk->meshInFlight) continue;
+    // 3. Enqueue dirty chunks for the workers, best priority first, so an
+    //    edit or light change next to the player never waits behind far
+    //    chunks streaming in.
+    std::vector<std::pair<int, Chunk*>> dirty;
+    for (auto& [key, chunk] : chunks_)
+        if (chunk->dirty && !chunk->meshInFlight)
+            dirty.push_back({priority(key), chunk.get()});
+    if ((int)dirty.size() > enqueueBudget)
+        std::partial_sort(dirty.begin(), dirty.begin() + enqueueBudget, dirty.end());
+    for (int i = 0; i < (int)dirty.size() && i < enqueueBudget; ++i) {
+        Chunk* chunk = dirty[i].second;
         chunk->dirty = false;
         chunk->meshInFlight = true;
         ++meshInFlight_;
-        --enqueueBudget;
         auto snap = std::make_shared<ChunkSnapshot>(snapshot(*chunk));
-        ChunkKey k = key;
+        ChunkKey k{chunk->cx(), chunk->cz()};
         pool_.push([this, k, snap] {
             auto t0 = Clock::now();
             MeshData md = buildMeshData(*snap);
@@ -465,23 +514,45 @@ void World::waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs) {
     }
 }
 
-void World::drawChunks(const Frustum& frustum) {
-    drawn_ = 0;
-    for (auto& [key, chunk] : chunks_) {
+namespace {
+// Visible chunks ordered by distance to the eye: front-to-back for the
+// opaque pass (early-z rejects hidden fragments), back-to-front for the
+// translucent water pass (correct blending).
+struct DrawItem { float dist2; Chunk* chunk; float ox, oz; };
+
+std::vector<DrawItem> visibleSorted(
+    const std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash>& chunks,
+    const Frustum& frustum, const glm::vec3& eye, bool frontToBack) {
+    std::vector<DrawItem> items;
+    items.reserve(chunks.size());
+    for (auto& [key, chunk] : chunks) {
         glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
         glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
         if (!frustum.intersectsAABB(mn, mx)) continue;
-        chunk->draw();
+        glm::vec2 center(mn.x + CHUNK_SIZE * 0.5f, mn.z + CHUNK_SIZE * 0.5f);
+        glm::vec2 d = center - glm::vec2(eye.x, eye.z);
+        items.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
+    }
+    std::sort(items.begin(), items.end(), [&](const DrawItem& a, const DrawItem& b) {
+        return frontToBack ? a.dist2 < b.dist2 : a.dist2 > b.dist2;
+    });
+    return items;
+}
+}
+
+void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
+    drawn_ = 0;
+    for (const DrawItem& it : visibleSorted(chunks_, frustum, eye, true)) {
+        glUniform3f(originLoc, it.ox, 0.0f, it.oz);
+        it.chunk->draw();
         ++drawn_;
     }
 }
 
-void World::drawWater(const Frustum& frustum) {
-    for (auto& [key, chunk] : chunks_) {
-        glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
-        glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
-        if (!frustum.intersectsAABB(mn, mx)) continue;
-        chunk->drawWater();
+void World::drawWater(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
+    for (const DrawItem& it : visibleSorted(chunks_, frustum, eye, false)) {
+        glUniform3f(originLoc, it.ox, 0.0f, it.oz);
+        it.chunk->drawWater();
     }
 }
 
@@ -533,6 +604,7 @@ WorldStats World::stats() const {
     s.uploads = uploads_;
     s.genQueued = (int)pendingGen_.size();
     s.meshQueued = meshInFlight_;
+    s.uploadQueued = (int)uploadQueue_.size();
     s.genMs = genMs_.load(std::memory_order_relaxed);
     s.meshMs = meshMs_.load(std::memory_order_relaxed);
     return s;

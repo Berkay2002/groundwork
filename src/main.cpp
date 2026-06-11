@@ -27,6 +27,7 @@ namespace {
 
 constexpr float REACH = 5.0f;           // block interaction distance
 constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
+constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
 constexpr uint32_t WORLD_SEED = 1337;
 const glm::vec3 SKY_COLOR(0.53f, 0.71f, 0.92f);
 const char* SAVE_DIR = "saves/world1";
@@ -36,19 +37,25 @@ const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
                         Block::Water};
 constexpr int HOTBAR_SLOTS = int(sizeof(HOTBAR) / sizeof(HOTBAR[0]));
 
+// Chunk vertices are packed integers (see ChunkVertex): chunk-local position
+// and UV in 1/16 units, brightness byte, texture-array layer. The texture
+// array (REPEAT wrap) lets greedy-merged faces tile their texture.
 const char* CHUNK_VS = R"(
 #version 330 core
-layout(location = 0) in vec3 aPos;
-layout(location = 1) in vec2 aUV;
-layout(location = 2) in float aLight;
+layout(location = 0) in ivec3 aPos;
+layout(location = 1) in ivec2 aUV;
+layout(location = 2) in ivec2 aLightLayer;
 uniform mat4 uViewProj;
+uniform vec3 uOrigin;
 out vec2 vUV;
+flat out float vLayer;
 out float vLight;
 out float vDist;
 void main() {
-    vUV = aUV;
-    vLight = aLight;
-    vec4 p = uViewProj * vec4(aPos, 1.0);
+    vUV = vec2(aUV) / 16.0;
+    vLayer = float(aLightLayer.y);
+    vLight = float(aLightLayer.x) / 255.0;
+    vec4 p = uViewProj * vec4(uOrigin + vec3(aPos) / 16.0, 1.0);
     vDist = length(p.xyz);
     gl_Position = p;
 }
@@ -57,16 +64,17 @@ void main() {
 const char* CHUNK_FS = R"(
 #version 330 core
 in vec2 vUV;
+flat in float vLayer;
 in float vLight;
 in float vDist;
-uniform sampler2D uAtlas;
+uniform sampler2DArray uAtlas;
 uniform vec3 uSky;
 uniform float uFogStart;
 uniform float uFogEnd;
 out vec4 FragColor;
 uniform float uAlpha;
 void main() {
-    vec3 c = texture(uAtlas, vUV).rgb * vLight;
+    vec3 c = texture(uAtlas, vec3(vUV, vLayer)).rgb * vLight;
     float fog = clamp((vDist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
     FragColor = vec4(mix(c, uSky, fog), uAlpha);
 }
@@ -348,7 +356,9 @@ int main(int argc, char** argv) {
 
     Shader chunkShader(CHUNK_VS, CHUNK_FS);
     Shader lineShader(LINE_VS, LINE_FS);
-    GLuint atlas = createBlockAtlas();
+    GLuint atlas = createBlockAtlas();          // 2D strip for the HUD
+    GLuint blockTextures = createBlockTextureArray(); // array for chunks
+    const int originLoc = chunkShader.loc("uOrigin");
     Hud hud(atlas);
 
     GLuint cubeVbo;
@@ -385,7 +395,21 @@ int main(int argc, char** argv) {
         // --- Update ---
         app.player.update(world, app.input, dt);
         world.update(app.player.pos, settings.renderDistance);
-        world.processMeshing(8);
+
+        // Camera for this frame, computed early: mesh uploads prioritize
+        // in-frustum chunks, so processMeshing wants the frustum too.
+        glfwGetFramebufferSize(app.window, &width, &height);
+        glm::vec3 eye = app.player.eyePos();
+        glm::vec3 dir = app.player.lookDir();
+        float aspect = height > 0 ? float(width) / float(height) : 1.0f;
+        glm::mat4 proj = glm::perspective(glm::radians(settings.fov), aspect, 0.05f, 600.0f);
+        glm::mat4 view = glm::lookAt(eye, eye + dir, glm::vec3(0, 1, 0));
+        glm::mat4 viewProj = proj * view;
+        Frustum frustum = Frustum::fromMatrix(viewProj);
+
+        // Budgeted mesh uploads (visible/near chunks first), so a streaming
+        // burst can't stall a frame on GL transfers.
+        world.processMeshing(8, app.player.pos, &frustum, UPLOAD_BUDGET_MS);
 
         // Periodic autosave so a crash loses at most ~30 s of edits (chunks
         // streaming out and clean exit already save on their own).
@@ -396,8 +420,6 @@ int main(int argc, char** argv) {
             savePlayer();
         }
 
-        glm::vec3 eye = app.player.eyePos();
-        glm::vec3 dir = app.player.lookDir();
         RaycastHit hit = world.raycast(eye, dir, REACH);
 
         if (app.breakPressed && hit.hit &&
@@ -413,15 +435,9 @@ int main(int argc, char** argv) {
         app.breakPressed = app.placePressed = false;
 
         // --- Render world ---
-        glfwGetFramebufferSize(app.window, &width, &height);
         glViewport(0, 0, width, height);
         glClearColor(SKY_COLOR.r, SKY_COLOR.g, SKY_COLOR.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        float aspect = height > 0 ? float(width) / float(height) : 1.0f;
-        glm::mat4 proj = glm::perspective(glm::radians(settings.fov), aspect, 0.05f, 600.0f);
-        glm::mat4 view = glm::lookAt(eye, eye + dir, glm::vec3(0, 1, 0));
-        glm::mat4 viewProj = proj * view;
 
         float fogEnd = float(settings.renderDistance * CHUNK_SIZE);
         chunkShader.use();
@@ -432,9 +448,8 @@ int main(int argc, char** argv) {
         chunkShader.setInt("uAtlas", 0);
         chunkShader.setFloat("uAlpha", 1.0f);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, atlas);
-        Frustum frustum = Frustum::fromMatrix(viewProj);
-        world.drawChunks(frustum);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures);
+        world.drawChunks(frustum, eye, originLoc);
 
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.
@@ -442,7 +457,7 @@ int main(int argc, char** argv) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_CULL_FACE);
-        world.drawWater(frustum);
+        world.drawWater(frustum, eye, originLoc);
         glEnable(GL_CULL_FACE);
         glDisable(GL_BLEND);
 
@@ -491,10 +506,10 @@ int main(int argc, char** argv) {
                     "bench: %ld frames in %.2f s = %.1f fps (%.2f ms/frame)\n"
                     "chunks: %d loaded, %.1f drawn/frame avg, %ld mesh uploads total\n"
                     "workers: gen %.2f ms/chunk, mesh %.2f ms/chunk (moving avg), "
-                    "queues gen %d mesh %d\n",
+                    "queues gen %d mesh %d upload %d\n",
                     frameCount, secs, frameCount / secs, secs * 1000.0 / frameCount,
                     st.loaded, double(benchDrawn) / frameCount, benchUploads,
-                    st.genMs, st.meshMs, st.genQueued, st.meshQueued);
+                    st.genMs, st.meshMs, st.genQueued, st.meshQueued, st.uploadQueued);
             } else {
                 saveScreenshotPPM("screenshot.ppm", width, height);
             }

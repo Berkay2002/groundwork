@@ -1,8 +1,8 @@
-# Status (last updated: 2026-06-11, after the A–D addenda)
+# Status (last updated: 2026-06-11, after Batch F)
 
 ## Where the project stands
 
-All planned batches through E **plus all A–D addenda** are done and verified:
+All planned batches through F **plus all A–D addenda** are done and verified:
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -13,6 +13,46 @@ All planned batches through E **plus all A–D addenda** are done and verified:
 | Batch D | 4-bit sun + block light per cell, BFS add/unlight relight on edits, cross-border propagation, light baked into mesh verts (0.85^n curve), Torch block as a 3D post (walk-through, non-opaque, emits 14), light readout in overlay | done |
 | Batch E | Spaghetti caves (two 3D noise fields, surface-pinched), Coal/Iron ore veins (depth-banded, per-8³-cell hashing), water (lake basins to SEA_LEVEL 20, translucent second mesh pass, sunlight attenuation, swim physics, hotbar slot 8) | done |
 | A–D addenda | level.bin seed file, atomic saves, autosave; block registry table; `--bench` + golden-screenshot test; per-vertex AO + smooth lighting (fog pre-existed) | done |
+| Batch F | Greedy meshing (AO/light-tuple keyed), 12-byte packed vertices + texture array, frame-budgeted prioritized mesh uploads, front-to-back/back-to-front draw sorting | done |
+
+### Batch F implementation notes (2026-06-11)
+
+- **Greedy meshing**: `buildMeshData` sweeps each of the 6 face directions
+  as slices (`AXES` table maps face → slice/grid axes with texture-direction
+  signs derived from the old FACES winding). Cells key on
+  `(block id, 4 quantized corner brightness bytes)`; maximal rectangles of
+  equal keys merge. Because the key contains the *exact* per-corner shading,
+  merging can never change the rendered lighting — this is the Batch D
+  constraint, enforced structurally. Water merges too (flat per-face light
+  keys); torches are excluded and keep their custom post geometry. Sweeps
+  clamp to the highest non-air layer and use strided direct neighbor reads
+  on interior slices: 0.40 ms/chunk (naive greedy was 1.36).
+- **Packed vertices**: `ChunkVertex` is 12 bytes — u16 x/y/z and u16 u/v in
+  **1/16 units** (chunk-local positions; torch fractions stay exact), u8
+  brightness (×255), u8 texture-array layer. The shader gets integer
+  attribs (`glVertexAttribIPointer`) plus a per-draw `uOrigin` uniform
+  (location passed into `World::drawChunks`). UVs span `0..w`/`0..h` tiles
+  on merged faces, wrapped by `GL_TEXTURE_2D_ARRAY` + REPEAT
+  (`createBlockTextureArray`; the HUD still uses the 2D strip atlas — both
+  come from the shared `tilePixel`). Near spawn: ~9.5k → ~1.7k verts/chunk,
+  222 KB → 20 KB vertex data.
+- **Budgeted uploads**: `processMeshing(budget, playerPos, frustum*, ms)`
+  drains worker results into `uploadQueue_` (newest per chunk, unloaded
+  dropped), frees the pipeline slot immediately, and uploads best-priority
+  first (in-frustum, then nearest) within `UPLOAD_BUDGET_MS` = 3 ms, always
+  ≥1/frame. Dirty-chunk enqueueing uses the same priority (it used to be
+  hash-map order — edits near the player no longer wait behind streaming).
+  main.cpp computes the camera/frustum *before* processMeshing now.
+- **Decisions by measurement**: VBO pooling/orphaning skipped — one full
+  chunk upload is ~12 µs post-greedy, nothing to save. Occlusion heuristics
+  skipped — ~80 draws/frame at ~340 fps is not draw-bound. "One persistent
+  VAO" interpreted as per-chunk VAOs (GL 3.3 has no separate attrib-binding
+  state; one VAO bind per chunk is already minimal).
+- **Golden reference regenerated**: the packed-coordinate path
+  (`uOrigin + pos/16`) shifts rasterization sub-pixel at block edges —
+  ~3.5% of pixels moved (all on edges, verified via amplified diff map;
+  solid areas identical). The reference was regenerated after visual
+  inspection; the test now passes at ~0.03% noise again.
 
 ### A–D addenda implementation notes (2026-06-11)
 
@@ -103,13 +143,12 @@ All planned batches through E **plus all A–D addenda** are done and verified:
 
 ## What's next
 
-**Batch F — Mesh & Render Optimization** (greedy meshing, vertex packing,
-draw ordering) is next per the agreed order; reasoning at the bottom of
-`TODO.md`. Two constraints set up for it: greedy merging must compare
-per-vertex corner AO/light values (only faces with identical corners merge),
-and water is a second translucent mesh that must be handled too. Use
-`--bench` for before/after numbers and the golden-screenshot test to prove
-the image didn't change.
+**Batch G — Items, Inventory & Entity Foundation** is next per the agreed
+order (`TODO.md`): fixed-timestep simulation tick first (the multiplayer
+insurance), then a minimal entity system reusing the player's collision,
+then block drops as the first entity, hotbar counts, inventory UI, and
+player-save v2 for persistence. The Block registry's `hardness`/`drop`
+columns have been waiting for this batch since the B addendum.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -122,7 +161,21 @@ the image didn't change.
 - World seed fixed at 1337 in `main.cpp`.
 - Internet access works (font8x8 was fetched via curl).
 
-## Recent verification snapshot (A–D addenda)
+## Recent verification snapshot (Batch F)
+
+Warning-free build; `world_tests` (new: greedy merging/UV-span/determinism,
+torch mesh, rewritten position-keyed AO/smooth tests) passes 3× and under
+TSAN (ASLR workaround). Identical-viewpoint `--bench 3000` at render
+distance 6: 299 fps (old mesher, same camera) → ~340 fps (run-to-run ±5%);
+mesh build 0.40 ms/chunk (was 0.24 pre-greedy, 1.36 unoptimized greedy);
+upload ~12 µs/chunk; queues empty at steady state. Mesh size near spawn:
+1711 verts/chunk avg (was 9455), 20 KB vertex + 10 KB index data (was
+222 + 55). Verified visually: standard golden view (AO/fog/trees intact, no
+greedy cracks at quad T-junctions), lake panorama (water one even sheet, no
+seams between merged quads), underwater looking up through the surface.
+Golden test stable at ~0.03% noise against the regenerated reference.
+
+## Older verification snapshot (A–D addenda)
 
 Warning-free build; `world_tests` (now incl. level-seed, unload-save,
 registry, AO, corner-column AO, smooth-lighting tests) passes repeatedly and

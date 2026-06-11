@@ -22,6 +22,32 @@
 - The block-outline cube is expanded by 0.002 to avoid z-fighting; the chunk
   shader fogs toward the sky color between 0.7 and 0.98 of render distance.
 
+## Meshing (Batch F)
+
+- Greedy merging is keyed on (block id, quantized corner AO/light tuple):
+  faces merge ONLY when every cell shades identically, which is what keeps
+  the merged image equal to the per-cell one. If you add per-vertex data
+  (e.g. per-face color), it must go into the key or merging will smear it.
+- `ChunkVertex` positions/UVs are integers in **1/16-block units** and
+  chunk-local; the shader divides by 16 and adds the per-draw `uOrigin`
+  uniform. Anything with fractional geometry (torch) must stay on the 1/16
+  grid. Tests read these raw fields — locate quads by vertex positions,
+  never by emission order (greedy reorders freely).
+- Chunks sample a GL_TEXTURE_2D_ARRAY (tile = layer, REPEAT so merged faces
+  tile); the HUD still uses the 2D strip atlas. Both are filled from
+  `tilePixel()` in Texture.cpp — add new tiles there once, and bump
+  ATLAS_TILES as before.
+- Sub-pixel rasterization shifted when positions moved to `uOrigin +
+  pos/16`: any such change lights up the golden test along block edges
+  (~3.5% of pixels) while solid areas stay identical. Inspect an amplified
+  diff map before regenerating the reference — edge-only noise is the
+  benign signature, solid-area drift is a real bug.
+- `processMeshing` frees a chunk's `meshInFlight` slot when the worker
+  result is *drained*, not when it is uploaded; the upload may wait several
+  frames in `uploadQueue_` (one entry per chunk, newest wins, 3 ms/frame
+  budget). Don't "fix" an apparently stale upload by uploading eagerly —
+  that reintroduces frame stalls on streaming bursts.
+
 ## Terrain
 
 - Generation must stay a pure function of (world coords, seed). Trees work

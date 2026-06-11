@@ -77,21 +77,35 @@ what was actually built.
 - [x] ~~Taller world~~ — skipped: caves fit fine in the 80-high world, and a
       CHUNK_HEIGHT bump would regenerate the player's modified chunks
 
-## Batch F — Mesh & Render Optimization
+## Batch F — Mesh & Render Optimization — DONE
 
-- [ ] Greedy meshing (merge coplanar same-tile faces **with identical corner
-      AO/light values** — the Batch D addenda constraint; must handle both
-      the opaque and water meshes; needs texture wrap handling — switch
-      atlas strip to a texture array or per-face UV tiling)
-- [ ] Vertex size reduction (pack position/uv/light/AO into ints; measure
-      first via `--bench`)
-- [ ] (new) Frame-budgeted main-thread work: cap mesh uploads per frame
-      (~2–4 ms), prioritize by distance-to-player and frustum, drop results
-      for chunks that unloaded meanwhile
-- [ ] (new) GL buffer lifecycle: pool/orphan chunk VBOs instead of
-      reallocating per remesh (measure first)
-- [ ] Sort chunk draws front-to-back for early-z; one persistent VAO layout
-- [ ] Occlusion heuristics only if profiling shows draw-bound (don't guess)
+- [x] Greedy meshing: coplanar same-block faces merge only when their
+      quantized corner AO/light tuples are identical (the Batch D
+      constraint), for both the opaque and water meshes; torches stay
+      custom geometry. Texture wrap solved by moving chunk rendering to a
+      GL_TEXTURE_2D_ARRAY (tile = layer, REPEAT wrapping); the HUD keeps
+      the 2D strip atlas, both built from the same tile functions.
+      ~9.5k → ~1.7k verts/chunk near spawn.
+- [x] Vertex size reduction: 24-byte float vertex → 12-byte packed ints
+      (u16 chunk-local position and uv in 1/16 units — torch geometry stays
+      exact — u8 brightness, u8 layer; the chunk origin became a per-draw
+      uniform). Combined with greedy: 222 KB → 20 KB vertex data per chunk;
+      steady-state bench 299 → ~340 fps at render distance 6.
+- [x] Frame-budgeted main-thread work: finished meshes wait in an upload
+      queue and upload within a 3 ms/frame cap (`UPLOAD_BUDGET_MS`),
+      in-frustum + nearest chunks first, dropped if their chunk unloaded,
+      newest result kept per chunk; dirty-chunk *enqueueing* is also
+      priority-ordered now (was hash-map order).
+- [x] GL buffer lifecycle: measured first, as specified — a full chunk
+      upload costs ~12 µs now that greedy meshes are ~30 KB, so VBO
+      pooling/orphaning has nothing left to save. Skipped on the numbers.
+- [x] Chunk draws sorted front-to-back for early-z; water back-to-front
+      (blend-correct — it was unordered before). Per-chunk VAOs kept
+      instead of "one persistent VAO": GL 3.3 has no separate
+      attrib-binding state, so one VAO bind per chunk *is* the minimal
+      call sequence.
+- [x] Occlusion heuristics: bench shows we are nowhere near draw-bound
+      (~80 draws/frame at ~340 fps), so skipped per the "don't guess" rule.
 
 ## Batch G — Items, Inventory & Entity Foundation
 
@@ -139,7 +153,8 @@ Far-later items, and each is a batch-sized commitment. Revisit after H.
 ## Suggested order
 
 ~~Addenda first~~ (done: A's save safety + seed file, B's registry, C's
-bench/golden screenshot, D's AO/smooth light/fog), then F → G → H. The D
-addenda preceded F's greedy mesher because merging rules depend on corner
-AO/light values; entities live inside G because dropped items are the gentle
-on-ramp to mobs; polish last.
+bench/golden screenshot, D's AO/smooth light/fog), ~~then F~~ (done:
+greedy meshing, packed vertices, budgeted uploads, sorted draws), then
+G → H. The D addenda preceded F's greedy mesher because merging rules
+depend on corner AO/light values; entities live inside G because dropped
+items are the gentle on-ramp to mobs; polish last.

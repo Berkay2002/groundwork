@@ -113,6 +113,26 @@ RGB torchPixel(int x, int y) {
         return shade({252, 150, 28}, 0.85f + 0.3f * noise01(x, y, 13)); // flame
     return shade({26, 26, 30}, 0.8f + 0.3f * noise01(x, y, 15)); // background
 }
+
+// One function per atlas tile index; shared by the HUD's 2D atlas strip and
+// the chunk renderer's texture array so both show identical art.
+RGB tilePixel(int tile, int x, int y) {
+    switch (tile) {
+        case 0: return grassTopPixel(x, y);
+        case 1: return grassSidePixel(x, y);
+        case 2: return dirtPixel(x, y);
+        case 3: return stonePixel(x, y);
+        case 4: return woodSidePixel(x, y);
+        case 5: return woodTopPixel(x, y);
+        case 6: return leavesPixel(x, y);
+        case 7: return sandPixel(x, y);
+        case 8: return bedrockPixel(x, y);
+        case 9: return torchPixel(x, y);
+        case 10: return coalOrePixel(x, y);
+        case 11: return ironOrePixel(x, y);
+        default: return waterPixel(x, y);
+    }
+}
 }
 
 unsigned createBlockAtlas() {
@@ -121,24 +141,7 @@ unsigned createBlockAtlas() {
 
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
-            int tile = x / TILE;
-            int tx = x % TILE;
-            RGB c;
-            switch (tile) {
-                case 0: c = grassTopPixel(tx, y); break;
-                case 1: c = grassSidePixel(tx, y); break;
-                case 2: c = dirtPixel(tx, y); break;
-                case 3: c = stonePixel(tx, y); break;
-                case 4: c = woodSidePixel(tx, y); break;
-                case 5: c = woodTopPixel(tx, y); break;
-                case 6: c = leavesPixel(tx, y); break;
-                case 7: c = sandPixel(tx, y); break;
-                case 8: c = bedrockPixel(tx, y); break;
-                case 9: c = torchPixel(tx, y); break;
-                case 10: c = coalOrePixel(tx, y); break;
-                case 11: c = ironOrePixel(tx, y); break;
-                default: c = waterPixel(tx, y); break;
-            }
+            RGB c = tilePixel(x / TILE, x % TILE, y);
             size_t i = (size_t(y) * W + x) * 3;
             img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;
         }
@@ -153,5 +156,30 @@ unsigned createBlockAtlas() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return tex;
+}
+
+unsigned createBlockTextureArray() {
+    // Same tiles as the atlas, one per array layer, with REPEAT wrapping so
+    // greedy-merged faces can tile their texture (UVs span 0..w / 0..h).
+    std::vector<uint8_t> img(size_t(TILE) * TILE * ATLAS_TILES * 3);
+    for (int layer = 0; layer < ATLAS_TILES; ++layer)
+        for (int y = 0; y < TILE; ++y)
+            for (int x = 0; x < TILE; ++x) {
+                RGB c = tilePixel(layer, x, y);
+                size_t i = ((size_t(layer) * TILE + y) * TILE + x) * 3;
+                img[i] = c.r; img[i + 1] = c.g; img[i + 2] = c.b;
+            }
+
+    unsigned tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, TILE, TILE, ATLAS_TILES, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, img.data());
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
     return tex;
 }

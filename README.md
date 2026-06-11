@@ -65,7 +65,9 @@ with the selected block at the bottom.
   (chunk blocks + neighbor edge slices); all chunk-map mutation and GL
   uploads stay on the main thread, with two mutex-guarded result queues as
   the only synchronization. Lifecycle: missing → generating → loaded+dirty →
-  meshing → uploaded; edits set dirty again.
+  meshing → uploaded; edits set dirty again. Finished meshes upload within
+  a 3 ms/frame budget — visible and nearby chunks first — so a streaming
+  burst never stalls a frame, and dirty chunks re-mesh nearest-first.
 - **Blocks** (`src/Block.h`) — a single constexpr registry table holds every
   per-block property (name, solidity, collision, opacity, light emission,
   hardness, drop, per-face atlas tiles); the gameplay code only reads it
@@ -76,12 +78,19 @@ with the selected block at the bottom.
   and per-vertex smooth lighting + ambient occlusion baked into the
   vertices: each corner averages the light of the open cells around it and
   darkens by the classic 3-neighbor AO rule, so block edges and corners read
-  as soft contact shadows. Chunks are marked dirty on edits (including
-  neighbors across borders, diagonals included) and rebuilt with a per-frame
-  budget. Torches are meshed as thin
-  3D posts rather than cubes. Water builds a second, translucent mesh per
-  chunk, drawn after all opaque geometry with blending (faces appear only
-  against air, so a lake renders as one surface — visible from below too).
+  as soft contact shadows. A greedy mesher then merges coplanar faces of the
+  same block — but only when their corner AO/light values match exactly, so
+  merging never changes the shading — and vertices are packed into 12 bytes
+  (integer positions/UVs in 1/16 units, brightness byte, texture layer),
+  cutting a chunk's vertex data by roughly 10×. Block textures live in a
+  texture array with repeat wrapping so merged faces can tile them. Chunks
+  are marked dirty on edits (including neighbors across borders, diagonals
+  included) and rebuilt nearest-first with a per-frame budget. Opaque chunks
+  draw front-to-back (early-z), water back-to-front. Torches are meshed as
+  thin 3D posts rather than cubes. Water builds a second, translucent mesh
+  per chunk, drawn after all opaque geometry with blending (faces appear
+  only against air, so a lake renders as one surface — visible from below
+  too).
 - **Lighting** — every cell stores 4-bit sunlight + 4-bit block light.
   Sunlight column-fills from the sky (level 15 falls without attenuation)
   and BFS-spreads into overhangs; torches emit block light 14 that fades by
@@ -107,8 +116,11 @@ with the selected block at the bottom.
   can't tunnel through blocks). Water is swim-through: gravity weakens, you
   sink slowly, and holding Space swims up. `F` toggles a fly mode for
   exploring.
-- **Textures** (`src/Texture.cpp`) — the block atlas is generated procedurally
-  at startup (hash-noise grass/dirt/stone tiles), so there are no asset files.
+- **Textures** (`src/Texture.cpp`) — all block tiles are generated
+  procedurally at startup (hash-noise grass/dirt/stone art), so there are no
+  asset files. The same tile functions fill both a texture array (chunk
+  rendering, repeat wrapping for merged faces) and a 2D atlas strip (HUD
+  hotbar icons).
 - **HUD** (`src/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,
   crosshair) using the public-domain `font8x8` bitmap font baked into a
   texture at startup.

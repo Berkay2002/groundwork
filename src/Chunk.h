@@ -6,13 +6,27 @@
 constexpr int CHUNK_SIZE = 16;   // X and Z
 constexpr int CHUNK_HEIGHT = 80; // Y
 
+// Packed chunk vertex (12 bytes vs the old 24-byte float layout). Positions
+// are chunk-local in 1/16-block units (so the torch's fractional geometry
+// stays exact); the shader adds the chunk origin via a uniform. UVs are in
+// 1/16-tile units and may span several tiles on greedy-merged faces — the
+// block textures live in a GL texture array (one tile per layer, REPEAT
+// wrapping), with `layer` selecting the tile.
+struct ChunkVertex {
+    uint16_t x, y, z;  // chunk-local position * 16
+    uint16_t u, v;     // tile UV * 16 (wraps per tile on merged faces)
+    uint8_t light;     // brightness * 255 (shade x smooth light x AO baked)
+    uint8_t layer;     // texture-array layer = atlas tile index
+};
+static_assert(sizeof(ChunkVertex) == 12, "ChunkVertex must stay tightly packed");
+
 // CPU-side mesh, built on any thread, uploaded on the GL thread.
 // Water lives in its own arrays: it is drawn in a separate translucent pass
 // after all opaque geometry.
 struct MeshData {
-    std::vector<float> verts;   // x y z u v light
+    std::vector<ChunkVertex> verts;
     std::vector<uint32_t> inds;
-    std::vector<float> waterVerts;
+    std::vector<ChunkVertex> waterVerts;
     std::vector<uint32_t> waterInds;
 };
 
@@ -34,6 +48,9 @@ struct ChunkSnapshot {
                          cornerLightXnZp, cornerLightXpZp;
 };
 
+// Greedy mesher: coplanar faces of the same block merge into one quad only
+// when their quantized corner AO/light tuples are identical, so merging never
+// changes the shading. Pure function, GL-free, thread-safe.
 MeshData buildMeshData(const ChunkSnapshot& s);
 
 class Chunk {

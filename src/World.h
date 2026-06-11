@@ -34,6 +34,7 @@ struct WorldStats {
     int uploads = 0;      // meshes uploaded last frame
     int genQueued = 0;    // generation jobs in flight
     int meshQueued = 0;   // mesh jobs in flight
+    int uploadQueued = 0; // finished meshes still waiting for a GL upload slot
     float genMs = 0;      // moving average per-chunk generation time
     float meshMs = 0;     // moving average per-chunk mesh build time
 };
@@ -59,17 +60,25 @@ public:
     // around the player, unload distant ones.
     void update(const glm::vec3& playerPos, int renderDistance);
 
-    // Mesh pipeline: upload finished meshes (GL!), enqueue dirty chunks.
-    void processMeshing(int enqueueBudget);
+    // Mesh pipeline: upload finished meshes (GL!) within a per-frame time
+    // budget — in-frustum and near chunks first, the rest carry over to the
+    // next frame — then enqueue dirty chunks for the workers, also
+    // nearest-first. At least one upload happens per frame so the queue
+    // always drains.
+    void processMeshing(int enqueueBudget, const glm::vec3& playerPos,
+                        const Frustum* frustum, float uploadBudgetMs);
 
     // True when all chunks within `radius` of pos are in memory.
     bool isAreaReady(const glm::vec3& pos, int radius) const;
     // Pump update() until the area is ready (no GL needed; usable in tests).
     void waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs);
 
-    void drawChunks(const Frustum& frustum);
-    // Translucent water pass; call after drawChunks with blending enabled.
-    void drawWater(const Frustum& frustum);
+    // Opaque pass, front-to-back for early-z. Vertices are chunk-local, so
+    // each draw sets the chunk origin via the given uniform location.
+    void drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc);
+    // Translucent water pass, back-to-front; call after drawChunks with
+    // blending enabled.
+    void drawWater(const Frustum& frustum, const glm::vec3& eye, int originLoc);
 
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
 
@@ -118,6 +127,9 @@ private:
     int meshInFlight_ = 0; // main-thread counter of jobs in the pipeline
     std::mutex meshM_;
     std::vector<std::pair<ChunkKey, MeshData>> meshDone_;
+    // Finished meshes waiting for their budgeted GL upload (main thread
+    // only). At most one entry per chunk: a newer result replaces the old.
+    std::vector<std::pair<ChunkKey, MeshData>> uploadQueue_;
 
     // Perf counters (workers store, main thread reads).
     std::atomic<float> genMs_{0.0f}, meshMs_{0.0f};

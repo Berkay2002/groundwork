@@ -2,9 +2,11 @@
 // paths (generation, block access, raycast, persistence) never touch the GPU.
 #include "../src/World.h"
 #include "../src/Terrain.h"
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 
@@ -253,19 +255,69 @@ static void testRaycast() {
     std::filesystem::remove_all(dir);
 }
 
+// --- Packed-mesh helpers. A quad is 4 consecutive ChunkVertex; positions are
+// chunk-local in 1/16-block units (block coordinate * 16). Greedy meshing
+// makes emission order an implementation detail, so tests locate quads by
+// the positions of their vertices instead.
+
+// Index of the unique quad whose four vertices all satisfy pred (-1 = none,
+// -2 = ambiguous).
+template <typename Pred>
+static int findQuad(const std::vector<ChunkVertex>& vs, Pred pred) {
+    int found = -1;
+    for (size_t q = 0; q + 3 < vs.size(); q += 4) {
+        if (pred(vs[q]) && pred(vs[q + 1]) && pred(vs[q + 2]) && pred(vs[q + 3])) {
+            if (found >= 0) return -2;
+            found = int(q / 4);
+        }
+    }
+    return found;
+}
+
+// Light byte of the vertex at exact packed position (x,y,z) inside quad q.
+static int lightAtVert(const std::vector<ChunkVertex>& vs, int quad, int x, int y, int z) {
+    for (int i = 0; i < 4; ++i) {
+        const ChunkVertex& v = vs[size_t(quad) * 4 + i];
+        if (v.x == x && v.y == y && v.z == z) return v.light;
+    }
+    return -1;
+}
+
+// The top (+Y) face quad of the block at (bx, by, bz): all four verts in the
+// y = by+1 plane within the block's footprint.
+static int topQuadOf(const std::vector<ChunkVertex>& vs, int bx, int by, int bz) {
+    return findQuad(vs, [&](const ChunkVertex& v) {
+        return v.y == (by + 1) * 16 &&
+               v.x >= bx * 16 && v.x <= (bx + 1) * 16 &&
+               v.z >= bz * 16 && v.z <= (bz + 1) * 16;
+    });
+}
+
 static void testMeshData() {
-    // One stone block floating in an empty snapshot -> exactly 6 faces.
+    // One stone block floating in an empty snapshot -> exactly 6 quads.
     ChunkSnapshot s;
     s.blocks.assign(Chunk::rawSize(), Block::Air);
     s.blocks[(40 * CHUNK_SIZE + 8) * CHUNK_SIZE + 8] = Block::Stone;
     MeshData md = buildMeshData(s);
-    CHECK(md.verts.size() == 6u * 4 * 6); // 6 faces * 4 verts * 6 floats
-    CHECK(md.inds.size() == 6u * 6);      // 6 faces * 6 indices
+    CHECK(md.verts.size() == 6u * 4); // 6 quads * 4 packed verts
+    CHECK(md.inds.size() == 6u * 6);  // 6 quads * 6 indices
 
-    // Two stacked blocks share a hidden face pair -> 10 faces total.
+    // Two stacked blocks: the shared face pair is culled and, in open air,
+    // each 2-cell side column merges into one greedy quad -> 6 quads total.
     s.blocks[(41 * CHUNK_SIZE + 8) * CHUNK_SIZE + 8] = Block::Stone;
     md = buildMeshData(s);
-    CHECK(md.inds.size() == 10u * 6);
+    CHECK(md.inds.size() == 6u * 6);
+    // The merged +X side spans both cells: y from 40 to 42, v from 0 to 2 tiles.
+    int side = findQuad(md.verts, [](const ChunkVertex& v) { return v.x == 9 * 16; });
+    CHECK(side >= 0);
+    int ymin = 1 << 16, ymax = -1, vmax = -1;
+    for (int i = 0; i < 4; ++i) {
+        const ChunkVertex& v = md.verts[size_t(side) * 4 + i];
+        ymin = std::min(ymin, int(v.y)); ymax = std::max(ymax, int(v.y));
+        vmax = std::max(vmax, int(v.v));
+    }
+    CHECK(ymin == 40 * 16 && ymax == 42 * 16);
+    CHECK(vmax == 2 * 16); // texture v tiles twice across the merged quad
 
     // A block at the -X border with a solid neighbor edge hides that face.
     s.blocks.assign(Chunk::rawSize(), Block::Air);
@@ -277,31 +329,74 @@ static void testMeshData() {
     CHECK(md.inds.size() == 5u * 6);
 }
 
-// Vertex brightness (the 6th float) of vertex v of the n-th emitted face.
-static float faceVertLight(const MeshData& md, int face, int v) {
-    return md.verts[size_t(face) * 4 * 6 + size_t(v) * 6 + 5];
+static void testGreedyMerging() {
+    // A 4x4 stone slab floating in fully sunlit open air: every face of the
+    // slab is uniformly lit and unoccluded, so greedy meshing collapses it to
+    // exactly 6 quads (one per direction), same as a single block.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    for (int z = 4; z < 8; ++z)
+        for (int x = 4; x < 8; ++x)
+            s.blocks[at(x, 40, z)] = Block::Stone;
+    MeshData md = buildMeshData(s);
+    CHECK(md.verts.size() == 6u * 4);
+    // The top quad covers the whole slab and tiles its texture 4x4.
+    int top = findQuad(md.verts, [](const ChunkVertex& v) { return v.y == 41 * 16; });
+    CHECK(top >= 0);
+    int umax = -1, vmax = -1;
+    for (int i = 0; i < 4; ++i) {
+        const ChunkVertex& v = md.verts[size_t(top) * 4 + i];
+        CHECK(v.light == 255); // full sun, AO open, top shade 1.0
+        CHECK(v.layer == 3);   // stone tile
+        umax = std::max(umax, int(v.u)); vmax = std::max(vmax, int(v.v));
+    }
+    CHECK(umax == 4 * 16 && vmax == 4 * 16);
+
+    // A block sitting on one corner of the slab casts AO onto the top faces
+    // around it: those cells' corner tuples differ, so the top no longer
+    // merges into a single quad and darkened vertices appear.
+    s.blocks[at(4, 41, 4)] = Block::Stone;
+    md = buildMeshData(s);
+    CHECK(md.verts.size() > 6u * 4);
+    bool darkened = false;
+    for (size_t i = 0; i < md.verts.size(); ++i)
+        if (md.verts[i].y == 41 * 16 && md.verts[i].light < 255) darkened = true;
+    CHECK(darkened);
+
+    // Same input twice -> bit-identical mesh (worker scheduling can't change
+    // results because meshing is a pure function of the snapshot).
+    MeshData md2 = buildMeshData(s);
+    CHECK(md.verts.size() == md2.verts.size() && md.inds == md2.inds);
+    CHECK(std::memcmp(md.verts.data(), md2.verts.data(),
+                      md.verts.size() * sizeof(ChunkVertex)) == 0);
 }
 
 static void testAmbientOcclusion() {
-    // Isolated stone block: emits faces f=0..5 in order; the top (+Y) face is
-    // the third. With nothing around, all four corners are fully open.
+    // Isolated stone block: with nothing around, all four corners of the top
+    // face are fully open and equally bright.
     ChunkSnapshot s;
     s.blocks.assign(Chunk::rawSize(), Block::Air);
     auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
     s.blocks[at(8, 40, 8)] = Block::Stone;
     MeshData md = buildMeshData(s);
-    for (int v = 1; v < 4; ++v)
-        CHECK(faceVertLight(md, 2, v) == faceVertLight(md, 2, 0));
+    int top = topQuadOf(md.verts, 8, 40, 8);
+    CHECK(top >= 0);
+    int open = lightAtVert(md.verts, top, 8 * 16, 41 * 16, 8 * 16);
+    CHECK(open > 0);
+    for (int i = 1; i < 4; ++i)
+        CHECK(int(md.verts[size_t(top) * 4 + i].light) == int(md.verts[size_t(top) * 4].light));
 
-    // A diagonal occluder above (+X,+Z corner) darkens exactly the top-face
-    // vertex whose corner cell it fills (v1 = (x+1, y+1, z+1)).
+    // A diagonal occluder above the (+X,+Z) corner darkens exactly the
+    // top-face vertex whose corner cell it fills.
     s.blocks[at(9, 41, 9)] = Block::Stone;
     md = buildMeshData(s);
-    float open = faceVertLight(md, 2, 0);
-    float shaded = faceVertLight(md, 2, 1);
-    CHECK(shaded < open);
-    CHECK(faceVertLight(md, 2, 2) == open); // other corners untouched
-    CHECK(faceVertLight(md, 2, 3) == open);
+    top = topQuadOf(md.verts, 8, 40, 8);
+    CHECK(top >= 0);
+    CHECK(lightAtVert(md.verts, top, 9 * 16, 41 * 16, 9 * 16) < open);
+    CHECK(lightAtVert(md.verts, top, 8 * 16, 41 * 16, 8 * 16) == open);
+    CHECK(lightAtVert(md.verts, top, 9 * 16, 41 * 16, 8 * 16) == open);
+    CHECK(lightAtVert(md.verts, top, 8 * 16, 41 * 16, 9 * 16) == open);
 }
 
 static void testAOCornerColumn() {
@@ -311,12 +406,16 @@ static void testAOCornerColumn() {
     s.blocks.assign(Chunk::rawSize(), Block::Air);
     s.blocks[(40 * CHUNK_SIZE + 0) * CHUNK_SIZE + 0] = Block::Stone;
     MeshData md = buildMeshData(s);
-    float open = faceVertLight(md, 2, 3); // top-face vertex at (0, 41, 0)
+    int top = topQuadOf(md.verts, 0, 40, 0);
+    CHECK(top >= 0);
+    int open = lightAtVert(md.verts, top, 0, 41 * 16, 0);
     s.cornerXnZn.assign(CHUNK_HEIGHT, Block::Air);
     s.cornerXnZn[41] = Block::Stone; // diagonal cell (-1, 41, -1)
     md = buildMeshData(s);
-    CHECK(faceVertLight(md, 2, 3) < open);
-    CHECK(faceVertLight(md, 2, 1) == open); // opposite corner unaffected
+    top = topQuadOf(md.verts, 0, 40, 0);
+    CHECK(top >= 0);
+    CHECK(lightAtVert(md.verts, top, 0, 41 * 16, 0) < open);
+    CHECK(lightAtVert(md.verts, top, 16, 41 * 16, 16) == open); // opposite corner
 }
 
 static void testSmoothLighting() {
@@ -330,15 +429,21 @@ static void testSmoothLighting() {
     s.blocks[at(8, 40, 8)] = Block::Stone;
     s.light[at(8, 41, 8)] = 15; // sun nibble
     MeshData md = buildMeshData(s);
-    float v0 = faceVertLight(md, 2, 0);
-    CHECK(v0 > 0.1f && v0 < 1.0f);
+    int top = topQuadOf(md.verts, 8, 40, 8);
+    CHECK(top >= 0);
+    int l = lightAtVert(md.verts, top, 8 * 16, 41 * 16, 8 * 16);
+    CHECK(l > 26 && l < 255); // 26 = floor light, 255 = full brightness
 
     // Lighting the +X neighbor cell too brightens the two +X-side corners
-    // (v1, v2) relative to the -X ones (v0, v3): the gradient interpolates.
+    // relative to the -X ones: the gradient interpolates across the face.
     s.light[at(9, 41, 8)] = 15;
     md = buildMeshData(s);
-    CHECK(faceVertLight(md, 2, 1) > faceVertLight(md, 2, 0));
-    CHECK(faceVertLight(md, 2, 2) > faceVertLight(md, 2, 3));
+    top = topQuadOf(md.verts, 8, 40, 8);
+    CHECK(top >= 0);
+    CHECK(lightAtVert(md.verts, top, 9 * 16, 41 * 16, 8 * 16) >
+          lightAtVert(md.verts, top, 8 * 16, 41 * 16, 8 * 16));
+    CHECK(lightAtVert(md.verts, top, 9 * 16, 41 * 16, 9 * 16) >
+          lightAtVert(md.verts, top, 8 * 16, 41 * 16, 9 * 16));
 }
 
 static void testBlockRegistry() {
@@ -416,11 +521,33 @@ static void testWaterMesh() {
     CHECK(md.inds.size() == 6u * 6);      // all stone faces incl. under water
     CHECK(md.waterInds.size() == 5u * 6); // water bottom culled
 
-    // Stacked water culls the water-water pair.
+    // Stacked water culls the water-water pair, and the uniformly-lit side
+    // columns greedy-merge: 4 sides + top + bottom = 6 quads.
     s.blocks[at(8, 39, 8)] = Block::Water;
     md = buildMeshData(s);
     CHECK(md.inds.empty());
-    CHECK(md.waterInds.size() == 10u * 6);
+    CHECK(md.waterInds.size() == 6u * 6);
+}
+
+static void testTorchMesh() {
+    // A torch on stone: custom post geometry, bottom face culled against the
+    // opaque ground -> 5 quads, all in the opaque mesh, never greedy-merged.
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    s.blocks[at(8, 39, 8)] = Block::Stone;
+    s.blocks[at(8, 40, 8)] = Block::Torch;
+    MeshData md = buildMeshData(s);
+    CHECK(md.inds.size() == (6u + 5u) * 6); // stone box + 5 torch faces
+    // The post is 2/16 wide centred in the cell and 10/16 tall.
+    bool postSeen = false;
+    for (const ChunkVertex& v : md.verts)
+        if (v.layer == 9) {
+            postSeen = true;
+            CHECK(v.x >= 8 * 16 + 7 && v.x <= 8 * 16 + 9);
+            CHECK(v.y >= 40 * 16 && v.y <= 40 * 16 + 10);
+        }
+    CHECK(postSeen);
 }
 
 static int surfaceY(World& w, int x, int z) {
@@ -521,6 +648,8 @@ static void testCrossBorderTorch() {
 int main() {
     testFloorDivMod();
     testMeshData();
+    testGreedyMerging();
+    testTorchMesh();
     testAmbientOcclusion();
     testAOCornerColumn();
     testSmoothLighting();
