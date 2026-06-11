@@ -1,7 +1,6 @@
 #include "Texture.h"
 #include "Block.h"
-#include <GL/gl.h>
-#include <GL/glext.h>
+#include "GLCompat.h"
 #include <cstdint>
 #include <vector>
 

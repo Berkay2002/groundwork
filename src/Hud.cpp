@@ -1,9 +1,8 @@
 #include "Hud.h"
 #include "Block.h"
+#include "GLCompat.h"
 #include "Shader.h"
 #include "font8x8_basic.h"
-#include <GL/gl.h>
-#include <GL/glext.h>
 
 namespace {
 const char* UI_VS = R"(

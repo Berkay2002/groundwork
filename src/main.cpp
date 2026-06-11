@@ -1,6 +1,4 @@
 #include <GLFW/glfw3.h>
-#include <GL/gl.h>
-#include <GL/glext.h>
 
 #include <algorithm>
 #include <chrono>
@@ -22,6 +20,7 @@
 #include "DayCycle.h"
 #include "Entity.h"
 #include "Frustum.h"
+#include "GLCompat.h"
 #include "Hud.h"
 #include "Inventory.h"
 #include "ItemRenderer.h"
@@ -585,6 +584,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     glfwMakeContextCurrent(app.window);
+    if (!glcompat::load()) {
+        std::fprintf(stderr, "failed to load OpenGL function: %s\n",
+                     glcompat::missingFunction());
+        glfwDestroyWindow(app.window);
+        glfwTerminate();
+        return 1;
+    }
     // Say which device the GL context landed on: on multi-GPU systems (or
     // with a broken driver) this is the difference between the real GPU,
     // an integrated one, and llvmpipe software rendering.

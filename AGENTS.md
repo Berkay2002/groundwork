@@ -5,8 +5,9 @@ This file provides guidance to agents when working with code in this repository.
 ## Project
 
 Groundwork — a Minecraft-style voxel game in C++17/OpenGL 3.3, grown
-incrementally from an MVP. Work is organized in user-approved batches tracked in `TODO.md`; session
-state, workflow, and hard-won gotchas live in `docs/handoff/`. Read
+incrementally from an MVP. Work is organized in user-approved batches tracked
+in `ROADMAP.md`; session state, workflow, and hard-won gotchas live in
+`docs/handoff/`. Read
 `docs/handoff/STATUS.md` first when resuming work.
 
 ## Commands
@@ -20,15 +21,40 @@ cmake --build build -j              # build both targets
 ctest --test-dir build              # same tests via ctest
 ```
 
+Windows 11 native build path:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install Kitware.CMake Ninja-build.Ninja
+```
+
+Open "x64 Native Tools Command Prompt for VS 2022" or "Developer PowerShell
+for VS 2022", then run:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg "$env:USERPROFILE\vcpkg"
+& "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
+& "$env:USERPROFILE\vcpkg\vcpkg.exe" install glfw3 glm --triplet x64-windows
+cmake -B build -S . -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE="$env:USERPROFILE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build build -j
+.\build\world_tests.exe
+.\build\groundwork.exe
+ctest --test-dir build
+```
+
 There is no lint target; the build uses `-Wall` and should stay warning-free.
 Tests are a single binary (`tests/test_world.cpp`, plain CHECK macros) — to run
 one test, comment out calls in its `main()` or just run the whole binary
 (it finishes in seconds).
 
-Dependencies are system packages only: `libglfw3-dev`, `libglm-dev`, OpenGL
-via Mesa (`GL_GLEXT_PROTOTYPES` + `-lGL`; there is no loader library like
-GLAD). There are **zero asset files** — block textures and the HUD font are
-generated/embedded at startup. Keep that property.
+Linux dependencies are system packages only: `libglfw3-dev`, `libglm-dev`,
+OpenGL via Mesa (`GL_GLEXT_PROTOTYPES` + OpenGL::GL). Windows uses vcpkg
+packages `glfw3` and `glm`, MSVC, and the platform OpenGL library. There is no
+loader library dependency like GLAD/GLEW; `src/GLCompat.{h,cpp}` is the in-tree
+Windows OpenGL function loader. There are **zero asset files** — block textures
+and the HUD font are generated/embedded at startup. Keep that property.
 
 ## Architecture
 

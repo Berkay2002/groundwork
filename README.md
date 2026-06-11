@@ -5,6 +5,8 @@ place blocks, and your edits persist between sessions.
 
 ## Quickstart
 
+Linux:
+
 ```sh
 sudo apt install build-essential cmake pkg-config libglfw3-dev libglm-dev
 cmake -B build -S .
@@ -12,10 +14,30 @@ cmake --build build -j
 ./build/groundwork
 ```
 
-That's the whole install — the binary is self-contained (every texture, font,
-and sound effect is generated at startup; there are no asset files to ship
-alongside it). Requires a C++17 compiler, CMake ≥ 3.16, GLFW 3, GLM, and
-OpenGL 3.3.
+Windows 11:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install Kitware.CMake Ninja-build.Ninja
+```
+
+Open "x64 Native Tools Command Prompt for VS 2022" or "Developer PowerShell
+for VS 2022", then run:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg "$env:USERPROFILE\vcpkg"
+& "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
+& "$env:USERPROFILE\vcpkg\vcpkg.exe" install glfw3 glm --triplet x64-windows
+cmake -B build -S . -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE="$env:USERPROFILE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build build -j
+.\build\groundwork.exe
+```
+
+That's the whole install. Every texture, font, and sound effect is generated or
+embedded at startup, so there are no asset files to ship alongside it. Requires
+a C++17 compiler, CMake ≥ 3.16, GLFW 3, GLM, and OpenGL 3.3.
 
 For a stripped release binary:
 
@@ -23,10 +45,17 @@ For a stripped release binary:
 cmake --install build --strip --prefix dist   # -> dist/bin/groundwork
 ```
 
+On Windows:
+
+```powershell
+cmake --install build --prefix dist           # -> dist\bin\groundwork.exe + glfw3.dll
+```
+
 Sound can be compiled out with `-DENABLE_AUDIO=OFF` at configure time (the
 game also simply stays silent when no audio device can be opened).
 
-Run the headless world-logic tests with `./build/world_tests`.
+Run the headless world-logic tests with `./build/world_tests` on Linux or
+`.\build\world_tests.exe` on Windows.
 
 `./build/groundwork --frames 300` runs 300 frames, saves `screenshot.ppm`, and
 exits (useful for automated checks). `./build/groundwork --bench 300` runs 300
@@ -34,10 +63,13 @@ frames with vsync forced off, prints performance counters (fps, chunks
 drawn/loaded, mesh uploads, worker timings), and exits.
 
 `ctest --test-dir build` additionally runs a golden-screenshot regression
-test (`tests/golden_screenshot.py`) that renders a fixed viewpoint and
-compares it against `tests/golden/reference.png`; it skips without a display.
+test (`tests/golden_screenshot.py`) when Python is available. It renders a
+fixed viewpoint and compares it against `tests/golden/reference.png`; it skips
+without a display or Pillow/PIL.
 After an intentional visual change, regenerate the reference with
 `python3 tests/golden_screenshot.py --update build/groundwork tests/golden/reference.png`.
+On Windows, use `python` and the `.exe` path:
+`python tests\golden_screenshot.py --update build\groundwork.exe tests\golden\reference.png`.
 
 ## Controls
 

@@ -1,7 +1,6 @@
 #include "Chunk.h"
 #include "Lighting.h"
-#include <GL/gl.h>
-#include <GL/glext.h>
+#include "GLCompat.h"
 #include <algorithm>
 #include <cmath>
 

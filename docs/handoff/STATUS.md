@@ -81,9 +81,10 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   16-voice pool in a miniaudio device callback (mutex-guarded voices,
   linear-interpolated resampling, tanh soft limiter, atomic master volume).
   miniaudio 0.11.21 vendored in `third_party/` (SYSTEM include; MA_NO_*
-  trims; links ${CMAKE_DL_LIBS} + m). `ENABLE_AUDIO=OFF` swaps in silent
-  stubs — call sites have no #ifdefs. init() failure = silence, never
-  fatal. Footsteps fire per ~2.2 m of on-ground travel in the tick loop.
+  trims; links ${CMAKE_DL_LIBS} + m only on non-Windows). `ENABLE_AUDIO=OFF`
+  swaps in silent stubs — call sites have no #ifdefs. init() failure =
+  silence, never fatal. Footsteps fire per ~2.2 m of on-ground travel in the
+  tick loop.
 - **UX note**: the hotbar (gameplay UI) is hidden while the pause menu is
   open — user called the overlap bad UX.
 - **Pause menu** (main.cpp): `Menu::{None,Main,Settings}` in App; Esc opens/
@@ -118,10 +119,11 @@ All planned batches through H **plus all A–D addenda** are done and verified:
   for screenshots; overlay shows `day N.NN`. Bench: 713 fps fresh-world
   (no regression from the wider vertex).
 - **Packaging**: `install(TARGETS minecraft)` + `cmake --install build
-  --strip --prefix dist` → 449 KB self-contained binary. README rewritten
-  with a quickstart (single apt line + 3 commands), rebinding/pause-menu
-  docs, day/night + audio sections. Verified from scratch in a clean
-  ubuntu:24.04 container (apt line → build → tests pass → stripped install).
+  --strip --prefix dist` → 449 KB asset-file-free Linux binary. Windows
+  installs `glfw3.dll` beside `groundwork.exe`. README rewritten with a
+  quickstart (single apt line + 3 commands), rebinding/pause-menu docs,
+  day/night + audio sections. Verified from scratch in a clean ubuntu:24.04
+  container (apt line → build → tests pass → stripped install).
 
 ### Batch G implementation notes (2026-06-11)
 
@@ -304,11 +306,11 @@ All planned batches through H **plus all A–D addenda** are done and verified:
 
 ## What's next
 
-All planned batches (A–H) are **done**. What remains is the "Far later"
-list in `TODO.md`: crafting, mobs, multiplayer, modding — each a major,
-user-approved undertaking. Smaller natural follow-ups if asked: survival
-break times (the registry's `hardness` column is still unused), persisting
-item entities, sounds for more events (splash, inventory clicks).
+All planned batches (A–H) are **done**. The active future-batch list now lives
+in `ROADMAP.md` starting at Batch I: survival progression, entity persistence,
+small mobs, crafting/recipes, world variety, structures, chests/containers,
+block state, interaction feel, save slots, render-distance/far-plane cleanup,
+and later data-file/modding work. Each is a major, user-approved undertaking.
 
 **Do not start a batch unsolicited** — see `WORKFLOW.md`.
 
@@ -320,6 +322,11 @@ item entities, sounds for more events (splash, inventory clicks).
   `screenshot.*`, and `settings.cfg` are gitignored transient state.
 - World seed fixed at 1337 in `main.cpp`.
 - Internet access works (font8x8 was fetched via curl).
+- Windows 11 is a first-class native target as of the
+  `docs/goals/2026-06-11-native-windows-support/` goal: MSVC + CMake + vcpkg
+  packages `glfw3`/`glm`, no external GL loader dependency. The in-tree
+  `src/GLCompat.{h,cpp}` loads OpenGL 3.3 functions on Windows after GLFW
+  creates the context.
 
 ## Recent verification snapshot (Batch H)
 

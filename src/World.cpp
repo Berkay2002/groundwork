@@ -1,8 +1,7 @@
 #include "World.h"
+#include "GLCompat.h"
 #include "Lighting.h"
 #include "WorldSave.h"
-#include <GL/gl.h>
-#include <GL/glext.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>

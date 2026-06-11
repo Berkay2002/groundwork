@@ -2,9 +2,28 @@
 
 ## Standard loop (every change)
 
+Linux:
+
 ```sh
 cmake --build build -j        # must be warning-free (-Wall)
 ./build/world_tests           # must print "all tests passed"
+```
+
+Windows 11:
+
+```powershell
+cmake --build build -j        # must be warning-free (/W4)
+.\build\world_tests.exe       # must print "all tests passed"
+```
+
+Configure Windows builds with vcpkg if `build/` does not exist yet. Run this
+from "x64 Native Tools Command Prompt for VS 2022" or "Developer PowerShell for
+VS 2022" so Ninja can find `cl.exe`:
+
+```powershell
+cmake -B build -S . -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE="$env:USERPROFILE\vcpkg\scripts\buildsystems\vcpkg.cmake"
 ```
 
 ## Visual verification (any rendering/UI/terrain change)
@@ -14,6 +33,9 @@ rm -rf saves screenshot.*                      # only if saves/ is your own test
 timeout 90 ./build/groundwork --frames 300      # auto-exits, writes screenshot.ppm
 python3 -c "from PIL import Image; Image.open('screenshot.ppm').save('screenshot.png')"
 ```
+
+On Windows, run `.\build\groundwork.exe --frames 300` and convert the PPM with
+`python -c "from PIL import Image; Image.open('screenshot.ppm').save('screenshot.png')"`.
 
 Then Read the PNG to inspect it, and send it to the user with SendUserFile
 when closing out a batch. Clean up `saves/` and `screenshot.*` afterwards —
@@ -88,6 +110,10 @@ setarch $(uname -m) -R /tmp/tsan_tests        # <- the ASLR workaround
 This works because the test sources never call GL at runtime (linking GL is
 enough); `World`/`Chunk`/`Terrain` logic including the worker pool runs fully
 headless.
+
+There is no equivalent TSAN recipe documented for native Windows/MSVC. For
+Windows threading-sensitive changes, run `.\build\world_tests.exe` repeatedly
+and still do the Linux TSAN pass before closing the work.
 
 ## Terrain inspection without the game
 

@@ -41,7 +41,7 @@ def main():
         sys.exit(1)
     binary, reference = os.path.abspath(args[0]), os.path.abspath(args[1])
 
-    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+    if os.name != "nt" and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         skip("no display available")
     try:
         from PIL import Image

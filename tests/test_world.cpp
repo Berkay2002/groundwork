@@ -13,6 +13,7 @@
 #include "../src/Settings.h"
 #include "../src/Sounds.h"
 #include "../src/MenuUi.h"
+#include "../src/SaveIO.h"
 #include "../src/TickClock.h"
 #include <algorithm>
 #include <cassert>
@@ -278,6 +279,25 @@ static void testWorldSaveLevelFormat() {
         f << "BAD!";
     }
     CHECK(!worldsave::loadLevelFile(path).ok);
+    std::filesystem::remove_all(dir);
+}
+
+static void testAtomicSaveOverwritesExisting() {
+    const char* dir = "test_atomic_save";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::string path = std::string(dir) + "/file.bin";
+
+    CHECK(atomicSave(path, [](std::ofstream& f) { f << "old"; }));
+    CHECK(atomicSave(path, [](std::ofstream& f) { f << "new-data"; }));
+    CHECK(!std::filesystem::exists(path + ".tmp"));
+
+    {
+        std::ifstream f(path, std::ios::binary);
+        std::string data((std::istreambuf_iterator<char>(f)),
+                         std::istreambuf_iterator<char>());
+        CHECK(data == "new-data");
+    }
     std::filesystem::remove_all(dir);
 }
 
@@ -1335,6 +1355,7 @@ int main() {
     testLevelSeed();
     testWorldSaveChunkFormat();
     testWorldSaveLevelFormat();
+    testAtomicSaveOverwritesExisting();
     testUnloadSaves();
     testRaycast();
     testBodyPhysics();

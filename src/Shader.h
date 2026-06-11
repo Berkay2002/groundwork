@@ -1,6 +1,5 @@
 #pragma once
-#include <GL/gl.h>
-#include <GL/glext.h>
+#include "GLCompat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <glm/glm.hpp>

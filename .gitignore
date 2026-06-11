@@ -1,5 +1,6 @@
 # Build output
-build/
+build*/
+dist*/
 
 # Runtime/transient state
 saves/
@@ -7,3 +8,5 @@ screenshot.ppm
 screenshot.png
 settings.cfg
 test_saves_tmp*/
+
+docs/goals

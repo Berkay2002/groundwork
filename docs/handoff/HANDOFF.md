@@ -8,7 +8,7 @@ Last commit: `75b1956` "Batch D: lighting — sun/block light, BFS relight, 3D t
 1. `CLAUDE.md` — architecture, commands, save-format rules.
 2. `docs/handoff/STATUS.md` — where the project stands; has a "Batch D
    implementation notes" section describing the new lighting engine.
-3. `TODO.md` — Batch E checklist (caves, ores, water, maybe taller world).
+3. `ROADMAP.md` — current completed-batch record and future batch list.
 4. `docs/handoff/GOTCHAS.md` — now includes a Lighting section. Read it
    before touching light, meshing, or block predicates.
 5. `docs/handoff/VERIFICATION.md` — now includes the staged-screenshot-scene
