@@ -1,4 +1,5 @@
 #pragma once
+#include "Physics.h"
 #include <glm/glm.hpp>
 
 class World;
@@ -10,12 +11,9 @@ struct PlayerInput {
 
 class Player {
 public:
-    glm::vec3 pos{0.5f, 50.0f, 0.5f}; // feet position
     glm::vec3 prevPos{0.5f, 50.0f, 0.5f}; // position at the previous tick
-    glm::vec3 vel{0.0f};
     float yaw = -90.0f;   // degrees
     float pitch = 0.0f;
-    bool onGround = false;
     bool flying = false;
     float sensitivity = 0.12f;
 
@@ -23,13 +21,22 @@ public:
     static constexpr float HEIGHT = 1.8f;
     static constexpr float EYE = 1.62f;
 
-    glm::vec3 eyePos() const { return pos + glm::vec3(0, EYE, 0); }
+    Body& body() { return body_; }
+    const Body& body() const { return body_; }
+    glm::vec3& pos() { return body_.pos; }
+    const glm::vec3& pos() const { return body_.pos; }
+    glm::vec3& vel() { return body_.vel; }
+    const glm::vec3& vel() const { return body_.vel; }
+    bool& onGround() { return body_.onGround; }
+    const bool& onGround() const { return body_.onGround; }
+
+    glm::vec3 eyePos() const { return pos() + glm::vec3(0, EYE, 0); }
     glm::vec3 lookDir() const;
 
     // Fixed-timestep interpolation: call beginTick at the start of each
     // simulation tick; render with renderPos/eyePos(alpha), alpha in [0,1).
-    void beginTick() { prevPos = pos; }
-    glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, pos, alpha); }
+    void beginTick() { prevPos = pos(); }
+    glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, pos(), alpha); }
     glm::vec3 eyePos(float alpha) const { return renderPos(alpha) + glm::vec3(0, EYE, 0); }
 
     void look(float dx, float dy); // mouse deltas
@@ -43,5 +50,6 @@ public:
     bool intersectsBlock(const glm::ivec3& b) const;
 
 private:
+    Body body_{glm::vec3(0.5f, 50.0f, 0.5f), glm::vec3(0.0f), WIDTH * 0.5f, HEIGHT, false};
     bool collidesAt(World& world, const glm::vec3& p) const;
 };

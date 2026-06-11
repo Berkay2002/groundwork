@@ -25,12 +25,14 @@
 #include "Hud.h"
 #include "Inventory.h"
 #include "ItemRenderer.h"
+#include "MenuUi.h"
 #include "Player.h"
 #include "PlayerSave.h"
 #include "SaveIO.h"
 #include "Settings.h"
 #include "Shader.h"
 #include "Texture.h"
+#include "TickClock.h"
 #include "World.h"
 
 namespace {
@@ -38,8 +40,6 @@ namespace {
 constexpr float REACH = 5.0f;           // block interaction distance
 constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
 constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
-constexpr float TICK_DT = 0.05f;          // 20 TPS simulation tick
-constexpr int MAX_TICKS_PER_FRAME = 5;    // stall guard: drop time, don't spiral
 constexpr uint32_t WORLD_SEED = 1337;
 const char* SAVE_DIR = "saves/world1";
 
@@ -107,7 +107,7 @@ out vec4 FragColor;
 void main() { FragColor = vec4(uColor, 1.0); }
 )";
 
-enum class Menu { None, Main, Settings }; // pause-menu state
+using Menu = ui::MenuPage; // pause-menu state
 
 struct App {
     GLFWwindow* window = nullptr;
@@ -139,51 +139,6 @@ Block heldBlock() {
 
 // ---- Inventory UI (survival): rows 1..3 on top, hotbar row 0 below a gap ----
 
-struct InvLayout { float slot = 56.0f, pad = 4.0f; float x0 = 0, y0 = 0; };
-
-InvLayout invLayout(int w, int h) {
-    InvLayout L;
-    float gw = Inventory::COLS * L.slot + (Inventory::COLS - 1) * L.pad;
-    float gh = Inventory::ROWS * L.slot + (Inventory::ROWS - 1) * L.pad + 14.0f;
-    L.x0 = (w - gw) * 0.5f;
-    L.y0 = (h - gh) * 0.5f;
-    return L;
-}
-
-float invSlotY(const InvLayout& L, int row) { // row 0 = hotbar, drawn last
-    if (row == 0) return L.y0 + 3 * (L.slot + L.pad) + 14.0f;
-    return L.y0 + (row - 1) * (L.slot + L.pad);
-}
-
-int invSlotAt(int w, int h, float mx, float my) {
-    InvLayout L = invLayout(w, h);
-    for (int i = 0; i < Inventory::SLOTS; ++i) {
-        float x = L.x0 + (i % Inventory::COLS) * (L.slot + L.pad);
-        float y = invSlotY(L, i / Inventory::COLS);
-        if (mx >= x && mx < x + L.slot && my >= y && my < y + L.slot) return i;
-    }
-    return -1;
-}
-
-// Left click: pick up / put down / swap; same block merges into the slot.
-void invClick(int slot) {
-    if (slot < 0) return;
-    ItemStack& s = app.inv.slots[slot];
-    ItemStack& c = app.cursorStack;
-    if (c.empty()) {
-        c = s;
-        s = {};
-    } else if (s.empty() || s.block != c.block) {
-        std::swap(s, c);
-    } else {
-        int space = Inventory::STACK_MAX - int(s.count);
-        int moved = std::min(space, int(c.count));
-        s.count = uint8_t(s.count + moved);
-        c.count = uint8_t(c.count - moved);
-        if (c.count == 0) c = {};
-    }
-}
-
 void closeInventory(GLFWwindow* w) {
     app.invOpen = false;
     if (!app.cursorStack.empty()) { // never destroy items on close
@@ -201,89 +156,10 @@ void closeInventory(GLFWwindow* w) {
 // ---- Pause menu: Esc opens it, gameplay freezes behind a dim overlay.
 // Every settings change applies live and is written back to settings.cfg.
 
-struct Rect {
-    float x = 0, y = 0, w = 0, h = 0;
-    bool contains(float mx, float my) const {
-        return mx >= x && mx < x + w && my >= y && my < y + h;
-    }
-};
-
-const char* const MENU_BUTTONS[] = {"Resume", "Settings", "Quit"};
-constexpr int MENU_BUTTON_COUNT = 3;
-const char* const SETTING_LABELS[] = {
-    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync", "Max FPS"};
-constexpr int SETTING_COUNT = 6;
-
 // Max FPS choices (the cap applies when vsync is off): common rates up to the
 // monitor's refresh, the refresh itself, then 0 = unlimited. Filled in main()
 // once the monitor is known.
 std::vector<int> fpsOptions = {0};
-
-Rect menuButtonRect(int w, int h, int i) {
-    const float bw = 260, bh = 44, gap = 14;
-    float y0 = h * 0.5f - (MENU_BUTTON_COUNT * (bh + gap) - gap) * 0.5f;
-    return {(w - bw) * 0.5f, y0 + i * (bh + gap), bw, bh};
-}
-
-// Settings rows: label left, [-] value [+] right; a Back button sits in the
-// extra row slot below.
-Rect settingsRowRect(int w, int h, int i) {
-    const float rw = 460, rh = 40, gap = 10;
-    float y0 = h * 0.5f - ((SETTING_COUNT + 1) * (rh + gap) - gap) * 0.5f;
-    return {(w - rw) * 0.5f, y0 + i * (rh + gap), rw, rh};
-}
-Rect settingsDecRect(const Rect& row) { return {row.x + row.w - 160, row.y + 4, 32, row.h - 8}; }
-Rect settingsIncRect(const Rect& row) { return {row.x + row.w - 36, row.y + 4, 32, row.h - 8}; }
-Rect settingsBackRect(int w, int h) {
-    Rect slot = settingsRowRect(w, h, SETTING_COUNT);
-    return {(w - 260) * 0.5f, slot.y, 260.0f, 44.0f};
-}
-
-void settingValueText(int row, char* buf, size_t n) {
-    const Settings& s = app.settings;
-    switch (row) {
-        case 0: std::snprintf(buf, n, "%d", s.renderDistance); break;
-        case 1: std::snprintf(buf, n, "%.0f", s.fov); break;
-        case 2: std::snprintf(buf, n, "%.2f", s.mouseSensitivity); break;
-        case 3: std::snprintf(buf, n, "%d%%", int(s.volume * 100.0f + 0.5f)); break;
-        case 4: std::snprintf(buf, n, "%s", s.vsync ? "on" : "off"); break;
-        case 5:
-            if (s.fpsMax == 0) std::snprintf(buf, n, "unlimited");
-            else std::snprintf(buf, n, "%d", s.fpsMax);
-            break;
-    }
-}
-
-void adjustSetting(int row, int dir) {
-    Settings& s = app.settings;
-    switch (row) {
-        case 0: s.renderDistance = std::min(16, std::max(2, s.renderDistance + dir)); break;
-        case 1: s.fov = std::min(110.0f, std::max(30.0f, s.fov + 5.0f * dir)); break;
-        case 2:
-            s.mouseSensitivity = std::min(0.5f, std::max(0.02f, s.mouseSensitivity + 0.02f * dir));
-            app.player.sensitivity = s.mouseSensitivity;
-            break;
-        case 3:
-            s.volume = std::min(1.0f, std::max(0.0f, s.volume + 0.1f * dir));
-            app.audio.setVolume(s.volume);
-            break;
-        case 4: s.vsync = !s.vsync; glfwSwapInterval(s.vsync ? 1 : 0); break;
-        case 5: {
-            // Step through the monitor-derived choices. The cfg may hold any
-            // value, so first find where it sits in the list (unlimited = 0
-            // lives at the end and counts as the highest).
-            auto rank = [](int v) { return v == 0 ? 1 << 30 : v; };
-            int idx = 0;
-            while (idx + 1 < int(fpsOptions.size()) &&
-                   rank(fpsOptions[idx]) < rank(s.fpsMax))
-                ++idx;
-            idx = std::min(int(fpsOptions.size()) - 1, std::max(0, idx + dir));
-            s.fpsMax = fpsOptions[idx];
-            break;
-        }
-    }
-    s.save("settings.cfg");
-}
 
 void openMenu() {
     app.menu = Menu::Main;
@@ -298,26 +174,38 @@ void closeMenu() {
     glfwSetInputMode(app.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 }
 
+void applySettingEffects(const ui::SettingEffects& effects) {
+    if (effects.mouseSensitivityChanged) app.player.sensitivity = app.settings.mouseSensitivity;
+    if (effects.volumeChanged) app.audio.setVolume(app.settings.volume);
+    if (effects.vsyncChanged) glfwSwapInterval(app.settings.vsync ? 1 : 0);
+    if (effects.saveSettings) app.settings.save("settings.cfg");
+}
+
 void menuClick(int w, int h, float mx, float my) {
-    if (app.menu == Menu::Main) {
-        for (int i = 0; i < MENU_BUTTON_COUNT; ++i) {
-            if (!menuButtonRect(w, h, i).contains(mx, my)) continue;
-            if (i == 0) closeMenu();
-            else if (i == 1) app.menu = Menu::Settings;
-            else glfwSetWindowShouldClose(app.window, GLFW_TRUE);
-            return;
-        }
-    } else if (app.menu == Menu::Settings) {
-        for (int i = 0; i < SETTING_COUNT; ++i) {
-            Rect row = settingsRowRect(w, h, i);
-            if (settingsDecRect(row).contains(mx, my)) { adjustSetting(i, -1); return; }
-            if (settingsIncRect(row).contains(mx, my)) { adjustSetting(i, +1); return; }
-        }
-        if (settingsBackRect(w, h).contains(mx, my)) app.menu = Menu::Main;
+    ui::MenuCommand command = ui::hitTestMenu(app.menu, w, h, mx, my);
+    switch (command.action) {
+        case ui::MenuAction::Resume:
+            closeMenu();
+            break;
+        case ui::MenuAction::OpenSettings:
+            app.menu = Menu::Settings;
+            break;
+        case ui::MenuAction::Quit:
+            glfwSetWindowShouldClose(app.window, GLFW_TRUE);
+            break;
+        case ui::MenuAction::Back:
+            app.menu = Menu::Main;
+            break;
+        case ui::MenuAction::AdjustSetting:
+            applySettingEffects(
+                ui::adjustSetting(app.settings, command.setting, command.dir, fpsOptions));
+            break;
+        case ui::MenuAction::None:
+            break;
     }
 }
 
-void drawMenuButton(Hud& hud, const Rect& r, const char* label,
+void drawMenuButton(Hud& hud, const ui::Rect& r, const char* label,
                     float mx, float my, float scale = 2.0f) {
     bool hover = r.contains(mx, my);
     hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, hover ? 0.95f : 0.8f);
@@ -332,31 +220,31 @@ void drawPauseMenu(Hud& hud, GLFWwindow* w, int sw, int sh) {
     hud.drawRect(0, 0, float(sw), float(sh), 0, 0, 0, 0.55f);
     const char* title = app.menu == Menu::Main ? "Paused" : "Settings";
     float tw = std::strlen(title) * Hud::GLYPH * 3.0f;
-    float topY = (app.menu == Menu::Main ? menuButtonRect(sw, sh, 0).y
-                                         : settingsRowRect(sw, sh, 0).y);
+    float topY = (app.menu == Menu::Main ? ui::menuButtonRect(sw, sh, 0).y
+                                         : ui::settingsRowRect(sw, sh, 0).y);
     hud.drawText((sw - tw) * 0.5f, topY - 56.0f, 3.0f, title);
     if (app.menu == Menu::Main) {
-        for (int i = 0; i < MENU_BUTTON_COUNT; ++i)
-            drawMenuButton(hud, menuButtonRect(sw, sh, i), MENU_BUTTONS[i],
+        for (int i = 0; i < ui::MENU_BUTTON_COUNT; ++i)
+            drawMenuButton(hud, ui::menuButtonRect(sw, sh, i), ui::MENU_BUTTONS[i],
                            float(mx), float(my));
         return;
     }
-    for (int i = 0; i < SETTING_COUNT; ++i) {
-        Rect row = settingsRowRect(sw, sh, i);
+    for (int i = 0; i < ui::SETTING_COUNT; ++i) {
+        ui::SettingId setting = ui::SettingId(i);
+        ui::Rect row = ui::settingsRowRect(sw, sh, i);
         hud.drawRect(row.x, row.y, row.w, row.h, 0.1f, 0.1f, 0.1f, 0.7f);
         hud.drawText(row.x + 10, row.y + (row.h - Hud::GLYPH * 2.0f) * 0.5f, 2.0f,
-                     SETTING_LABELS[i]);
-        drawMenuButton(hud, settingsDecRect(row), "-", float(mx), float(my));
-        drawMenuButton(hud, settingsIncRect(row), "+", float(mx), float(my));
-        char val[16];
-        settingValueText(i, val, sizeof(val));
+                     ui::settingLabel(setting));
+        drawMenuButton(hud, ui::settingsDecRect(row), "-", float(mx), float(my));
+        drawMenuButton(hud, ui::settingsIncRect(row), "+", float(mx), float(my));
+        std::string val = ui::settingValueText(app.settings, setting);
         // Value centered between the - and + buttons.
-        float vx0 = settingsDecRect(row).x + 32, vx1 = settingsIncRect(row).x;
-        float vw = std::strlen(val) * Hud::GLYPH * 2.0f;
+        float vx0 = ui::settingsDecRect(row).x + 32, vx1 = ui::settingsIncRect(row).x;
+        float vw = val.size() * Hud::GLYPH * 2.0f;
         hud.drawText(vx0 + (vx1 - vx0 - vw) * 0.5f,
-                     row.y + (row.h - Hud::GLYPH * 2.0f) * 0.5f, 2.0f, val);
+                     row.y + (row.h - Hud::GLYPH * 2.0f) * 0.5f, 2.0f, val.c_str());
     }
-    drawMenuButton(hud, settingsBackRect(sw, sh), "Back", float(mx), float(my));
+    drawMenuButton(hud, ui::settingsBackRect(sw, sh), "Back", float(mx), float(my));
 }
 
 void keyCallback(GLFWwindow* w, int key, int, int action, int) {
@@ -403,7 +291,8 @@ void mouseButtonCallback(GLFWwindow* w, int button, int action, int) {
             glfwGetCursorPos(w, &mx, &my);
             int ww, wh;
             glfwGetWindowSize(w, &ww, &wh); // cursor coords are window coords
-            invClick(invSlotAt(ww, wh, float(mx), float(my)));
+            ui::clickInventorySlot(app.inv, app.cursorStack,
+                                   ui::inventorySlotAt(ww, wh, float(mx), float(my)));
         }
         return;
     }
@@ -457,7 +346,7 @@ std::string playerPath() { return std::string(SAVE_DIR) + "/player.bin"; }
 
 void savePlayer() {
     PlayerState s;
-    s.pos = app.player.pos;
+    s.pos = app.player.pos();
     s.yaw = app.player.yaw;
     s.pitch = app.player.pitch;
     s.flying = app.player.flying;
@@ -474,7 +363,7 @@ bool loadPlayer() {
             std::fprintf(stderr, "warning: bad/old player save, starting at spawn\n");
         return false;
     }
-    app.player.pos = s.pos;
+    app.player.pos() = s.pos;
     app.player.prevPos = s.pos;
     app.player.yaw = s.yaw;
     app.player.pitch = s.pitch;
@@ -518,8 +407,8 @@ void saveScreenshotPPM(const char* path, int w, int h) {
 void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
                       const RaycastHit& hit) {
     const Player& p = app.player;
-    int pcx = World::floorDiv((int)std::floor(p.pos.x), CHUNK_SIZE);
-    int pcz = World::floorDiv((int)std::floor(p.pos.z), CHUNK_SIZE);
+    int pcx = World::floorDiv((int)std::floor(p.pos().x), CHUNK_SIZE);
+    int pcz = World::floorDiv((int)std::floor(p.pos().z), CHUNK_SIZE);
     WorldStats st = world.stats();
     char lightBuf[48] = "";
     if (hit.hit) // light of the air cell the targeted face looks into
@@ -534,7 +423,7 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
         "gen %.1fms q%d  mesh %.1fms q%d up%d\n"
         "target: %s%s%s",
         fps, frameMs,
-        p.pos.x, p.pos.y, p.pos.z,
+        p.pos().x, p.pos().y, p.pos().z,
         pcx, pcz, st.drawn, st.loaded, dayFraction(world.dayTime()),
         st.genMs, st.genQueued, st.meshMs, st.meshQueued, st.uploads,
         hit.hit ? blockName(world.getBlock(hit.block.x, hit.block.y, hit.block.z)) : "-",
@@ -584,20 +473,19 @@ void drawHotbar(Hud& hud, int screenW, int screenH) {
 
 void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
     hud.drawRect(0, 0, float(screenW), float(screenH), 0, 0, 0, 0.55f);
-    InvLayout L = invLayout(screenW, screenH);
+    ui::InventoryLayout L = ui::inventoryLayout(screenW, screenH);
     hud.drawText(L.x0, L.y0 - 26.0f, 2.0f, "Inventory");
     for (int i = 0; i < Inventory::SLOTS; ++i) {
-        float x = L.x0 + (i % Inventory::COLS) * (L.slot + L.pad);
-        float y = invSlotY(L, i / Inventory::COLS);
-        hud.drawRect(x, y, L.slot, L.slot, 0.15f, 0.15f, 0.15f, 0.9f);
+        ui::Rect r = ui::inventorySlotRect(L, i);
+        hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, 0.9f);
         const ItemStack& s = app.inv.slots[i];
         if (s.empty()) continue;
-        hud.drawTile(x + L.pad, y + L.pad, L.slot - 2 * L.pad, tileFor(s.block, 4));
+        hud.drawTile(r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad, tileFor(s.block, 4));
         { // count always shown, matching the hotbar
             char cnt[4];
             std::snprintf(cnt, sizeof(cnt), "%d", s.count);
             float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
-            hud.drawText(x + L.slot - cw - 4, y + L.slot - 16, 1.5f, cnt);
+            hud.drawText(r.x + L.slot - cw - 4, r.y + L.slot - 16, 1.5f, cnt);
         }
     }
     if (!app.cursorStack.empty()) { // stack riding the mouse
@@ -745,7 +633,7 @@ int main(int argc, char** argv) {
 
     bool restored = loadPlayer();
     // Pre-load the area around the player so they don't fall through.
-    world.waitUntilLoaded(app.player.pos, 2, 10000);
+    world.waitUntilLoaded(app.player.pos(), 2, 10000);
     if (!restored) app.player.spawn(world);
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
 
@@ -773,7 +661,7 @@ int main(int argc, char** argv) {
 
     double lastTime = glfwGetTime();
     float stepDist = 0.0f;    // ground distance walked since the last footstep
-    double accumulator = 0.0; // fixed-timestep simulation accumulator
+    TickClock tickClock;      // fixed-timestep simulation accumulator
     double gameTime = 0.0;    // sim-side clock (drives item bob/spin)
     double autosaveTimer = 0.0;
     double fpsTimer = 0.0;
@@ -807,8 +695,9 @@ int main(int argc, char** argv) {
 
     while (!glfwWindowShouldClose(app.window)) {
         double now = glfwGetTime();
-        float dt = float(now - lastTime);
+        float frameDt = float(now - lastTime);
         lastTime = now;
+        float dt = frameDt;
         if (dt > 0.05f) dt = 0.05f; // avoid huge physics steps after stalls
 
         benchSecMark = now;
@@ -823,30 +712,26 @@ int main(int argc, char** argv) {
         // mid-bob, no ticks run), while streaming/rendering continue so
         // render-distance changes apply behind the menu.
         const bool paused = app.menu != Menu::None;
-        if (!paused) {
-            accumulator += dt;
-            gameTime += dt;
-        }
-        int ticksRun = 0;
-        while (accumulator >= TICK_DT) {
-            if (++ticksRun > MAX_TICKS_PER_FRAME) { accumulator = 0.0; break; }
+        const int ticksToRun = tickClock.advance(frameDt, paused);
+        const double simDt = tickClock.consumedSeconds();
+        gameTime += simDt;
+        for (int i = 0; i < ticksToRun; ++i) {
             app.player.beginTick();
             // Inventory open: keep simulating (gravity), drop movement intent.
-            app.player.update(world, app.invOpen ? PlayerInput{} : app.input, TICK_DT);
-            if (app.player.onGround && !app.player.flying) {
-                glm::vec3 d = app.player.pos - app.player.prevPos;
+            app.player.update(world, app.invOpen ? PlayerInput{} : app.input, float(TickClock::TICK_DT));
+            if (app.player.onGround() && !app.player.flying) {
+                glm::vec3 d = app.player.pos() - app.player.prevPos;
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
                 if (stepDist > 2.2f) { // roughly one stride
                     stepDist = 0.0f;
                     app.audio.playFootstep();
                 }
             }
-            app.entities.tick(world, app.player.pos, &app.inv, TICK_DT);
-            accumulator -= TICK_DT;
+            app.entities.tick(world, app.player.pos(), &app.inv, float(TickClock::TICK_DT));
         }
-        const float alpha = float(accumulator / TICK_DT);
+        const float alpha = tickClock.alpha();
         benchMark(1);
-        world.update(app.player.pos, settings.renderDistance);
+        world.update(app.player.pos(), settings.renderDistance);
         benchMark(2);
 
         // Camera for this frame, computed early: mesh uploads prioritize
@@ -862,12 +747,12 @@ int main(int argc, char** argv) {
 
         // Budgeted mesh uploads (visible/near chunks first), so a streaming
         // burst can't stall a frame on GL transfers.
-        world.processMeshing(8, app.player.pos, &frustum, UPLOAD_BUDGET_MS);
+        world.processMeshing(8, app.player.pos(), &frustum, UPLOAD_BUDGET_MS);
         benchMark(3);
 
         // Periodic autosave so a crash loses at most ~30 s of edits (chunks
         // streaming out and clean exit already save on their own).
-        autosaveTimer += dt;
+        autosaveTimer += frameDt;
         if (autosaveTimer >= AUTOSAVE_SECONDS) {
             autosaveTimer = 0.0;
             world.saveAllModified();
@@ -901,9 +786,10 @@ int main(int argc, char** argv) {
         // --- Render world ---
         // Day/night: the sky (and the fog, which fades into it) follows the
         // world's day clock; sunlight is dimmed in the shader via uSunLevel.
-        if (!paused) world.setDayTime(world.dayTime() + dt);
-        const glm::vec3 sky = skyColorAt(world.dayTime());
-        const float sunLevel = sunLevelAt(world.dayTime());
+        world.setDayTime(world.dayTime() + float(simDt));
+        const float renderDayTime = world.dayTime() + alpha * float(TickClock::TICK_DT);
+        const glm::vec3 sky = skyColorAt(renderDayTime);
+        const float sunLevel = sunLevelAt(renderDayTime);
 
         glViewport(0, 0, width, height);
         glClearColor(sky.r, sky.g, sky.b, 1.0f);
@@ -925,7 +811,8 @@ int main(int argc, char** argv) {
 
         // Item entities: after opaque (normal depth test), before water so
         // submerged drops blend correctly under the surface.
-        itemRenderer.draw(world, app.entities, viewProj, alpha, float(gameTime), sunLevel);
+        const double renderGameTime = gameTime + alpha * TickClock::TICK_DT;
+        itemRenderer.draw(world, app.entities, viewProj, alpha, float(renderGameTime), sunLevel);
         benchMark(6);
 
         // Translucent water pass: after all opaque geometry, blended, with

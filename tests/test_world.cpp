@@ -7,9 +7,13 @@
 #include "../src/Inventory.h"
 #include "../src/Entity.h"
 #include "../src/PlayerSave.h"
+#include "../src/WorldSave.h"
 #include "../src/DayCycle.h"
+#include "../src/Lighting.h"
 #include "../src/Settings.h"
 #include "../src/Sounds.h"
+#include "../src/MenuUi.h"
+#include "../src/TickClock.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -217,6 +221,63 @@ static void testLevelSeed() {
         World w(1111, dir);
         CHECK(w.seed() == 4321); // the rewrite stuck
     }
+    std::filesystem::remove_all(dir);
+}
+
+static void testWorldSaveChunkFormat() {
+    const char* dir = "test_worldsave_chunk";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::string path = worldsave::chunkPath(dir, -2, 3);
+
+    std::vector<uint8_t> blocks(Chunk::rawSize(), uint8_t(Block::Air));
+    blocks[0] = uint8_t(Block::Stone);
+    blocks[1] = 255; // file from a newer build/corruption: clamp to Air on load
+    CHECK(worldsave::saveChunkFile(path, blocks.data(), blocks.size()));
+
+    std::vector<uint8_t> loaded(Chunk::rawSize(), 0);
+    CHECK(worldsave::loadChunkFile(path, loaded.data(), loaded.size()));
+    CHECK(loaded[0] == uint8_t(Block::Stone));
+    CHECK(loaded[1] == uint8_t(Block::Air));
+
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f << "JUNK";
+    }
+    CHECK(!worldsave::loadChunkFile(path, loaded.data(), loaded.size()));
+    std::filesystem::remove_all(dir);
+}
+
+static void testWorldSaveLevelFormat() {
+    const char* dir = "test_worldsave_level";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::string path = std::string(dir) + "/level.bin";
+
+    CHECK(worldsave::saveLevelFile(path, 1234, 42.5f));
+    worldsave::LevelFile level = worldsave::loadLevelFile(path);
+    CHECK(level.ok);
+    CHECK(level.seed == 1234);
+    CHECK(std::fabs(level.dayTime - 42.5f) < 1e-6f);
+
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        constexpr char magic[4] = {'M', 'C', 'L', 'V'};
+        uint32_t version = 1, seed = 777;
+        f.write(magic, 4);
+        f.write(reinterpret_cast<const char*>(&version), 4);
+        f.write(reinterpret_cast<const char*>(&seed), 4);
+    }
+    level = worldsave::loadLevelFile(path);
+    CHECK(level.ok);
+    CHECK(level.seed == 777);
+    CHECK(level.dayTime == 0.0f);
+
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f << "BAD!";
+    }
+    CHECK(!worldsave::loadLevelFile(path).ok);
     std::filesystem::remove_all(dir);
 }
 
@@ -657,6 +718,60 @@ static void testCrossBorderTorch() {
     std::filesystem::remove_all(dir);
 }
 
+struct FakeLightingAccess : lighting::Accessor {
+    static constexpr int R = 3;
+    static constexpr int W = R * 2 + 1;
+    std::vector<Block> blocks;
+    std::vector<uint8_t> sun;
+    std::vector<uint8_t> block;
+    int changed = 0;
+
+    FakeLightingAccess()
+        : blocks(size_t(W) * CHUNK_HEIGHT * W, Block::Air),
+          sun(blocks.size(), 0), block(blocks.size(), 0) {}
+
+    bool hasChunkAt(int wx, int wz) const override {
+        return wx >= -R && wx <= R && wz >= -R && wz <= R;
+    }
+    Block blockAt(int wx, int wy, int wz) const override {
+        if (!hasChunkAt(wx, wz) || wy < 0 || wy >= CHUNK_HEIGHT) return Block::Air;
+        return blocks[index(wx, wy, wz)];
+    }
+    uint8_t cellLightAt(lighting::Channel ch, int wx, int wy, int wz) const override {
+        const std::vector<uint8_t>& cells = ch == lighting::Channel::Sun ? sun : block;
+        return cells[index(wx, wy, wz)];
+    }
+    void setCellLight(lighting::Channel ch, int wx, int wy, int wz, uint8_t v) override {
+        std::vector<uint8_t>& cells = ch == lighting::Channel::Sun ? sun : block;
+        cells[index(wx, wy, wz)] = v;
+        ++changed;
+    }
+    void setBlock(int wx, int wy, int wz, Block b) {
+        blocks[index(wx, wy, wz)] = b;
+    }
+
+private:
+    static size_t index(int wx, int wy, int wz) {
+        return size_t((wy * W + (wz + R)) * W + (wx + R));
+    }
+};
+
+static void testLightingAccessorTorchRelight() {
+    FakeLightingAccess a;
+    glm::ivec3 p(0, 20, 0);
+
+    a.setBlock(p.x, p.y, p.z, Block::Torch);
+    lighting::onBlockChanged(a, Block::Air, Block::Torch, p);
+    CHECK(lighting::lightAt(a, lighting::Channel::Block, p.x, p.y, p.z) == 14);
+    CHECK(lighting::lightAt(a, lighting::Channel::Block, p.x + 1, p.y, p.z) == 13);
+    CHECK(a.changed > 0);
+
+    a.setBlock(p.x, p.y, p.z, Block::Air);
+    lighting::onBlockChanged(a, Block::Torch, Block::Air, p);
+    CHECK(lighting::lightAt(a, lighting::Channel::Block, p.x, p.y, p.z) == 0);
+    CHECK(lighting::lightAt(a, lighting::Channel::Block, p.x + 1, p.y, p.z) == 0);
+}
+
 // Body physics on a hand-built platform high above terrain (y=70 is air
 // everywhere near spawn: terrain tops out ~45 with trees).
 static void testBodyPhysics() {
@@ -688,6 +803,60 @@ static void testBodyPhysics() {
     std::filesystem::remove_all("test_phys_save");
 }
 
+static void testMoveBodyAxisFlushBoundaries() {
+    std::filesystem::remove_all("test_phys_flush_save");
+    World w(1337, "test_phys_flush_save");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+
+    struct Case {
+        glm::vec3 pos;
+        glm::vec3 vel;
+        glm::ivec3 obstacle;
+        int axis;
+        float amount;
+        float expected;
+        bool expectGround;
+    };
+    const Case cases[] = {
+        {{0.62f, 70.0f, 0.5f}, {4.0f, 0.0f, 0.0f}, {1, 70, 0}, 0, 0.20f, 0.70f, false},
+        {{0.32f, 70.0f, 0.5f}, {-4.0f, 0.0f, 0.0f}, {-1, 70, 0}, 0, -0.20f, 0.30f, false},
+        {{0.5f, 70.0f, 0.62f}, {0.0f, 0.0f, 4.0f}, {0, 70, 1}, 2, 0.20f, 0.70f, false},
+        {{0.5f, 70.0f, 0.32f}, {0.0f, 0.0f, -4.0f}, {0, 70, -1}, 2, -0.20f, 0.30f, false},
+        {{0.70f, 70.0f, 0.5f}, {-4.0f, 0.0f, 0.0f}, {-1, 70, 0}, 0, -1.40f, 0.30f, false},
+        {{0.5f, 70.20f, 0.5f}, {0.0f, -6.0f, 0.0f}, {0, 69, 0}, 1, -0.30f, 70.0f, true},
+        {{0.5f, 70.0f, 0.5f}, {0.0f, 3.0f, 0.0f}, {0, 72, 0}, 1, 0.30f, 70.20f, false},
+    };
+    for (const Case& tc : cases) {
+        w.setBlock(tc.obstacle.x, tc.obstacle.y, tc.obstacle.z, Block::Stone);
+        Body b;
+        b.pos = tc.pos;
+        b.vel = tc.vel;
+        b.halfWidth = 0.3f;
+        b.height = 1.8f;
+        CHECK(!bodyCollidesAt(w, b, b.pos));
+        moveBodyAxis(w, b, tc.axis, tc.amount);
+        CHECK(std::fabs(b.pos[tc.axis] - tc.expected) < 1e-4f);
+        CHECK(b.onGround == tc.expectGround);
+        CHECK(!bodyCollidesAt(w, b, b.pos));
+        w.setBlock(tc.obstacle.x, tc.obstacle.y, tc.obstacle.z, Block::Air);
+    }
+
+    std::filesystem::remove_all("test_phys_flush_save");
+}
+
+static void testPlayerOwnsCanonicalBody() {
+    Player p;
+    p.body().pos = glm::vec3(2.0f, 3.0f, 4.0f);
+    p.body().vel = glm::vec3(0.5f, -1.0f, 1.5f);
+    p.body().onGround = true;
+    CHECK(&p.pos() == &p.body().pos);
+    CHECK(&p.vel() == &p.body().vel);
+    CHECK(&p.onGround() == &p.body().onGround);
+    CHECK(p.pos() == glm::vec3(2.0f, 3.0f, 4.0f));
+    CHECK(p.vel() == glm::vec3(0.5f, -1.0f, 1.5f));
+    CHECK(p.onGround());
+}
+
 // The Player refactor onto Body must not change player physics.
 static void testPlayerLandsOnPlatform() {
     std::filesystem::remove_all("test_player_save");
@@ -697,11 +866,11 @@ static void testPlayerLandsOnPlatform() {
         for (int dz = 0; dz < 2; ++dz)
             w.setBlock(8 + dx, 70, 8 + dz, Block::Stone);
     Player p;
-    p.pos = glm::vec3(9.0f, 75.0f, 9.0f);
+    p.pos() = glm::vec3(9.0f, 75.0f, 9.0f);
     PlayerInput in;
-    for (int i = 0; i < 200 && !p.onGround; ++i) p.update(w, in, 0.05f);
-    CHECK(p.onGround);
-    CHECK(std::abs(p.pos.y - 71.0f) < 1e-3f);
+    for (int i = 0; i < 200 && !p.onGround(); ++i) p.update(w, in, 0.05f);
+    CHECK(p.onGround());
+    CHECK(std::abs(p.pos().y - 71.0f) < 1e-3f);
     std::filesystem::remove_all("test_player_save");
 }
 
@@ -981,6 +1150,165 @@ static void testSoundBank() {
     CHECK(std::fabs(d[0] - 0.5f) < 1e-3f && std::fabs(d[1] + 0.5f) < 1e-3f);
 }
 
+static void testMenuUiHitTesting() {
+    const int w = 800, h = 600;
+
+    ui::Rect resume = ui::menuButtonRect(w, h, 0);
+    ui::MenuCommand c = ui::hitTestMenu(ui::MenuPage::Main, w, h,
+                                        resume.x + resume.w * 0.5f,
+                                        resume.y + resume.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::Resume);
+
+    ui::Rect settings = ui::menuButtonRect(w, h, 1);
+    c = ui::hitTestMenu(ui::MenuPage::Main, w, h,
+                        settings.x + settings.w * 0.5f,
+                        settings.y + settings.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::OpenSettings);
+
+    ui::Rect quit = ui::menuButtonRect(w, h, 2);
+    c = ui::hitTestMenu(ui::MenuPage::Main, w, h,
+                        quit.x + quit.w * 0.5f,
+                        quit.y + quit.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::Quit);
+
+    ui::Rect row = ui::settingsRowRect(w, h, int(ui::SettingId::RenderDistance));
+    ui::Rect dec = ui::settingsDecRect(row);
+    c = ui::hitTestMenu(ui::MenuPage::Settings, w, h,
+                        dec.x + dec.w * 0.5f, dec.y + dec.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::AdjustSetting);
+    CHECK(c.setting == ui::SettingId::RenderDistance);
+    CHECK(c.dir == -1);
+
+    ui::Rect inc = ui::settingsIncRect(row);
+    c = ui::hitTestMenu(ui::MenuPage::Settings, w, h,
+                        inc.x + inc.w * 0.5f, inc.y + inc.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::AdjustSetting);
+    CHECK(c.setting == ui::SettingId::RenderDistance);
+    CHECK(c.dir == 1);
+
+    ui::Rect back = ui::settingsBackRect(w, h);
+    c = ui::hitTestMenu(ui::MenuPage::Settings, w, h,
+                        back.x + back.w * 0.5f, back.y + back.h * 0.5f);
+    CHECK(c.action == ui::MenuAction::Back);
+
+    c = ui::hitTestMenu(ui::MenuPage::None, w, h, resume.x, resume.y);
+    CHECK(c.action == ui::MenuAction::None);
+}
+
+static void testMenuUiAdjustSettings() {
+    Settings s;
+    std::vector<int> fps = {30, 60, 144, 0};
+
+    s.renderDistance = 16;
+    ui::SettingEffects e = ui::adjustSetting(s, ui::SettingId::RenderDistance, 1, fps);
+    CHECK(s.renderDistance == 16);
+    CHECK(e.saveSettings);
+
+    s.renderDistance = 2;
+    e = ui::adjustSetting(s, ui::SettingId::RenderDistance, -1, fps);
+    CHECK(s.renderDistance == 2);
+
+    s.fov = 75.0f;
+    e = ui::adjustSetting(s, ui::SettingId::Fov, 1, fps);
+    CHECK(std::fabs(s.fov - 80.0f) < 0.001f);
+    CHECK(!e.mouseSensitivityChanged && !e.volumeChanged && !e.vsyncChanged);
+
+    s.mouseSensitivity = 0.12f;
+    e = ui::adjustSetting(s, ui::SettingId::MouseSensitivity, 1, fps);
+    CHECK(std::fabs(s.mouseSensitivity - 0.14f) < 0.001f);
+    CHECK(e.mouseSensitivityChanged && e.saveSettings);
+
+    s.volume = 0.8f;
+    e = ui::adjustSetting(s, ui::SettingId::Volume, -1, fps);
+    CHECK(std::fabs(s.volume - 0.7f) < 0.001f);
+    CHECK(e.volumeChanged && e.saveSettings);
+
+    s.vsync = true;
+    e = ui::adjustSetting(s, ui::SettingId::Vsync, 1, fps);
+    CHECK(!s.vsync);
+    CHECK(e.vsyncChanged && e.saveSettings);
+
+    s.fpsMax = 60;
+    e = ui::adjustSetting(s, ui::SettingId::FpsMax, 1, fps);
+    CHECK(s.fpsMax == 144);
+    e = ui::adjustSetting(s, ui::SettingId::FpsMax, -1, fps);
+    CHECK(s.fpsMax == 60);
+
+    s.volume = 0.7f;
+    CHECK(ui::settingValueText(s, ui::SettingId::Volume) == "70%");
+    s.fpsMax = 0;
+    CHECK(ui::settingValueText(s, ui::SettingId::FpsMax) == "unlimited");
+}
+
+static void testMenuUiInventoryHelpers() {
+    const int w = 800, h = 600;
+    ui::InventoryLayout L = ui::inventoryLayout(w, h);
+    ui::Rect slot0 = ui::inventorySlotRect(L, 0);
+    ui::Rect slot8 = ui::inventorySlotRect(L, 8);
+    CHECK(slot0.y > slot8.y); // hotbar row is drawn below the grid
+    CHECK(ui::inventorySlotAt(w, h, slot0.x + 4.0f, slot0.y + 4.0f) == 0);
+    CHECK(ui::inventorySlotAt(w, h, L.x0 - 1.0f, L.y0 - 1.0f) == -1);
+
+    Inventory inv;
+    ItemStack cursor{Block::Dirt, 10};
+    ui::clickInventorySlot(inv, cursor, 0);
+    CHECK(inv.slots[0].block == Block::Dirt && inv.slots[0].count == 10);
+    CHECK(cursor.empty());
+
+    cursor = {Block::Dirt, 60};
+    ui::clickInventorySlot(inv, cursor, 0);
+    CHECK(inv.slots[0].count == Inventory::STACK_MAX);
+    CHECK(cursor.block == Block::Dirt && cursor.count == 6);
+
+    inv.slots[1] = {Block::Stone, 3};
+    ui::clickInventorySlot(inv, cursor, 1);
+    CHECK(inv.slots[1].block == Block::Dirt && inv.slots[1].count == 6);
+    CHECK(cursor.block == Block::Stone && cursor.count == 3);
+}
+
+static void testTickClockRunsFixedTicksAndAlpha() {
+    TickClock clock;
+
+    CHECK(clock.advance(0.016, false) == 0);
+    CHECK(std::fabs(clock.consumedSeconds()) < 1e-9);
+    CHECK(std::fabs(clock.alpha() - 0.32f) < 0.001f);
+
+    CHECK(clock.advance(0.034, false) == 1);
+    CHECK(std::fabs(clock.consumedSeconds() - TickClock::TICK_DT) < 1e-9);
+    CHECK(std::fabs(clock.alpha()) < 0.001f);
+
+    CHECK(clock.advance(0.126, false) == 2);
+    CHECK(std::fabs(clock.consumedSeconds() - 2.0 * TickClock::TICK_DT) < 1e-9);
+    CHECK(std::fabs(clock.alpha() - 0.52f) < 0.001f);
+}
+
+static void testTickClockCapsStallsAndDropsRemainder() {
+    TickClock clock;
+
+    CHECK(clock.advance(2.0, false) == 5);
+    CHECK(std::fabs(clock.consumedSeconds() - 5.0 * TickClock::TICK_DT) < 1e-9);
+    CHECK(std::fabs(clock.alpha()) < 0.001f);
+
+    CHECK(clock.advance(0.05, false) == 1);
+    CHECK(std::fabs(clock.consumedSeconds() - TickClock::TICK_DT) < 1e-9);
+    CHECK(std::fabs(clock.alpha()) < 0.001f);
+}
+
+static void testTickClockPauseFreezesAccumulatedTime() {
+    TickClock clock;
+
+    CHECK(clock.advance(0.025, false) == 0);
+    float before = clock.alpha();
+    CHECK(clock.advance(1.0, true) == 0);
+    CHECK(std::fabs(clock.consumedSeconds()) < 1e-9);
+    CHECK(std::fabs(clock.alpha() - before) < 0.001f);
+
+    CHECK(clock.advance(0.024, false) == 0);
+    CHECK(clock.advance(0.001, false) == 1);
+    CHECK(std::fabs(clock.consumedSeconds() - TickClock::TICK_DT) < 1e-9);
+    CHECK(std::fabs(clock.alpha()) < 0.001f);
+}
+
 int main() {
     testFloorDivMod();
     testMeshData();
@@ -997,6 +1325,7 @@ int main() {
     testSunlight();
     testTorchLight();
     testCrossBorderTorch();
+    testLightingAccessorTorchRelight();
     testTerrainDeterminism();
     testTerrainShape();
     testTreeBorderConsistency();
@@ -1004,9 +1333,13 @@ int main() {
     testOres();
     testSaveLoadRoundTrip();
     testLevelSeed();
+    testWorldSaveChunkFormat();
+    testWorldSaveLevelFormat();
     testUnloadSaves();
     testRaycast();
     testBodyPhysics();
+    testMoveBodyAxisFlushBoundaries();
+    testPlayerOwnsCanonicalBody();
     testPlayerLandsOnPlatform();
     testInventory();
     testItemEntityFallsAndLands();
@@ -1017,6 +1350,12 @@ int main() {
     testPlayerSaveV1Migrates();
     testKeyBinds();
     testSoundBank();
+    testMenuUiHitTesting();
+    testMenuUiAdjustSettings();
+    testMenuUiInventoryHelpers();
+    testTickClockRunsFixedTicksAndAlpha();
+    testTickClockCapsStallsAndDropsRemainder();
+    testTickClockPauseFreezesAccumulatedTime();
     testDayCycle();
     testLightChannelSplit();
     testLevelDayTime();

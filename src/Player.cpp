@@ -32,17 +32,14 @@ void Player::look(float dx, float dy) {
 }
 
 bool Player::collidesAt(World& world, const glm::vec3& p) const {
-    Body b;
-    b.halfWidth = WIDTH * 0.5f;
-    b.height = HEIGHT;
-    return bodyCollidesAt(world, b, p);
+    return bodyCollidesAt(world, body_, p);
 }
 
 bool Player::intersectsBlock(const glm::ivec3& b) const {
     const float hw = WIDTH * 0.5f;
-    return pos.x + hw > b.x && pos.x - hw < b.x + 1 &&
-           pos.y + HEIGHT > b.y && pos.y < b.y + 1 &&
-           pos.z + hw > b.z && pos.z - hw < b.z + 1;
+    return pos().x + hw > b.x && pos().x - hw < b.x + 1 &&
+           pos().y + HEIGHT > b.y && pos().y < b.y + 1 &&
+           pos().z + hw > b.z && pos().z - hw < b.z + 1;
 }
 
 void Player::update(World& world, const PlayerInput& in, float dt) {
@@ -58,56 +55,52 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
 
     if (flying) {
         float speed = FLY_SPEED * (in.sprint ? 2.0f : 1.0f);
-        vel = wish * speed;
-        if (in.jump)  vel.y = speed;
-        if (in.sneak) vel.y = -speed;
+        vel() = wish * speed;
+        if (in.jump)  vel().y = speed;
+        if (in.sneak) vel().y = -speed;
     } else {
         // Swimming when the body's center is in water.
-        bool inWater = world.getBlock((int)std::floor(pos.x),
-                                      (int)std::floor(pos.y + HEIGHT * 0.5f),
-                                      (int)std::floor(pos.z)) == Block::Water;
+        bool inWater = world.getBlock((int)std::floor(pos().x),
+                                      (int)std::floor(pos().y + HEIGHT * 0.5f),
+                                      (int)std::floor(pos().z)) == Block::Water;
         float speed = in.sprint ? SPRINT_SPEED : WALK_SPEED;
         if (inWater) speed *= 0.6f;
-        vel.x = wish.x * speed;
-        vel.z = wish.z * speed;
-        vel.y += (inWater ? WATER_GRAVITY : GRAVITY) * dt;
+        vel().x = wish.x * speed;
+        vel().z = wish.z * speed;
+        vel().y += (inWater ? WATER_GRAVITY : GRAVITY) * dt;
         float terminal = inWater ? WATER_TERMINAL : TERMINAL;
-        if (vel.y < terminal) vel.y = terminal;
+        if (vel().y < terminal) vel().y = terminal;
         if (in.jump) {
             if (inWater) {
-                vel.y = SWIM_SPEED;
-            } else if (onGround) {
-                vel.y = JUMP_SPEED;
-                onGround = false;
+                vel().y = SWIM_SPEED;
+            } else if (onGround()) {
+                vel().y = JUMP_SPEED;
+                onGround() = false;
             }
         }
     }
 
-    Body b{pos, vel, WIDTH * 0.5f, HEIGHT, onGround};
-    moveBody(world, b, dt);
-    pos = b.pos;
-    vel = b.vel;
-    onGround = b.onGround;
+    moveBody(world, body_, dt);
 
     // Safety net: fell out of the world.
-    if (pos.y < -20.0f) spawn(world);
+    if (pos().y < -20.0f) spawn(world);
 }
 
 void Player::ensureNotStuck(World& world) {
-    if (collidesAt(world, pos)) spawn(world);
+    if (collidesAt(world, pos())) spawn(world);
 }
 
 void Player::spawn(World& world) {
-    int x = (int)std::floor(pos.x), z = (int)std::floor(pos.z);
+    int x = (int)std::floor(pos().x), z = (int)std::floor(pos().z);
     for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
         if (isSolid(world.getBlock(x, y, z))) {
-            pos = glm::vec3(x + 0.5f, float(y + 1), z + 0.5f);
-            prevPos = pos; // don't interpolate across a respawn teleport
-            vel = glm::vec3(0.0f);
+            pos() = glm::vec3(x + 0.5f, float(y + 1), z + 0.5f);
+            prevPos = pos(); // don't interpolate across a respawn teleport
+            vel() = glm::vec3(0.0f);
             return;
         }
     }
-    pos = glm::vec3(x + 0.5f, float(CHUNK_HEIGHT), z + 0.5f);
-    prevPos = pos;
-    vel = glm::vec3(0.0f);
+    pos() = glm::vec3(x + 0.5f, float(CHUNK_HEIGHT), z + 0.5f);
+    prevPos = pos();
+    vel() = glm::vec3(0.0f);
 }

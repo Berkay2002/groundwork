@@ -1,4 +1,5 @@
 #include "Chunk.h"
+#include "Lighting.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <algorithm>
@@ -48,59 +49,7 @@ const float AO_CURVE[4] = {0.55f, 0.72f, 0.86f, 1.0f};
 }
 
 void Chunk::computeInitialLight() {
-    constexpr int CS = CHUNK_SIZE;
-    std::fill(light_.begin(), light_.end(), 0);
-
-    // Worklists of flat indices; head pointer instead of pop_front.
-    std::vector<int> sunQ, blkQ;
-    sunQ.reserve(8192);
-
-    // Sunlight: each column is 15 from the sky down to the first opaque or
-    // dimming (water) block; water then gets attenuated light via the BFS.
-    for (int z = 0; z < CS; ++z) {
-        for (int x = 0; x < CS; ++x) {
-            for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
-                int i = index(x, y, z);
-                if (isOpaque(blocks_[i]) || dimsSunlight(blocks_[i])) break;
-                light_[i] = 15;
-                sunQ.push_back(i);
-            }
-        }
-    }
-    // Block light sources (loaded chunks may contain torches).
-    for (size_t i = 0; i < blocks_.size(); ++i) {
-        uint8_t e = lightEmission(blocks_[i]);
-        if (e) { light_[i] |= uint8_t(e << 4); blkQ.push_back((int)i); }
-    }
-
-    static const int D[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-    auto spread = [&](std::vector<int>& q, bool sun) {
-        for (size_t h = 0; h < q.size(); ++h) {
-            int i = q[h];
-            int x = i % CS, z = (i / CS) % CS, y = i / (CS * CS);
-            uint8_t l = sun ? (light_[i] & 0x0F) : (light_[i] >> 4);
-            if (l <= 1) continue;
-            for (auto& d : D) {
-                int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-                if (nx < 0 || nx >= CS || nz < 0 || nz >= CS ||
-                    ny < 0 || ny >= CHUNK_HEIGHT) continue;
-                int ni = index(nx, ny, nz);
-                if (isOpaque(blocks_[ni])) continue;
-                // Full sunlight keeps level 15 straight down (no attenuation),
-                // unless it enters water, which dims it like a sideways step.
-                uint8_t target = (sun && d[1] == -1 && l == 15 &&
-                                  !dimsSunlight(blocks_[ni])) ? 15 : l - 1;
-                uint8_t nl = sun ? (light_[ni] & 0x0F) : (light_[ni] >> 4);
-                if (nl < target) {
-                    if (sun) light_[ni] = (light_[ni] & 0xF0) | target;
-                    else     light_[ni] = (light_[ni] & 0x0F) | uint8_t(target << 4);
-                    q.push_back(ni);
-                }
-            }
-        }
-    };
-    spread(sunQ, true);
-    spread(blkQ, false);
+    lighting::computeInitialLight(*this);
 }
 
 namespace {

@@ -101,29 +101,19 @@ public:
     static int mod(int a, int b) { int m = a % b; return m < 0 ? m + b : m; }
 
 private:
+    class LightingAccess;
     static uint32_t loadOrCreateSeed(const std::string& saveDir, uint32_t fallback);
     void loadDayTime();
     void saveLevel() const;
     Chunk* getChunk(int cx, int cz) const;
     void saveChunk(const Chunk& c);
     bool loadChunkFromDisk(Chunk& c) const;
-    std::string chunkPath(int cx, int cz) const;
     void markNeighborsDirty(int cx, int cz);
     void markBorderDirty(int cx, int cz, int lx, int lz);
     // The single way a chunk becomes dirty: sets the flag and registers the
     // chunk in dirtyQueue_ so processMeshing never scans the whole map.
     void markDirty(Chunk& c);
     ChunkSnapshot snapshot(const Chunk& c) const;
-
-    // Cross-chunk light BFS (main thread only: walks live chunks, marks them
-    // dirty). Workers compute per-chunk initial light; everything that can
-    // cross a border goes through these.
-    enum class LightChan { Sun, Block };
-    uint8_t getLight(LightChan ch, int wx, int wy, int wz) const;
-    void setLight(LightChan ch, int wx, int wy, int wz, uint8_t v);
-    void addLight(LightChan ch, std::vector<glm::ivec3> seeds);
-    void removeLight(LightChan ch, const glm::ivec3& pos);
-    void seedChunkBorderLight(int cx, int cz);
 
     uint32_t seed_;
     float dayTime_ = 0.0f; // seconds; 0 = morning
