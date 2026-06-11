@@ -700,6 +700,10 @@ int main(int argc, char** argv) {
         app.entities.spawnItem(base, glm::vec3(0.0f), ItemId::DirtBlock, 1);
         app.entities.spawnItem(base + glm::vec3(1, 0, 0), glm::vec3(0.0f), ItemId::StoneBlock, 1);
         app.entities.spawnItem(base + glm::vec3(-1, 0, 0), glm::vec3(0.0f), ItemId::LogBlock, 1);
+        app.entities.spawnItem(base + glm::vec3(2, 0, 0), glm::vec3(0.0f), ItemId::Coal, 1);
+        ItemStack pick = makeToolStack(ItemId::IronPickaxe);
+        pick.durability = 42;
+        app.entities.spawnItem(base + glm::vec3(-2, 0, 0), glm::vec3(0.0f), pick);
     }
     if (demoInv) {
         app.survival = true;

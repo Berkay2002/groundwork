@@ -22,6 +22,7 @@ public:
 
 private:
     Shader shader_;
-    unsigned vao_ = 0, vbo_ = 0;
+    unsigned cubeVao_ = 0, cubeVbo_ = 0;
+    unsigned billboardVao_ = 0, billboardVbo_ = 0;
     int locMVP_ = -1, locLayers_ = -1, locLight_ = -1;
 };

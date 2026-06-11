@@ -1,6 +1,7 @@
 #include "render/ItemRenderer.h"
 #include "world/Block.h"
 #include "sim/Entity.h"
+#include "render/Texture.h"
 #include "world/World.h"
 #include <algorithm>
 #include <cmath>
@@ -64,20 +65,25 @@ std::vector<float> buildCube() {
     quad({l, b, l}, {r, b, l}, {r, t, l}, {l, t, l}, 5, 0.70f); // -Z
     return v;
 }
-} // namespace
 
-ItemRenderer::ItemRenderer() : shader_(ITEM_VS, ITEM_FS) {
-    locMVP_ = shader_.loc("uMVP");
-    locLayers_ = shader_.loc("uLayers");
-    locLight_ = shader_.loc("uLight");
-    shader_.use();
-    shader_.setInt("uAtlas", 0);
+std::vector<float> buildBillboard() {
+    std::vector<float> v;
+    const glm::vec3 P[6] = {
+        {-0.5f, 0.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, {0.5f, 1.0f, 0.0f},
+        {-0.5f, 0.0f, 0.0f}, {0.5f, 1.0f, 0.0f}, {-0.5f, 1.0f, 0.0f},
+    };
+    const float U[6] = {0, 1, 1, 0, 1, 0};
+    const float W[6] = {1, 1, 0, 1, 0, 0};
+    for (int i = 0; i < 6; ++i)
+        v.insert(v.end(), {P[i].x, P[i].y, P[i].z, U[i], W[i], 0.0f, 1.0f});
+    return v;
+}
 
-    std::vector<float> verts = buildCube();
-    glGenVertexArrays(1, &vao_);
-    glGenBuffers(1, &vbo_);
-    glBindVertexArray(vao_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+void uploadItemGeometry(unsigned& vao, unsigned& vbo, const std::vector<float>& verts) {
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(),
                  GL_STATIC_DRAW);
     const GLsizei stride = 7 * sizeof(float);
@@ -88,10 +94,24 @@ ItemRenderer::ItemRenderer() : shader_(ITEM_VS, ITEM_FS) {
     for (int i = 0; i < 4; ++i) glEnableVertexAttribArray(i);
     glBindVertexArray(0);
 }
+} // namespace
+
+ItemRenderer::ItemRenderer() : shader_(ITEM_VS, ITEM_FS) {
+    locMVP_ = shader_.loc("uMVP");
+    locLayers_ = shader_.loc("uLayers");
+    locLight_ = shader_.loc("uLight");
+    shader_.use();
+    shader_.setInt("uAtlas", 0);
+
+    uploadItemGeometry(cubeVao_, cubeVbo_, buildCube());
+    uploadItemGeometry(billboardVao_, billboardVbo_, buildBillboard());
+}
 
 ItemRenderer::~ItemRenderer() {
-    glDeleteBuffers(1, &vbo_);
-    glDeleteVertexArrays(1, &vao_);
+    glDeleteBuffers(1, &cubeVbo_);
+    glDeleteVertexArrays(1, &cubeVao_);
+    glDeleteBuffers(1, &billboardVbo_);
+    glDeleteVertexArrays(1, &billboardVao_);
 }
 
 void ItemRenderer::draw(const World& world, const Entities& entities,
@@ -99,7 +119,6 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
                         float sunLevel) {
     if (entities.items().empty()) return;
     shader_.use();
-    glBindVertexArray(vao_);
     glDisable(GL_CULL_FACE);
     for (const auto& up : entities.items()) {
         const ItemEntity& e = *up;
@@ -108,13 +127,18 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         float bob = 0.06f + 0.05f * std::sin(time * 2.0f + phase);
         glm::mat4 m = glm::translate(glm::mat4(1.0f), p + glm::vec3(0, bob, 0));
         m = glm::rotate(m, time * 1.5f + phase, glm::vec3(0, 1, 0));
-        m = glm::scale(m, glm::vec3(0.25f));
+        bool cube = itemUsesBlockCube(e.stack.item);
+        m = glm::scale(m, glm::vec3(cube ? 0.25f : 0.32f));
         glm::mat4 mvp = viewProj * m;
         glUniformMatrix4fv(locMVP_, 1, GL_FALSE, glm::value_ptr(mvp));
         float layers[6];
-        Block b = placeBlockForItem(e.stack.item);
-        if (b == Block::Air) b = Block::Stone; // non-block billboards arrive in a later task
-        for (int f = 0; f < 6; ++f) layers[f] = float(tileFor(b, f));
+        if (cube) {
+            Block b = placeBlockForItem(e.stack.item);
+            for (int f = 0; f < 6; ++f) layers[f] = float(tileFor(b, f));
+        } else {
+            layers[0] = float(itemIconTile(e.stack.item));
+            for (int f = 1; f < 6; ++f) layers[f] = layers[0];
+        }
         glUniform1fv(locLayers_, 6, layers);
         int wx = (int)std::floor(p.x), wy = (int)std::floor(p.y + 0.2f),
             wz = (int)std::floor(p.z);
@@ -123,7 +147,8 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
         float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
         glUniform1f(locLight_, std::max(sunBr * sunLevel, blkBr));
-        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(cube ? cubeVao_ : billboardVao_);
+        glDrawArrays(GL_TRIANGLES, 0, cube ? 36 : 6);
     }
     glEnable(GL_CULL_FACE);
     glBindVertexArray(0);

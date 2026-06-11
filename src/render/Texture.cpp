@@ -1,6 +1,7 @@
 #include "render/Texture.h"
 #include "world/Block.h"
 #include "render/GLCompat.h"
+#include <cstdlib>
 #include <cstdint>
 #include <vector>
 
@@ -152,6 +153,58 @@ RGB furnaceFrontPixel(int x, int y) {
     return cobblestonePixel(x, y);
 }
 
+RGB iconBg(int x, int y) {
+    bool border = x == 0 || y == 0 || x == TILE - 1 || y == TILE - 1;
+    float n = 0.85f + 0.12f * noise01(x, y, 30);
+    return shade(border ? RGB{25, 26, 28} : RGB{48, 50, 54}, n);
+}
+RGB materialColor(ToolTier tier) {
+    switch (tier) {
+        case ToolTier::Wood: return {150, 100, 55};
+        case ToolTier::Stone: return {130, 130, 132};
+        case ToolTier::Iron: return {215, 218, 210};
+        case ToolTier::Diamond: return {74, 220, 212};
+        case ToolTier::Hand: return {180, 140, 90};
+    }
+    return {255, 0, 255};
+}
+RGB itemStickPixel(int x, int y) {
+    if (std::abs(x - 8) <= 1 && y >= 3 && y <= 13)
+        return shade({130, 82, 42}, 0.85f + 0.2f * noise01(x, y, 31));
+    return iconBg(x, y);
+}
+RGB itemLumpPixel(int x, int y, RGB color, uint32_t salt) {
+    int dx = x - 8, dy = y - 8;
+    if (dx * dx + dy * dy < 30 + int(noise01(x, y, salt) * 8.0f))
+        return shade(color, 0.75f + 0.35f * noise01(x, y, salt + 1));
+    return iconBg(x, y);
+}
+RGB itemIngotPixel(int x, int y, RGB color, uint32_t salt) {
+    bool body = y >= 6 && y <= 10 && x >= 3 && x <= 12;
+    bool bevel = (x == 3 || x == 12) && (y == 6 || y == 10);
+    if (body && !bevel) return shade(color, 0.8f + 0.25f * noise01(x, y, salt));
+    return iconBg(x, y);
+}
+RGB itemDiamondPixel(int x, int y) {
+    int dx = std::abs(x - 8), dy = std::abs(y - 8);
+    if (dx + dy <= 6) return shade({74, 220, 212}, 0.85f + 0.25f * noise01(x, y, 36));
+    return iconBg(x, y);
+}
+RGB toolIconPixel(int x, int y, ToolClass cls, ToolTier tier) {
+    RGB head = materialColor(tier);
+    bool handle = std::abs((x + y) - 17) <= 1 && x >= 5 && x <= 11 && y >= 6 && y <= 13;
+    bool toolHead = false;
+    if (cls == ToolClass::Pickaxe) toolHead = y >= 3 && y <= 5 && x >= 3 && x <= 13;
+    if (cls == ToolClass::Axe) toolHead = x >= 4 && x <= 9 && y >= 3 && y <= 8 && x + y <= 14;
+    if (cls == ToolClass::Shovel) {
+        int dx = x - 8, dy = y - 4;
+        toolHead = dx * dx + dy * dy <= 10 && y <= 8;
+    }
+    if (toolHead) return shade(head, 0.8f + 0.25f * noise01(x, y, 37 + tierLevel(tier)));
+    if (handle) return shade({116, 76, 38}, 0.85f + 0.15f * noise01(x, y, 42));
+    return iconBg(x, y);
+}
+
 // One function per tile; shared by the HUD's 2D atlas strip and the chunk
 // renderer's texture array so both show identical art. The switch covers
 // every TileId enumerator (no default) so adding a tile without art is a
@@ -179,6 +232,23 @@ RGB tilePixel(TileId tile, int x, int y) {
         case TileId::FurnaceSide: return furnaceSidePixel(x, y);
         case TileId::FurnaceFront: return furnaceFrontPixel(x, y);
         case TileId::DiamondOre: return diamondOrePixel(x, y);
+        case TileId::ItemStick: return itemStickPixel(x, y);
+        case TileId::ItemCoal: return itemLumpPixel(x, y, {32, 31, 30}, 32);
+        case TileId::ItemRawIron: return itemLumpPixel(x, y, {196, 118, 70}, 34);
+        case TileId::ItemIronIngot: return itemIngotPixel(x, y, {215, 218, 210}, 35);
+        case TileId::ItemDiamond: return itemDiamondPixel(x, y);
+        case TileId::ItemWoodPickaxe: return toolIconPixel(x, y, ToolClass::Pickaxe, ToolTier::Wood);
+        case TileId::ItemWoodAxe: return toolIconPixel(x, y, ToolClass::Axe, ToolTier::Wood);
+        case TileId::ItemWoodShovel: return toolIconPixel(x, y, ToolClass::Shovel, ToolTier::Wood);
+        case TileId::ItemStonePickaxe: return toolIconPixel(x, y, ToolClass::Pickaxe, ToolTier::Stone);
+        case TileId::ItemStoneAxe: return toolIconPixel(x, y, ToolClass::Axe, ToolTier::Stone);
+        case TileId::ItemStoneShovel: return toolIconPixel(x, y, ToolClass::Shovel, ToolTier::Stone);
+        case TileId::ItemIronPickaxe: return toolIconPixel(x, y, ToolClass::Pickaxe, ToolTier::Iron);
+        case TileId::ItemIronAxe: return toolIconPixel(x, y, ToolClass::Axe, ToolTier::Iron);
+        case TileId::ItemIronShovel: return toolIconPixel(x, y, ToolClass::Shovel, ToolTier::Iron);
+        case TileId::ItemDiamondPickaxe: return toolIconPixel(x, y, ToolClass::Pickaxe, ToolTier::Diamond);
+        case TileId::ItemDiamondAxe: return toolIconPixel(x, y, ToolClass::Axe, ToolTier::Diamond);
+        case TileId::ItemDiamondShovel: return toolIconPixel(x, y, ToolClass::Shovel, ToolTier::Diamond);
         case TileId::Error:
         case TileId::Count: break;
     }

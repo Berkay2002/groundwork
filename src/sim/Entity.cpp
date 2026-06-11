@@ -9,6 +9,7 @@ constexpr float GROUND_FRICTION = 0.6f; // horizontal damping per tick on ground
 constexpr float MAGNET_RADIUS = 2.0f;   // starts flying to the player inside this
 constexpr float MAGNET_SPEED = 8.0f;
 constexpr float PICKUP_RADIUS = 0.8f;
+constexpr float MERGE_RADIUS = 0.75f;
 constexpr float PICKUP_DELAY = 0.4f;    // so fresh drops visibly pop out first
 constexpr float DESPAWN_SECONDS = 300.0f;
 }
@@ -93,6 +94,25 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         }
         if (e.age > DESPAWN_SECONDS) e.dead = true;
     }
+
+    for (size_t i = 0; i < items_.size(); ++i) {
+        ItemEntity& a = *items_[i];
+        if (a.dead || !world.isAreaReady(a.body.pos, 0)) continue;
+        const ItemDef& d = itemDef(a.stack.item);
+        if (a.stack.count >= d.stackMax) continue;
+        for (size_t j = i + 1; j < items_.size() && a.stack.count < d.stackMax; ++j) {
+            ItemEntity& b = *items_[j];
+            if (b.dead || !world.isAreaReady(b.body.pos, 0)) continue;
+            if (!stacksCompatible(a.stack, b.stack)) continue;
+            if (glm::distance(a.body.pos, b.body.pos) > MERGE_RADIUS) continue;
+            int space = int(d.stackMax) - int(a.stack.count);
+            int moved = std::min(space, int(b.stack.count));
+            a.stack.count = uint8_t(a.stack.count + moved);
+            b.stack.count = uint8_t(b.stack.count - moved);
+            if (b.stack.count == 0) b.dead = true;
+        }
+    }
+
     items_.erase(std::remove_if(items_.begin(), items_.end(),
                      [](const std::unique_ptr<ItemEntity>& e) { return e->dead; }),
                  items_.end());

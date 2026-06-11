@@ -15,6 +15,7 @@
 #include "platform/Settings.h"
 #include "audio/Sounds.h"
 #include "ui/MenuUi.h"
+#include "render/Texture.h"
 #include "platform/SaveIO.h"
 #include "sim/TickClock.h"
 #include <algorithm>
@@ -1153,6 +1154,40 @@ static void testItemPickup() {
     std::filesystem::remove_all("test_ent_save2");
 }
 
+static void testItemPickupPreservesDurabilityAndRemainder() {
+    std::filesystem::remove_all("test_ent_save_pickup_remainder");
+    World w(1337, "test_ent_save_pickup_remainder");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    w.setBlock(0, 70, 0, Block::Stone);
+
+    Entities tools;
+    Inventory toolInv;
+    ItemStack damaged = makeToolStack(ItemId::IronPickaxe);
+    damaged.durability = 7;
+    tools.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f), damaged);
+    for (int i = 0; i < 60 && !tools.items().empty(); ++i)
+        tools.tick(w, glm::vec3(0.5f, 71.0f, 0.5f), &toolInv, 0.05f);
+    CHECK(tools.items().empty());
+    CHECK(toolInv.slots[0].item == ItemId::IronPickaxe);
+    CHECK(toolInv.slots[0].durability == 7);
+
+    Entities coal;
+    Inventory almostFull;
+    almostFull.slots[0] = makeItemStack(ItemId::Coal, 63);
+    for (int i = 1; i < Inventory::SLOTS; ++i)
+        almostFull.slots[i] = makeItemStack(ItemId::StoneBlock, 64);
+    coal.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::Coal, 5));
+    for (int i = 0; i < 60; ++i)
+        coal.tick(w, glm::vec3(0.5f, 71.0f, 0.5f), &almostFull, 0.05f);
+    CHECK(almostFull.slots[0].count == 64);
+    CHECK(coal.items().size() == 1);
+    CHECK(coal.items()[0]->stack.item == ItemId::Coal);
+    CHECK(coal.items()[0]->stack.count == 4);
+
+    std::filesystem::remove_all("test_ent_save_pickup_remainder");
+}
+
 static void testItemFrozenInUnloadedChunk() {
     std::filesystem::remove_all("test_ent_save3");
     World w(1337, "test_ent_save3");
@@ -1163,6 +1198,57 @@ static void testItemFrozenInUnloadedChunk() {
     for (int i = 0; i < 20; ++i) ents.tick(w, glm::vec3(0.0f), nullptr, 0.05f);
     CHECK(ents.items()[0]->body.pos == farPos); // no physics in the void
     std::filesystem::remove_all("test_ent_save3");
+}
+
+static void testItemEntityMerging() {
+    std::filesystem::remove_all("test_ent_merge");
+    World w(1337, "test_ent_merge");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+
+    Entities stackMerge;
+    stackMerge.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                         makeItemStack(ItemId::Coal, 30));
+    stackMerge.spawnItem(glm::vec3(1.0f, 70.0f, 0.5f), glm::vec3(0.0f),
+                         makeItemStack(ItemId::Coal, 40));
+    stackMerge.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(stackMerge.items().size() == 2);
+    CHECK(stackMerge.items()[0]->stack.count == 64);
+    CHECK(stackMerge.items()[1]->stack.count == 6);
+
+    Entities atRadius;
+    atRadius.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                       makeItemStack(ItemId::Coal, 1));
+    atRadius.spawnItem(glm::vec3(1.25f, 70.0f, 0.5f), glm::vec3(0.0f),
+                       makeItemStack(ItemId::Coal, 1));
+    atRadius.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(atRadius.items().size() == 1);
+    CHECK(atRadius.items()[0]->stack.count == 2);
+
+    Entities outsideRadius;
+    outsideRadius.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                            makeItemStack(ItemId::Coal, 1));
+    outsideRadius.spawnItem(glm::vec3(1.26f, 70.0f, 0.5f), glm::vec3(0.0f),
+                            makeItemStack(ItemId::Coal, 1));
+    outsideRadius.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(outsideRadius.items().size() == 2);
+
+    Entities tools;
+    tools.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                    makeToolStack(ItemId::WoodPickaxe));
+    tools.spawnItem(glm::vec3(1.0f, 70.0f, 0.5f), glm::vec3(0.0f),
+                    makeToolStack(ItemId::WoodPickaxe));
+    tools.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(tools.items().size() == 2);
+
+    Entities unloaded;
+    glm::vec3 farPos(1000.5f, 70.0f, 1000.5f);
+    unloaded.spawnItem(farPos, glm::vec3(0.0f), makeItemStack(ItemId::Coal, 1));
+    unloaded.spawnItem(farPos + glm::vec3(0.25f, 0.0f, 0.0f), glm::vec3(0.0f),
+                       makeItemStack(ItemId::Coal, 1));
+    unloaded.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(unloaded.items().size() == 2);
+
+    std::filesystem::remove_all("test_ent_merge");
 }
 
 static void testEntityBucketsAndDrops() {
@@ -1183,6 +1269,22 @@ static void testEntityBucketsAndDrops() {
     CHECK(ents.itemsNear(glm::vec3(0.5f, 70.0f, 0.5f), 8.0f).size() == 2);
     CHECK(ents.itemsNear(glm::vec3(40.5f, 70.0f, 0.5f), 8.0f).size() == 1);
     std::filesystem::remove_all("test_ent_save4");
+}
+
+static void testNonBlockItemIconMapping() {
+    for (int i = 1; i < ITEM_TYPES; ++i) {
+        ItemId id = ItemId(i);
+        bool blockItem = placeBlockForItem(id) != Block::Air;
+        if (blockItem) {
+            CHECK(itemUsesBlockCube(id));
+        } else {
+            CHECK(!itemUsesBlockCube(id));
+            CHECK(itemIconTile(id) != TileId::Error);
+            CHECK(int(itemIconTile(id)) < ATLAS_TILES);
+        }
+    }
+    CHECK(itemIconTile(ItemId::Coal) != itemIconTile(ItemId::IronIngot));
+    CHECK(itemIconTile(ItemId::WoodPickaxe) != itemIconTile(ItemId::WoodAxe));
 }
 
 static void testItemEntityStackIngress() {
@@ -1657,8 +1759,11 @@ int main() {
     testMiningProgressResetsAndBreakEvent();
     testItemEntityFallsAndLands();
     testItemPickup();
+    testItemPickupPreservesDurabilityAndRemainder();
     testItemFrozenInUnloadedChunk();
+    testItemEntityMerging();
     testEntityBucketsAndDrops();
+    testNonBlockItemIconMapping();
     testItemEntityStackIngress();
     testPlayerSaveV3Roundtrip();
     testPlayerSaveV2BlockInventoryMigrates();

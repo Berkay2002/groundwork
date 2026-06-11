@@ -2,9 +2,11 @@
 
 ## STATUS
 
-- Current: M2 / Task 5
-- Last verified: M2/T4 validation green (`cmake --build build -j` exit 0,
-  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M2 milestone review
+- Last verified: M2/T5 validation green (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`; isolated
+  `.\build\groundwork.exe --demo-items --frames 120` exit 0 and screenshot
+  inspected, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 0
 
@@ -74,3 +76,11 @@
   input, creative remains instant, and block drops use item-stack harvest
   results. Validation: `cmake --build build -j` exit 0 warning-free;
   `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
+- [2026-06-11] M2/T5 DONE. Item entities now merge nearby compatible stacks
+  in loaded chunks with earlier-entity absorption, preserve durability through
+  pickup, leave inventory-full remainders in-world, and never merge tools.
+  Non-block item drops render as procedural icon billboards while block items
+  remain cube drops. Validation: `cmake --build build -j` exit 0 warning-free;
+  `.\build\world_tests.exe` exit 0 and printed `all tests passed`. Visual:
+  isolated temp-dir `.\build\groundwork.exe --demo-items --frames 120` exit 0;
+  screenshot inspected with block cubes plus coal/tool billboards visible.
