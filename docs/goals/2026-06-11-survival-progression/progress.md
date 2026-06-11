@@ -2,9 +2,10 @@
 
 ## STATUS
 
-- Current: M4 spec-compliance re-review
-- Last verified: M4 spec-review fixes applied (`cmake --build build -j` exit 0,
-  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M4 code-quality review
+- Last verified: M4 spec-compliance re-review approved after fixes
+  (`cmake --build build -j` exit 0, warning-free;
+  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 5
 
@@ -180,3 +181,5 @@
   junk no-op, furnace slot hit testing, and recipe-reference slot hit testing.
   Validation rerun: `cmake --build build -j` exit 0 warning-free;
   `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
+- [2026-06-11] M4 spec-compliance re-review round 2: APPROVED. Prior findings
+  M4-T9-001 and M4-T9-002 resolved; no fix-induced regressions found.
