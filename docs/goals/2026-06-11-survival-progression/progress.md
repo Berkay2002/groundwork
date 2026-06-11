@@ -2,12 +2,11 @@
 
 ## STATUS
 
-- Current: M4 code-quality review
-- Last verified: M4 spec-compliance re-review approved after fixes
-  (`cmake --build build -j` exit 0, warning-free;
-  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M4 code-quality re-review
+- Last verified: M4 code-quality fix applied (`cmake --build build -j` exit 0,
+  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
-- Minor issues parked: 5
+- Minor issues parked: 8
 
 ## Log
 
@@ -183,3 +182,15 @@
   `.\build\world_tests.exe` exit 0 and printed `all tests passed`.
 - [2026-06-11] M4 spec-compliance re-review round 2: APPROVED. Prior findings
   M4-T9-001 and M4-T9-002 resolved; no fix-induced regressions found.
+- [2026-06-11] M4 code-quality review round 1: REJECTED. Important finding
+  M4-REV-001: `savePlayer()` persisted only `app.inv`, so autosave/shutdown
+  could lose stacks currently carried by the cursor or held in the transient
+  crafting grid. Fixed by adding a pure transient-stack save snapshot helper,
+  merging cursor and crafting-grid stacks into the saved inventory copy, and
+  testing normal merge plus overflow reporting. Validation rerun:
+  `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe`
+  exit 0 and printed `all tests passed`. Parked minor issues: a checked
+  World-level furnace-open accessor would reduce future orphan-creation risk;
+  `BreakOverlay::draw()` does not restore the previous blend function; the
+  inventory/crafting/furnace drawing in `main.cpp` should be decomposed before
+  more UI screens are added.

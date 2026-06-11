@@ -366,6 +366,18 @@ inline bool quickMoveFromCraftingGrid(crafting::CraftingGrid& grid, int slot,
     return true;
 }
 
+inline bool addTransientStacksForSave(Inventory& inv, const ItemStack& cursor,
+                                      const crafting::CraftingGrid& grid) {
+    bool allStored = true;
+    auto add = [&](const ItemStack& stack) {
+        if (stack.empty()) return;
+        if (inv.addStack(stack) != 0) allStored = false;
+    };
+    add(cursor);
+    for (const ItemStack& stack : grid.cells) add(stack);
+    return allStored;
+}
+
 inline ItemStack& furnaceSlotRef(FurnaceState& furnace, FurnaceSlot slot) {
     if (slot == FurnaceSlot::Input) return furnace.input;
     if (slot == FurnaceSlot::Fuel) return furnace.fuel;

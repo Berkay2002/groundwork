@@ -2168,6 +2168,30 @@ static void testMenuUiShiftClickDestinations() {
     CHECK(junkInv.slots[0].item == ItemId::Stick && junkInv.slots[0].count == 3);
 }
 
+static void testMenuUiTransientSaveSnapshot() {
+    Inventory inv;
+    inv.slots[0] = makeItemStack(ItemId::Coal, 10);
+    ItemStack cursor = makeItemStack(ItemId::Coal, 2);
+    crafting::CraftingGrid craft = grid(2);
+    craft.at(0, 0) = makeItemStack(ItemId::RawIron, 3);
+    craft.at(1, 0) = makeItemStack(ItemId::Stick, 4);
+
+    CHECK(ui::addTransientStacksForSave(inv, cursor, craft));
+    CHECK(inv.slots[0].item == ItemId::Coal && inv.slots[0].count == 12);
+    bool sawRaw = false, sawStick = false;
+    for (const ItemStack& s : inv.slots) {
+        if (s.item == ItemId::RawIron && s.count == 3) sawRaw = true;
+        if (s.item == ItemId::Stick && s.count == 4) sawStick = true;
+    }
+    CHECK(sawRaw && sawStick);
+
+    Inventory fullInv;
+    for (int i = 0; i < Inventory::SLOTS; ++i)
+        fullInv.slots[i] = makeItemStack(ItemId::StoneBlock, 64);
+    crafting::CraftingGrid empty = grid(2);
+    CHECK(!ui::addTransientStacksForSave(fullInv, makeItemStack(ItemId::Coal, 1), empty));
+}
+
 static void testMenuUiRecipeReferenceEnumeratesCraftingTable() {
     std::vector<ItemStack> outputs = ui::recipeReferenceOutputs();
     bool sawPick = false, sawFurnace = false, sawTorch = false;
@@ -2291,6 +2315,7 @@ int main() {
     testMenuUiCraftingSlotsAndOutput();
     testMenuUiSurfaceHitTesting();
     testMenuUiShiftClickDestinations();
+    testMenuUiTransientSaveSnapshot();
     testMenuUiRecipeReferenceEnumeratesCraftingTable();
     testTickClockRunsFixedTicksAndAlpha();
     testTickClockCapsStallsAndDropsRemainder();
