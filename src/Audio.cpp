@@ -33,11 +33,16 @@ struct Voice {
 struct Audio::Impl {
     ma_device device{};
     bool deviceOk = false;
-    std::vector<float> sounds[3]; // indexed by Sound
+    std::vector<std::vector<float>> sounds[3]; // variants, indexed by Sound
     Voice voices[MAX_VOICES];
     std::mutex voiceMutex; // guards voices between game and audio threads
     std::atomic<float> volume{1.0f};
-    uint32_t rng = 0x9E3779B9u; // pitch-variation LCG (game thread only)
+    uint32_t rng = 0x9E3779B9u; // variant/pitch-variation LCG (game thread only)
+
+    float rand01() {
+        rng = rng * 1664525u + 1013904223u;
+        return float(rng >> 8) / float(1u << 24); // [0,1)
+    }
 
     static void callback(ma_device* dev, void* out, const void*, ma_uint32 frames) {
         auto* self = static_cast<Impl*>(dev->pUserData);
@@ -74,14 +79,12 @@ Audio::~Audio() {
 
 bool Audio::init() {
     impl_ = new Impl();
-    impl_->sounds[int(Sound::Break)] = makeBreakSound();
-    impl_->sounds[int(Sound::Place)] = makePlaceSound();
-    impl_->sounds[int(Sound::Footstep)] = makeFootstepSound();
+    for (int s = 0; s < 3; ++s) impl_->sounds[s] = soundVariants(s);
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 1;
-    cfg.sampleRate = SOUND_RATE;
+    cfg.sampleRate = SOUND_RATE; // the embedded data rate; the OS resamples
     cfg.dataCallback = Impl::callback;
     cfg.pUserData = impl_;
     if (ma_device_init(nullptr, &cfg, &impl_->device) != MA_SUCCESS) return false;
@@ -95,10 +98,13 @@ bool Audio::init() {
 
 void Audio::play(Sound s, float gain, float pitch) {
     if (!impl_ || !impl_->deviceOk) return;
+    const auto& variants = impl_->sounds[int(s)];
+    if (variants.empty()) return;
+    size_t pick = size_t(impl_->rand01() * variants.size()) % variants.size();
     std::lock_guard<std::mutex> lock(impl_->voiceMutex);
     for (Voice& v : impl_->voices) {
         if (v.active) continue;
-        v.buf = &impl_->sounds[int(s)];
+        v.buf = &variants[pick];
         v.pos = 0.0f;
         v.step = pitch;
         v.gain = gain;
@@ -109,9 +115,8 @@ void Audio::play(Sound s, float gain, float pitch) {
 
 void Audio::playVaried(Sound s, float gain) {
     if (!impl_) return;
-    impl_->rng = impl_->rng * 1664525u + 1013904223u;
-    float r = float(impl_->rng >> 8) / float(1u << 24); // [0,1)
-    play(s, gain, 0.9f + 0.2f * r);
+    // Random recorded variant (in play) + a light pitch jitter on top.
+    play(s, gain, 0.95f + 0.1f * impl_->rand01());
 }
 
 void Audio::setVolume(float v) {

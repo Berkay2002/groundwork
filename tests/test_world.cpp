@@ -945,29 +945,30 @@ static void testKeyBinds() {
     std::filesystem::remove("test_settings.cfg");
 }
 
-static void testSoundSynthesis() {
-    // The procedural effects must be bounded, non-silent, deterministic,
-    // and end near silence (no click on cutoff).
-    for (auto make : {makeBreakSound, makePlaceSound, makeFootstepSound}) {
-        std::vector<float> s = make();
-        CHECK(!s.empty());
-        float peak = 0.0f;
-        for (float v : s) peak = std::max(peak, std::fabs(v));
-        CHECK(peak > 0.05f && peak <= 1.0f);
-        float tail = 0.0f; // last 5 ms
-        for (size_t i = s.size() - SOUND_RATE / 200; i < s.size(); ++i)
-            tail = std::max(tail, std::fabs(s[i]));
-        CHECK(tail < 0.1f);
-        // No clicks: the waveform never jumps between adjacent samples
-        // (this is what made the first version harsh), and it starts soft.
-        float jump = 0.0f;
-        for (size_t i = 1; i < s.size(); ++i)
-            jump = std::max(jump, std::fabs(s[i] - s[i - 1]));
-        CHECK(jump < 0.15f);
-        CHECK(std::fabs(s[0]) < 0.05f);
-        std::vector<float> again = make();
-        CHECK(again == s);
+static void testSoundBank() {
+    // The embedded CC0 samples decode to sane buffers: every event has
+    // multiple variants, each non-trivial, peak-normalized, with the
+    // trailing silence trimmed by the generator script.
+    for (int event = 0; event < 3; ++event) {
+        auto variants = soundVariants(event);
+        CHECK(variants.size() >= 2);
+        for (const auto& s : variants) {
+            CHECK(s.size() > size_t(SOUND_RATE) / 50); // at least 20 ms
+            CHECK(s.size() < size_t(SOUND_RATE) * 2);  // and under 2 s
+            float peak = 0.0f;
+            for (float v : s) peak = std::max(peak, std::fabs(v));
+            CHECK(std::fabs(peak - 0.8f) < 0.01f); // normalized loudness
+            float tail = 0.0f; // last 5 ms — generator trims dead air
+            for (size_t i = s.size() - SOUND_RATE / 200; i < s.size(); ++i)
+                tail = std::max(tail, std::fabs(s[i]));
+            CHECK(tail < 0.25f);
+        }
     }
+    // Decoding is exact little-endian s16: a known two-sample buffer.
+    const unsigned char raw[] = {0x00, 0x40, 0x00, 0xC0}; // +0.5, -0.5
+    std::vector<float> d = decodeSound(raw, 4, 0.5f);
+    CHECK(d.size() == 2);
+    CHECK(std::fabs(d[0] - 0.5f) < 1e-3f && std::fabs(d[1] + 0.5f) < 1e-3f);
 }
 
 int main() {
@@ -1005,7 +1006,7 @@ int main() {
     testPlayerSaveV2Roundtrip();
     testPlayerSaveV1Migrates();
     testKeyBinds();
-    testSoundSynthesis();
+    testSoundBank();
     testDayCycle();
     testLightChannelSplit();
     testLevelDayTime();

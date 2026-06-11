@@ -136,12 +136,15 @@ swap, or merge stacks; the hotbar is the bottom row).
   and torches keep their full glow after dark. Moonlight keeps night terrain
   barely readable instead of pitch black. The day clock persists in
   `level.bin`, so a save resumes at the time of day you left it.
-- **Audio** (`src/Audio.cpp`, `src/Sounds.h`) — block break/place sounds and
-  footsteps, synthesized at startup (filtered noise bursts — no sound files,
-  matching the no-assets rule) and mixed by a small voice pool on a
-  [miniaudio](https://miniaud.io) playback device (vendored single header).
-  Pitch varies slightly per play so repeats don't sound mechanical;
-  `volume` in settings.cfg (or the pause menu) scales everything.
+- **Audio** (`src/Audio.cpp`, `src/Sounds.h`, `src/SoundData.h`) — block
+  break/place sounds and footsteps are real recordings from
+  [Kenney's CC0 "Impact Sounds" pack](https://kenney.nl/assets/impact-sounds),
+  embedded in the binary as raw PCM (regenerate with
+  `tools/make_sounddata.sh`) so the no-asset-files rule still holds. A small
+  voice pool mixes them on a [miniaudio](https://miniaud.io) playback device
+  (vendored single header) with a soft limiter; each play picks a random
+  recorded variant plus a light pitch jitter so repeats don't sound
+  mechanical. `volume` in settings.cfg (or the pause menu) scales everything.
 - **Terrain** (`src/Terrain.cpp`, `src/Noise.h`) — deterministic and a pure
   function of world coordinates + seed: rolling value-noise plains plus
   occasional hill regions selected by a low-frequency mask; sandy basins below
