@@ -1117,6 +1117,12 @@ int main(int argc, char** argv) {
             ui::drawHotbar(hud, hv, width, height);
         }
         if (app.invOpen) {
+            // Flush the world-space HUD (hotbar, debug text) before the
+            // overlay: Hud draws solids before tiles/text within one batch,
+            // so without the flush the screen dim would render underneath
+            // the hotbar icons instead of covering them.
+            hud.end();
+            hud.begin(width, height);
             double mx, my;
             glfwGetCursorPos(app.window, &mx, &my);
             ui::InventoryView iv{app.inv,    app.cursorStack, app.crafting,
