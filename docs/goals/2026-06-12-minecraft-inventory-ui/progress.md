@@ -108,6 +108,29 @@
   fresh --demo-inv screenshot: hotbar now dimmed. Tests green,
   saves/world1 untouched.
 
+### 2026-06-12 — M3 stage-1 review + user addendum batch (`4f47f9b`)
+
+- M3 spec-compliance review (Opus 4.8): APPROVED. One Minor, C1: chunk
+  eviction in World::update() called saveChunk() ungated by demoMode_.
+- User addendum (mid-run, user-directed): 4 decorative armor placeholder
+  slots left of the player box; panel midline as a divider — armor + player
+  box in the left half, 2x2 craft cluster centered in the right half.
+  Spec R2 amended. Implemented in MenuUi.h (armorSlotRect, topH = 4 slots,
+  playerBoxRect repositioned/full-height, craftGridLeft midline-anchored)
+  + InventoryUi.cpp (draw armor column). Furnace cluster now self-centered
+  (also resolves parked Q3 (M2)). Layout tests extended: armor containment/
+  disjointness/hit-test-none + midline-balance assertions.
+- C1 fixed: saveChunk() itself now returns early under demoMode_.
+- Validation: build warning-free, `all tests passed`, all three screens
+  re-screenshotted and controller-inspected (armor column + balance
+  confirmed; furnace centered; crafting table unchanged).
+- Save-data note (honesty log): saves/world1 player.bin was rewritten at
+  2026-06-12 2:29 PM as v4/210 bytes (plus level.bin/block_entities.bin
+  refresh) — evidence points to the stage-1 reviewer running a bare
+  --frames run, which saves by design for non-demo runs. Contents
+  round-tripped through the v3→v4 migration (lossless); chunks untouched;
+  re-tested demo + test binaries afterward: no writes to saves/world1.
+
 ## Parked Minor issues
 
 - Q1 (M1): remap math `(i/8)*9 + i%8` duplicated in v2 and v3 load loops —
@@ -118,8 +141,6 @@
   sweep on the inventory-screen test block. (cleanup pass)
 - Q2 (M2): `y0` and `topSectionY` share a re-derived prefix in MenuUi.h —
   express y0 via topSectionY to remove drift risk. (cleanup pass)
-- Q3 (M2): furnaceSlotRect anchors to craftGridLeft (phantom player box)
-  on a screen with no player box — aesthetic offset, non-obvious coupling.
-  (cleanup pass)
+- ~~Q3 (M2)~~ RESOLVED in `4f47f9b`: furnace cluster now self-centered.
 - Q4 (M2): arrowRect re-derives gridW/craftGridLeft instead of reading the
   rects it already fetches. (cleanup pass)
