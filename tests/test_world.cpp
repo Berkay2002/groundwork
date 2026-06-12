@@ -334,6 +334,10 @@ static void testEntityChunkSaveFormatRoundtrip() {
     loaded.push_back(a);
     CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Missing);
     CHECK(loaded.empty());
+
+    std::vector<SavedDroppedItem> tooMany(4097, a);
+    CHECK(!saveEntityChunkFile(path, tooMany));
+    CHECK(!std::filesystem::exists(path));
     std::filesystem::remove_all(dir);
 }
 

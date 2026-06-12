@@ -138,6 +138,7 @@ bool saveEntityChunkFile(const std::string& path,
         filtered.push_back(item);
     }
     if (filtered.empty()) return deleteEntityChunkFile(path);
+    if (filtered.size() > MAX_ENTITIES_PER_CHUNK) return false;
 
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
