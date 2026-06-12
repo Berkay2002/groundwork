@@ -2,10 +2,10 @@
 
 ## STATUS
 
-- Current: M4 code-quality re-review round 3
-- Last verified: M4 code-quality fix round 2 applied (`cmake --build build -j`
-  exit 0, warning-free; `.\build\world_tests.exe` -> `all tests passed`,
-  2026-06-11)
+- Current: Final whole-implementation review
+- Last verified: M4 code-quality re-review approved after fixes
+  (`cmake --build build -j` exit 0, warning-free/no work;
+  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
 - Blockers: none
 - Minor issues parked: 8
 
@@ -204,3 +204,7 @@
   snapshot does not overwrite an existing player save. Validation rerun:
   `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe`
   exit 0 and printed `all tests passed`.
+- [2026-06-11] M4 code-quality re-review round 3: APPROVED. Prior finding
+  M4-REV-001 resolved; no fix-induced regressions found. The reviewer also
+  reran `git diff --check 82dd6ec..f9b7e61`, `.\build\world_tests.exe`, and
+  `cmake --build build -j`; all passed. M4 milestone gate cleared.
