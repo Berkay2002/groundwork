@@ -37,21 +37,24 @@ uniform sampler2DArray uAtlas;
 uniform float uLayers[6];
 out vec4 FragColor;
 void main() {
-    vec3 c = texture(uAtlas, vec3(vUV, uLayers[vFace])).rgb * vLight;
-    FragColor = vec4(c, 1.0);
+    vec4 c = texture(uAtlas, vec3(vUV, uLayers[vFace]));
+    if (c.a < 0.5) discard; // item sprites are cut-outs; block tiles are opaque
+    FragColor = vec4(c.rgb * vLight, 1.0);
 }
 )";
 
 // Unit cube, x/z in [-0.5,0.5], y in [0,1] (feet origin like Body.pos).
 // Face order matches Block.h tiles: +X -X +Y -Y +Z -Z. Drawn with face
 // culling disabled (a handful of cubes), so winding doesn't matter.
+// Tile-space v=1 is the visual top of a tile (see Texture.cpp), so the top
+// vertices of a face sample v=1.
 std::vector<float> buildCube() {
     std::vector<float> v;
     auto quad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d,
                     int face, float shade) {
         const glm::vec3 P[6] = {a, b, c, a, c, d};
         const float U[6] = {0, 1, 1, 0, 1, 0};
-        const float W[6] = {1, 1, 0, 1, 0, 0};
+        const float W[6] = {0, 0, 1, 0, 1, 1};
         for (int i = 0; i < 6; ++i)
             v.insert(v.end(), {P[i].x, P[i].y, P[i].z, U[i], W[i],
                                float(face), shade});
@@ -73,7 +76,7 @@ std::vector<float> buildBillboard() {
         {-0.5f, 0.0f, 0.0f}, {0.5f, 1.0f, 0.0f}, {-0.5f, 1.0f, 0.0f},
     };
     const float U[6] = {0, 1, 1, 0, 1, 0};
-    const float W[6] = {1, 1, 0, 1, 0, 0};
+    const float W[6] = {0, 0, 1, 0, 1, 1};
     for (int i = 0; i < 6; ++i)
         v.insert(v.end(), {P[i].x, P[i].y, P[i].z, U[i], W[i], 0.0f, 1.0f});
     return v;
@@ -150,6 +153,74 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         glBindVertexArray(cube ? cubeVao_ : billboardVao_);
         glDrawArrays(GL_TRIANGLES, 0, cube ? 36 : 6);
     }
+    glEnable(GL_CULL_FACE);
+    glBindVertexArray(0);
+}
+
+void ItemRenderer::drawHeld(const World& world, const ItemStack& stack,
+                            const glm::vec3& eye, float aspect, float sunLevel,
+                            float swing) {
+    bool arm = stack.empty();
+    bool cube = !arm && itemUsesBlockCube(stack.item);
+
+    shader_.use();
+    glClear(GL_DEPTH_BUFFER_BIT); // viewmodel never clips into world geometry
+    glDisable(GL_CULL_FACE);
+
+    // View space directly (no view matrix): x right, y up, -z forward.
+    glm::mat4 proj = glm::perspective(glm::radians(62.0f), aspect, 0.05f, 4.0f);
+    float s = std::sin(swing * 3.14159265f); // 0..1..0 chop arc
+    glm::mat4 m(1.0f);
+    m = glm::translate(m, cube || arm
+                              ? glm::vec3(0.78f - 0.26f * s, -0.68f - 0.2f * s, -1.15f)
+                              : glm::vec3(1.0f - 0.3f * s, -0.48f - 0.22f * s, -1.15f));
+    m = glm::rotate(m, glm::radians(-70.0f) * s, glm::vec3(1, 0, 0));
+    if (cube) {
+        // Mini block held at a Minecraft-like angle.
+        m = glm::rotate(m, glm::radians(40.0f), glm::vec3(0, 1, 0));
+        m = glm::scale(m, glm::vec3(0.4f));
+        m = glm::translate(m, glm::vec3(0, -0.5f, 0));
+    } else if (arm) {
+        // Bare arm: a long cuboid reaching from the bottom-right up-forward.
+        m = glm::rotate(m, glm::radians(-62.0f), glm::vec3(1, 0, 0));
+        m = glm::rotate(m, glm::radians(-18.0f), glm::vec3(0, 0, 1));
+        m = glm::scale(m, glm::vec3(0.34f, 1.5f, 0.34f));
+        m = glm::translate(m, glm::vec3(0, -0.85f, 0));
+    } else {
+        // Flat icon sprite in the classic first-person pose: rolled 90 so
+        // the handle runs off the bottom-right corner and the tool head
+        // leads upper-left (matches the vanilla held-pickaxe reference).
+        // Strong negative yaw: the sprite plane recedes into the scene —
+        // handle near the player's shoulder, tool head angled forward and
+        // away (top-down sketch reference, 2026-06-12), not a flat card.
+        m = glm::rotate(m, glm::radians(-65.0f), glm::vec3(0, 1, 0));
+        m = glm::rotate(m, glm::radians(90.0f), glm::vec3(0, 0, 1));
+        m = glm::scale(m, glm::vec3(0.9f));
+        m = glm::translate(m, glm::vec3(0, -0.5f, 0));
+    }
+    glm::mat4 mvp = proj * m;
+    glUniformMatrix4fv(locMVP_, 1, GL_FALSE, glm::value_ptr(mvp));
+
+    float layers[6];
+    if (cube) {
+        Block b = placeBlockForItem(stack.item);
+        for (int f = 0; f < 6; ++f) layers[f] = float(tileFor(b, f));
+    } else {
+        layers[0] = arm ? float(TileId::PlayerArm)
+                        : float(itemIconTile(stack.item));
+        for (int f = 1; f < 6; ++f) layers[f] = layers[0];
+    }
+    glUniform1fv(locLayers_, 6, layers);
+
+    int wx = (int)std::floor(eye.x), wy = (int)std::floor(eye.y),
+        wz = (int)std::floor(eye.z);
+    float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
+    float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
+    glUniform1f(locLight_, std::max(sunBr * sunLevel, blkBr));
+
+    bool useCubeVao = cube || arm;
+    glBindVertexArray(useCubeVao ? cubeVao_ : billboardVao_);
+    glDrawArrays(GL_TRIANGLES, 0, useCubeVao ? 36 : 6);
     glEnable(GL_CULL_FACE);
     glBindVertexArray(0);
 }

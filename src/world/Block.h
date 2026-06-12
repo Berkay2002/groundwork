@@ -21,8 +21,9 @@ enum class Block : uint8_t {
     CraftingTable = 14,
     Furnace = 15,
     DiamondOre = 16,
+    FurnaceLit = 17, // burning furnace: same block entity, glows + fire front
 };
-constexpr int BLOCK_TYPES = 17;
+constexpr int BLOCK_TYPES = 18;
 
 // Texture tile identity. The numeric value is the texture-array layer and the
 // column in the HUD's horizontal strip atlas — a renderer/content ID with no
@@ -49,7 +50,9 @@ enum class TileId : uint8_t {
     CraftingTableTop,
     FurnaceSide,
     FurnaceFront,
+    FurnaceFrontLit,
     DiamondOre,
+    PlayerArm,
     ItemStick,
     ItemCoal,
     ItemRawIron,
@@ -155,9 +158,18 @@ constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
     /* 12 */ tiledef::same("Cobblestone",    true,  true,  true,  false, 0,  2.0f,        Block::Cobblestone, SoundMat::Stone, TileId::Cobblestone, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1),
     /* 13 */ tiledef::same("Planks",         true,  true,  true,  false, 0,  2.0f,        Block::Planks,      SoundMat::Wood,  TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::PlanksBlock, 1, ItemId::PlanksBlock, 1),
     /* 14 */ tiledef::sideTopBot("Crafting Table", true, true, true, false, 0, 2.5f,      Block::CraftingTable, SoundMat::Wood, TileId::CraftingTableSide, TileId::CraftingTableTop, TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::CraftingTableBlock, 1, ItemId::CraftingTableBlock, 1),
-    /* 15 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 0,  3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceSide, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
+    // The furnace has no facing metadata, so the front (mouth) shows on all
+    // four side faces; top/bottom use the plain side tile.
+    /* 15 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 0,  3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceFront, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
     /* 16 */ tiledef::same("Diamond Ore",    true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::DiamondOre, ToolClass::Pickaxe, ToolTier::Iron, ItemId::Diamond, 1),
+    /* 17 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 13, 3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceFrontLit, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
 };
+
+// Furnace lit/unlit are one logical block (shared block entity, same drops);
+// gameplay code that targets "a furnace" must accept both.
+inline bool isFurnaceBlock(Block b) {
+    return b == Block::Furnace || b == Block::FurnaceLit;
+}
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }
 

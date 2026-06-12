@@ -102,6 +102,7 @@ inline ItemId itemForBlock(Block b) {
         case Block::Planks: return ItemId::PlanksBlock;
         case Block::CraftingTable: return ItemId::CraftingTableBlock;
         case Block::Furnace: return ItemId::FurnaceBlock;
+        case Block::FurnaceLit: return ItemId::FurnaceBlock;
         case Block::DiamondOre: return ItemId::DiamondOreBlock;
     }
     return ItemId::None;

@@ -30,7 +30,7 @@ uniform int uMode; // 0 solid, 1 textured, 2 font (red channel = alpha)
 out vec4 FragColor;
 void main() {
     if (uMode == 0) FragColor = vColor;
-    else if (uMode == 1) FragColor = vec4(texture(uTex, vUV).rgb, 1.0) * vColor;
+    else if (uMode == 1) FragColor = texture(uTex, vUV) * vColor;
     else FragColor = vec4(vColor.rgb, vColor.a * texture(uTex, vUV).r);
 }
 )";

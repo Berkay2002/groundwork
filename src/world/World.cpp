@@ -122,7 +122,8 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
     int lx = mod(wx, CHUNK_SIZE), lz = mod(wz, CHUNK_SIZE);
     Block old = c->get(lx, wy, lz);
     if (old == b) return;
-    if (old == Block::Furnace && b != Block::Furnace)
+    // Lit<->unlit furnace swaps keep the block entity; anything else does not.
+    if (isFurnaceBlock(old) && !isFurnaceBlock(b))
         blockEntities_.removeFurnace({wx, wy, wz});
     c->set(lx, wy, lz, b);
     markDirty(*c);
@@ -540,6 +541,15 @@ std::vector<ItemStack> World::takeFurnaceContents(glm::ivec3 pos) {
 
 void World::tickBlockEntities() {
     blockEntities_.tickFurnaces();
+    // Sync the visual lit state to the burn state. setBlock handles light
+    // (the lit row emits) and remeshing; the furnace-to-furnace swap keeps
+    // the block entity. Unloaded chunks read Air and are skipped.
+    for (const auto& [pos, f] : blockEntities_.furnaces()) {
+        Block cur = getBlock(pos.x, pos.y, pos.z);
+        if (!isFurnaceBlock(cur)) continue;
+        Block want = f.burnTicksRemaining > 0 ? Block::FurnaceLit : Block::Furnace;
+        if (cur != want) setBlock(pos.x, pos.y, pos.z, want);
+    }
 }
 
 WorldStats World::stats() const {

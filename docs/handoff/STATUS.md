@@ -1,4 +1,41 @@
-# Status (last updated: 2026-06-11, after Batch I)
+# Status (last updated: 2026-06-12, after Batch I M5 visual polish)
+
+### Batch I M5 addendum notes (2026-06-12)
+
+User-requested reopen of `docs/goals/2026-06-11-survival-progression`
+(milestone M5): Minecraft-style visual polish + first-person held items.
+
+- **Icon art**: `Texture.cpp` item/tool icons are now 16x16 ASCII sprite
+  maps (classic MC shapes, per-tier palettes) with transparent backgrounds.
+  The HUD atlas and the chunk texture array are **RGBA8** (blocks opaque);
+  the HUD tile mode multiplies by texture alpha and the item shader
+  alpha-discards, so dropped/held tools are cut-out sprites. Tile-space
+  y=0 is the visual bottom — sprites are authored top-down and flipped at
+  lookup (documented in Texture.cpp). The item cube/billboard V mapping
+  was upside down and is fixed.
+- **Blocks**: crafting table uses the papercraft look (waffle top,
+  strap+tools side). The furnace front (vent + firebox) now actually
+  renders — on all four side faces, since there is no facing metadata.
+  **`Block::FurnaceLit` (id 17, appended)** is the burning furnace:
+  emission 13, fire pixels in the firebox; `World::tickBlockEntities`
+  syncs lit/unlit to `burnTicksRemaining`, and the Furnace<->FurnaceLit
+  `setBlock` swap keeps the block entity (`isFurnaceBlock` guards all
+  furnace interaction/break sites). Cobblestone is staggered; ores have
+  blob edge shading; the crack overlay is quantized pixel cracks +
+  per-stage crumble speckles.
+- **Held items**: `ItemRenderer::drawHeld` is a depth-cleared viewmodel
+  pass after all world passes (main.cpp binds the block texture array
+  first — the crack pass leaves its own array bound on unit 0). Block
+  stacks render as a mini cube, tools/materials as the icon sprite in the
+  vanilla 90°-roll pose (user-tuned against reference screenshots), an
+  empty hand as the `TileId::PlayerArm` cuboid. Swing: one pulse per
+  click (`app.swingStart`, wall clock) plus a continuous chop while
+  mining. `--demo-survival` stages the furnace burning (`1 << 20` burn
+  ticks) so the lit furnace is visible in screenshots.
+- **Caveat**: the golden screenshot reference was NOT regenerated — the
+  Windows ctest run skips it. The HUD hotbar icons changed by design, so
+  regenerate on Linux (`tests/golden_screenshot.py --update`) after
+  visual inspection before trusting that test again.
 
 ## Where the project stands
 

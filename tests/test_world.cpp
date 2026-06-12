@@ -35,7 +35,7 @@ static int failures = 0;
 } while (0)
 
 static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
-static_assert(BLOCK_TYPES == 17, "Block ids are saved data; append ids only");
+static_assert(BLOCK_TYPES == 18, "Block ids are saved data; append ids only");
 
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
@@ -1414,6 +1414,37 @@ static void testWorldOwnsFurnaceState() {
     std::filesystem::remove_all("test_world_be");
 }
 
+static void testFurnaceLitBlockSync() {
+    CHECK(itemForBlock(Block::FurnaceLit) == ItemId::FurnaceBlock);
+    CHECK(blockDef(Block::FurnaceLit).emission == 13);
+    CHECK(isFurnaceBlock(Block::Furnace) && isFurnaceBlock(Block::FurnaceLit));
+    CHECK(!isFurnaceBlock(Block::Stone));
+    CHECK(mining::miningDrop(Block::FurnaceLit,
+                             mining::miningToolForStack(makeToolStack(ItemId::WoodPickaxe))).item
+          == ItemId::FurnaceBlock);
+    CHECK(tileFor(Block::FurnaceLit, 4) < ATLAS_TILES);
+
+    std::filesystem::remove_all("test_world_lit");
+    {
+        World w(1337, "test_world_lit");
+        w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+        glm::ivec3 pos(0, 70, 0);
+        w.setBlock(pos.x, pos.y, pos.z, Block::Furnace);
+        FurnaceState& f = w.getOrCreateFurnace(pos);
+        f.input = makeItemStack(ItemId::RawIron, 1);
+        f.fuel = makeItemStack(ItemId::Coal, 1);
+        w.tickBlockEntities();
+        CHECK(w.getBlock(pos.x, pos.y, pos.z) == Block::FurnaceLit);
+        CHECK(w.furnaceAt(pos) != nullptr); // lit swap keeps the block entity
+        f.burnTicksRemaining = 0;
+        f.input = {};
+        w.tickBlockEntities();
+        CHECK(w.getBlock(pos.x, pos.y, pos.z) == Block::Furnace);
+        CHECK(w.furnaceAt(pos) != nullptr);
+    }
+    std::filesystem::remove_all("test_world_lit");
+}
+
 static void testFurnaceBreakTakesContents() {
     std::filesystem::remove_all("test_world_furnace_break");
     World w(1337, "test_world_furnace_break");
@@ -2311,6 +2342,7 @@ int main() {
     testFurnaceBlockedAndMissingInputBurns();
     testFurnaceSaveLoadAndRemoval();
     testWorldOwnsFurnaceState();
+    testFurnaceLitBlockSync();
     testFurnaceBreakTakesContents();
     testWrongToolFurnaceBreakStillTakesContents();
     testItemEntityFallsAndLands();

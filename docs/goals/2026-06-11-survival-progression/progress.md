@@ -2,13 +2,16 @@
 
 ## STATUS
 
-- Current: Reopened for M5 (visual polish + held item, user request 2026-06-12)
-- Last verified: Final validation passed (`cmake --build build -j` exit 0,
-  warning-free/no work; `.\build\world_tests.exe` -> `all tests passed`;
-  `.\build\groundwork.exe --demo-survival --frames 300` screenshot inspected,
-  2026-06-11)
+- Current: M5 complete (visual polish + held item, user request 2026-06-12)
+- Last verified: 2026-06-12 — warning-free build, `world_tests` all pass,
+  ctest 2/2 (golden skipped on Windows), screenshots inspected:
+  `--demo-survival` (new icons, lit furnace, papercraft crafting table,
+  held pickaxe in MC pose), `--demo-inv`, `--demo-items` (upright cut-out
+  drops), `--demo-break` (pixel crack stages), plain fresh run (arm).
+- Minor issues parked: 8 (added: golden reference must be regenerated on
+  Linux — the HUD hotbar icons changed by design, the Windows ctest run
+  skips the golden test so it could not be updated here)
 - Blockers: none
-- Minor issues parked: 7
 
 ## Log
 
@@ -227,3 +230,30 @@
   resources/tools/counts, staged Crafting Table and Furnace, targeted Diamond
   Ore, and visible mining cracks. The temp render directory was deleted after
   inspection.
+- [2026-06-12] M5 reopened at user request (same goal/batch): redesign the
+  Batch I procedural art and add first-person held-item rendering. Spec/plan
+  addendum written; the user supplied Minecraft reference images for tools,
+  the arm, the held pose, the crafting table (papercraft), and the lit/unlit
+  furnace, and explicitly instructed skipping the spec/plan reviewer.
+- [2026-06-12] M5 implementation DONE in one pass:
+  - Sprite-map icons (classic MC shapes, transparent backgrounds) for
+    stick/coal/raw iron/ingot/diamond and pickaxe/axe/shovel x 4 tier
+    palettes; HUD atlas + chunk texture array now RGBA; HUD tile mode and
+    the item shader respect alpha (dropped tools are cut-out sprites);
+    fixed the upside-down V mapping in the item cube/billboard geometry.
+  - Crafting table papercraft faces (waffle-grid top, strap-and-tools
+    side); furnace redesigned (vent slot + firebox front shown on all four
+    side faces); appended Block::FurnaceLit (id 17, emission 13, fire in
+    the firebox) and World::tickBlockEntities now syncs lit/unlit to the
+    burn state, keeping the block entity across the swap; staggered
+    cobblestone; ore blob edge shading; crack overlay redesigned as
+    quantized pixel cracks + crumble speckles.
+  - First-person viewmodel pass (ItemRenderer::drawHeld, depth-cleared,
+    world-lit): held block as mini cube, tools/materials as cut-out sprite
+    in the vanilla 90-degree pose (user-tuned twice against reference
+    screenshots), bare arm cuboid when the hand is empty, click swing +
+    continuous mining chop animation.
+  Validation: warning-free `cmake --build build -j`; `world_tests.exe`
+  `all tests passed` (new testFurnaceLitBlockSync; BLOCK_TYPES tripwire
+  bumped 17 -> 18 for the appended id); ctest 2/2 (golden skipped on
+  Windows, regeneration parked for Linux); demo screenshots inspected.

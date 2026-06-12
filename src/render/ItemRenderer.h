@@ -1,5 +1,6 @@
 #pragma once
 #include "render/Shader.h"
+#include "sim/Item.h"
 #include <glm/glm.hpp>
 
 class World;
@@ -19,6 +20,16 @@ public:
     // sunLevel: day/night scale applied to the sun light channel.
     void draw(const World& world, const Entities& entities,
               const glm::mat4& viewProj, float alpha, float time, float sunLevel);
+
+    // First-person viewmodel, drawn after all world passes and before the
+    // HUD (it clears the depth buffer so the item never clips into walls).
+    // Renders the held stack bottom-right: block items as a mini cube,
+    // other items as their flat icon sprite, an empty hand as the arm
+    // cuboid. swing is a 0..1 animation phase (0 = at rest), lit by the
+    // world light at the player's eye cell.
+    void drawHeld(const World& world, const ItemStack& stack,
+                  const glm::vec3& eye, float aspect, float sunLevel,
+                  float swing);
 
 private:
     Shader shader_;

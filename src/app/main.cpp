@@ -134,6 +134,7 @@ struct App {
     bool firstMouse = true;
     bool breakPressed = false, placePressed = false;
     bool breakHeld = false;
+    double swingStart = -10.0; // wall-clock start of the held-item click swing
     mining::BreakProgressState breakProgress;
 };
 
@@ -196,7 +197,7 @@ void survivalMiningTick(World& world) {
     if (!ev.removed) return;
 
     std::vector<ItemStack> contents;
-    if (targetBlock == Block::Furnace) contents = world.takeFurnaceContents(hit.block);
+    if (isFurnaceBlock(targetBlock)) contents = world.takeFurnaceContents(hit.block);
     world.setBlock(hit.block.x, hit.block.y, hit.block.z, Block::Air);
     app.audio.playBreak(soundMaterial(targetBlock));
 
@@ -466,6 +467,7 @@ void mouseButtonCallback(GLFWwindow* w, int button, int action, int mods) {
             app.breakHeld = true;
         }
         if (button == GLFW_MOUSE_BUTTON_RIGHT) app.placePressed = true;
+        app.swingStart = glfwGetTime(); // one viewmodel swing per click
     }
 }
 
@@ -884,6 +886,9 @@ int main(int argc, char** argv) {
         if (demoSurvival) {
             world.setBlock(target.x - 2, target.y, target.z, Block::CraftingTable);
             world.setBlock(target.x + 2, target.y, target.z, Block::Furnace);
+            // Stage the furnace burning so the lit front/glow is visible.
+            world.getOrCreateFurnace({target.x + 2, target.y, target.z})
+                .burnTicksRemaining = 1 << 20;
             app.inv.slots[0] = makeItemStack(ItemId::LogBlock, 16);
             app.inv.slots[1] = makeItemStack(ItemId::PlanksBlock, 32);
             app.inv.slots[2] = makeToolStack(ItemId::StonePickaxe);
@@ -1021,7 +1026,7 @@ int main(int argc, char** argv) {
             app.breakProgress.requiredTicks = 100;
         }
         if (app.invOpen && app.invScreen == InventoryScreen::Furnace &&
-            world.getBlock(app.openFurnace.x, app.openFurnace.y, app.openFurnace.z) != Block::Furnace) {
+            !isFurnaceBlock(world.getBlock(app.openFurnace.x, app.openFurnace.y, app.openFurnace.z))) {
             closeInventory(app.window);
         }
 
@@ -1037,7 +1042,7 @@ int main(int argc, char** argv) {
                 if (target == Block::CraftingTable) {
                     openInventoryScreen(app.window, InventoryScreen::CraftingTable);
                     app.placePressed = false;
-                } else if (target == Block::Furnace) {
+                } else if (isFurnaceBlock(target)) {
                     openInventoryScreen(app.window, InventoryScreen::Furnace, hit.block);
                     if (!world.furnaceAt(hit.block)) world.getOrCreateFurnace(hit.block);
                     app.placePressed = false;
@@ -1120,6 +1125,25 @@ int main(int argc, char** argv) {
             lineShader.setVec3("uColor", glm::vec3(0.05f));
             glBindVertexArray(cubeVao);
             glDrawArrays(GL_LINES, 0, 24);
+        }
+
+        // First-person held item / empty-hand arm: the last world-space
+        // pass (clears depth so it draws over everything).
+        if (!paused) {
+            double tnow = glfwGetTime();
+            float swing = 0.0f;
+            if (app.survival && app.breakHeld && !app.invOpen &&
+                app.breakProgress.active) {
+                swing = float(std::fmod(tnow, 0.4) / 0.4); // continuous mining chop
+            } else if (tnow - app.swingStart < 0.25) {
+                swing = float((tnow - app.swingStart) / 0.25); // click swing
+            }
+            ItemStack heldStack =
+                app.survival ? app.inv.slots[app.hotbarSlot]
+                             : makeItemStack(itemForBlock(heldBlock()), 1);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures); // crack pass rebinds unit 0
+            itemRenderer.drawHeld(world, heldStack, eye,
+                                  float(width) / float(height), sunLevel, swing);
         }
 
         // --- HUD overlay ---
