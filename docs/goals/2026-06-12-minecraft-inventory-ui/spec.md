@@ -33,9 +33,13 @@ New layout geometry in `src/ui/MenuUi.h` (header-only, pure, GL-free, as
 today). The layout describes one centered panel per screen:
 
 - **Inventory screen** (2×2 crafting):
-  - Panel interior, top section (left→right): player-preview box (dark inset
-    rect, ~2 slots wide × ~3.5 slots tall), 2×2 crafting grid, arrow,
-    output slot.
+  - Panel interior, top section (left→right): a column of 4 armor-slot
+    placeholders (slot-sized inset bevels, purely decorative — hit-testing
+    returns `none()` for them; user addendum 2026-06-12), the
+    player-preview box (dark inset rect, ~2 slots wide × ~3.5 slots tall),
+    then the 2×2 crafting grid + arrow + output slot positioned toward the
+    right half of the panel so the top section reads balanced against the
+    player box (user addendum 2026-06-12, per the Minecraft reference).
   - Below: 3×9 main grid = inventory rows 1–3.
   - Gap of ~0.45 slot height, then the 9-slot hotbar row = inventory row 0.
 - **Crafting-table screen** (3×3): same panel; the top section is the 3×3

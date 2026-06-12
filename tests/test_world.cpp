@@ -2298,6 +2298,29 @@ static void testMenuUiPanelLayout() {
         CHECK(rectInside(box, panel));
         for (const ui::Rect& r : rects) CHECK(!rectsOverlap(box, r));
 
+        // Armor placeholder column: inside the panel, left of the player
+        // box, disjoint from every interactive slot and the box, and
+        // invisible to hit-testing (decorative only).
+        for (int i = 0; i < ui::ARMOR_SLOTS; ++i) {
+            ui::Rect a = ui::armorSlotRect(L, i);
+            CHECK(rectInside(a, panel));
+            CHECK(a.x + a.w <= box.x);
+            CHECK(!rectsOverlap(a, box));
+            for (const ui::Rect& r : rects) CHECK(!rectsOverlap(a, r));
+            CHECK(ui::uiSlotAt(L, ui::InventorySurface::Crafting, 2,
+                               a.x + a.w * 0.5f, a.y + a.h * 0.5f) ==
+                  ui::UiSlot::none());
+        }
+
+        // Midline balance (user addendum): armor column + player box stay in
+        // the left half of the panel; the 2x2 grid + arrow + output cluster
+        // stays in the right half.
+        float mid = panel.x + panel.w * 0.5f;
+        CHECK(box.x + box.w <= mid);
+        CHECK(ui::craftSlotRect(L, 2, 0, 0).x >= mid);
+        ui::Rect out2 = ui::craftOutputRect(L, 2);
+        CHECK(out2.x + out2.w <= panel.x + panel.w);
+
         // Hotbar (row 0) separated from main grid (row 1) by a positive gap.
         ui::Rect row1 = ui::inventorySlotRect(L, Inventory::COLS);     // first grid row
         ui::Rect lastGrid = ui::inventorySlotRect(L, 3 * Inventory::COLS - 1);

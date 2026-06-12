@@ -192,6 +192,9 @@ bool World::loadChunkFromDisk(Chunk& c) const {
 }
 
 void World::saveChunk(const Chunk& c) {
+    // Gate every chunk write, not just saveAllModified(): chunk eviction in
+    // update() also lands here, and demo runs must never touch real saves.
+    if (demoMode_) return;
     bool ok = worldsave::saveChunkFile(worldsave::chunkPath(saveDir_, c.cx(), c.cz()),
                                        c.rawData(), Chunk::rawSize());
     if (!ok)

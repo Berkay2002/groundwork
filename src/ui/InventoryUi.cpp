@@ -191,8 +191,11 @@ void drawInventoryScreen(Hud& hud, const InventoryView& view, int screenW,
         }
     }
 
-    // Dark inset player-preview box (inventory screen only).
+    // Armor placeholder column + dark inset player-preview box (inventory
+    // screen only). The armor slots are decorative: hit-testing skips them.
     if (view.screen == ScreenKind::Inventory) {
+        for (int i = 0; i < ui::ARMOR_SLOTS; ++i)
+            drawBeveledSlot(hud, ui::armorSlotRect(L, i));
         ui::Rect box = ui::playerBoxRect(L);
         drawBeveledSlot(hud, box);  // bevel frame
         hud.drawRect(box.x + 2.0f, box.y + 2.0f, box.w - 4.0f, box.h - 4.0f,

@@ -219,9 +219,10 @@ inline std::string settingValueText(const Settings& s, SettingId setting) {
 inline InventoryLayout inventoryLayout(int w, int h) {
     InventoryLayout L;
     const float step = L.slot + L.pad;            // 60 px per slot cell
-    // Top section is sized to hold the tallest variant: the player preview box
-    // (~3.5 slots tall). 2x2 craft / furnace fit inside the same band.
-    L.topH = 3.5f * L.slot;
+    // Top section is sized to hold the tallest variant: the 4-slot armor
+    // placeholder column (and the player box beside it, which spans the same
+    // height). 2x2 craft / furnace fit inside the same band.
+    L.topH = 4 * L.slot + 3 * L.pad;
     L.hotbarGap = 0.45f * L.slot;                 // ~25 px gap before the hotbar
 
     float gridW = Inventory::COLS * L.slot + (Inventory::COLS - 1) * L.pad;
@@ -251,10 +252,21 @@ inline Rect panelRect(const InventoryLayout& L, InventorySurface, int) {
     return {L.panelX, L.panelY, L.panelW, L.panelH};
 }
 
-// Dark inset player-preview box. Only meaningful on the inventory screen
-// (craftSurface 2); the crafting-table and furnace screens have no player box.
+// Decorative armor-slot placeholder column at the panel's left edge: four
+// slot-sized inset bevels, top-aligned with the player box. Purely visual —
+// uiSlotAt never returns them (user addendum 2026-06-12). Inventory screen
+// only.
+inline constexpr int ARMOR_SLOTS = 4;
+inline Rect armorSlotRect(const InventoryLayout& L, int index) {
+    return {L.x0, topSectionY(L) + index * (L.slot + L.pad), L.slot, L.slot};
+}
+
+// Dark inset player-preview box, right of the armor column, spanning the full
+// top-section height. Only meaningful on the inventory screen (craftSurface
+// 2); the crafting-table and furnace screens have no player box.
 inline Rect playerBoxRect(const InventoryLayout& L) {
-    return {L.x0, topSectionY(L), 2.0f * L.slot + L.pad, 3.5f * L.slot};
+    return {L.x0 + L.slot + L.pad, topSectionY(L), 2.0f * L.slot + L.pad,
+            L.topH};
 }
 
 inline float inventorySlotY(const InventoryLayout& L, int row) {
@@ -295,9 +307,13 @@ inline float craftGridLeft(const InventoryLayout& L, int surface) {
         float clusterW = gridW + arrowGap + L.slot;
         return L.panelX + (L.panelW - clusterW) * 0.5f;
     }
-    // Inventory screen: place to the right of the player box.
-    Rect box = playerBoxRect(L);
-    return box.x + box.w + L.slot * 0.6f;
+    // Inventory screen: the panel midline is a divider — armor column +
+    // player box fill the left half, and the grid+arrow+output cluster is
+    // centered within the right half (user addendum 2026-06-12).
+    float clusterW = gridW + L.slot + L.slot;  // grid + arrow gap + output
+    float mid = L.panelX + L.panelW * 0.5f;
+    float innerRight = L.panelX + L.panelW - L.margin;
+    return mid + (innerRight - mid - clusterW) * 0.5f;
 }
 
 // Top edge of the crafting grid, vertically centered within the top section.
@@ -321,10 +337,13 @@ inline Rect craftOutputRect(const InventoryLayout& L, int surface) {
 }
 
 inline Rect furnaceSlotRect(const InventoryLayout& L, FurnaceSlot slot) {
-    // Input above fuel (with flame room between), output to the right.
+    // Input above fuel (with flame room between), output to the right. The
+    // whole cluster (input column + arrow gap + output, 3 slots wide) is
+    // horizontally centered — the furnace screen has no player box to
+    // anchor against.
     float flameGap = L.slot * 0.7f;
     float stackH = 2 * L.slot + flameGap;
-    float colX = craftGridLeft(L, 2);
+    float colX = L.panelX + (L.panelW - 3 * L.slot) * 0.5f;
     float topY = topSectionY(L) + (L.topH - stackH) * 0.5f;
     if (slot == FurnaceSlot::Input) return {colX, topY, L.slot, L.slot};
     if (slot == FurnaceSlot::Fuel)
