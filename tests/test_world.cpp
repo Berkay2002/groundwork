@@ -2245,6 +2245,137 @@ static void testMenuUiSurfaceHitTesting() {
           ui::UiSlot::furnace(ui::FurnaceSlot::Output));
 }
 
+static bool rectsOverlap(const ui::Rect& a, const ui::Rect& b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w &&
+           a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+static bool rectInside(const ui::Rect& inner, const ui::Rect& outer) {
+    return inner.x >= outer.x && inner.y >= outer.y &&
+           inner.x + inner.w <= outer.x + outer.w &&
+           inner.y + inner.h <= outer.y + outer.h;
+}
+
+static void checkRoundTrip(const ui::InventoryLayout& L, ui::InventorySurface surf,
+                           int craftSurface, const ui::Rect& r, ui::UiSlot expect) {
+    float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+    CHECK(ui::uiSlotAt(L, surf, craftSurface, cx, cy) == expect);
+}
+
+static void testMenuUiPanelLayout() {
+    const int w = 1280, h = 720;
+    ui::InventoryLayout L = ui::inventoryLayout(w, h);
+    ui::Rect screen{0, 0, float(w), float(h)};
+
+    // --- Inventory screen (2x2 crafting, surface 2) ---
+    {
+        ui::Rect panel = ui::panelRect(L, ui::InventorySurface::Crafting, 2);
+        CHECK(rectInside(panel, screen));
+
+        std::vector<ui::Rect> rects;
+        std::vector<ui::UiSlot> slots;
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            rects.push_back(ui::inventorySlotRect(L, i));
+            slots.push_back(ui::UiSlot::inventory(i));
+        }
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) {
+                rects.push_back(ui::craftSlotRect(L, 2, x, y));
+                slots.push_back(ui::UiSlot::craft(y * 2 + x));
+            }
+        rects.push_back(ui::craftOutputRect(L, 2));
+        slots.push_back(ui::UiSlot::craftOutput());
+
+        for (size_t i = 0; i < rects.size(); ++i) {
+            CHECK(rectInside(rects[i], panel));
+            checkRoundTrip(L, ui::InventorySurface::Crafting, 2, rects[i], slots[i]);
+            for (size_t j = i + 1; j < rects.size(); ++j)
+                CHECK(!rectsOverlap(rects[i], rects[j]));
+        }
+
+        // Player box inside panel, no overlap with slots.
+        ui::Rect box = ui::playerBoxRect(L);
+        CHECK(rectInside(box, panel));
+        for (const ui::Rect& r : rects) CHECK(!rectsOverlap(box, r));
+
+        // Hotbar (row 0) separated from main grid (row 1) by a positive gap.
+        ui::Rect row1 = ui::inventorySlotRect(L, Inventory::COLS);     // first grid row
+        ui::Rect lastGrid = ui::inventorySlotRect(L, 3 * Inventory::COLS - 1);
+        ui::Rect hotbar = ui::inventorySlotRect(L, 0);
+        CHECK(hotbar.y > lastGrid.y + lastGrid.h);
+        CHECK(row1.y < hotbar.y);
+
+        // Recipe panel and its slots.
+        ui::Rect rpanel = ui::recipePanelRect(L);
+        CHECK(rectInside(rpanel, screen));
+        int rc = int(crafting::recipeCount());
+        for (int i = 0; i < rc; ++i) {
+            ui::Rect rr = ui::recipeReferenceSlotRect(L, i);
+            CHECK(rectInside(rr, rpanel));
+            CHECK(ui::recipeReferenceSlotAt(L, rr.x + rr.w * 0.5f,
+                                            rr.y + rr.h * 0.5f) == i);
+            checkRoundTrip(L, ui::InventorySurface::Crafting, 2, rr,
+                           ui::UiSlot::recipeReference(i));
+        }
+    }
+
+    // --- Crafting-table screen (3x3, surface 3) ---
+    {
+        ui::Rect panel = ui::panelRect(L, ui::InventorySurface::Crafting, 3);
+        std::vector<ui::Rect> rects;
+        std::vector<ui::UiSlot> slots;
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            rects.push_back(ui::inventorySlotRect(L, i));
+            slots.push_back(ui::UiSlot::inventory(i));
+        }
+        for (int y = 0; y < 3; ++y)
+            for (int x = 0; x < 3; ++x) {
+                rects.push_back(ui::craftSlotRect(L, 3, x, y));
+                slots.push_back(ui::UiSlot::craft(y * 3 + x));
+            }
+        rects.push_back(ui::craftOutputRect(L, 3));
+        slots.push_back(ui::UiSlot::craftOutput());
+
+        for (size_t i = 0; i < rects.size(); ++i) {
+            CHECK(rectInside(rects[i], panel));
+            checkRoundTrip(L, ui::InventorySurface::Crafting, 3, rects[i], slots[i]);
+            for (size_t j = i + 1; j < rects.size(); ++j)
+                CHECK(!rectsOverlap(rects[i], rects[j]));
+        }
+    }
+
+    // --- Furnace screen ---
+    {
+        ui::Rect panel = ui::panelRect(L, ui::InventorySurface::Furnace, 2);
+        std::vector<ui::Rect> rects;
+        std::vector<ui::UiSlot> slots;
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            rects.push_back(ui::inventorySlotRect(L, i));
+            slots.push_back(ui::UiSlot::inventory(i));
+        }
+        for (ui::FurnaceSlot s : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
+                                  ui::FurnaceSlot::Output}) {
+            rects.push_back(ui::furnaceSlotRect(L, s));
+            slots.push_back(ui::UiSlot::furnace(s));
+        }
+        for (size_t i = 0; i < rects.size(); ++i) {
+            CHECK(rectInside(rects[i], panel));
+            checkRoundTrip(L, ui::InventorySurface::Furnace, 2, rects[i], slots[i]);
+            for (size_t j = i + 1; j < rects.size(); ++j)
+                CHECK(!rectsOverlap(rects[i], rects[j]));
+        }
+        // Input above fuel with flame room between them.
+        ui::Rect in = ui::furnaceSlotRect(L, ui::FurnaceSlot::Input);
+        ui::Rect fuel = ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel);
+        CHECK(fuel.y > in.y + in.h);
+        // Furnace surface returns none() where recipe slots would be.
+        ui::Rect rr = ui::recipeReferenceSlotRect(L, 0);
+        CHECK(ui::uiSlotAt(L, ui::InventorySurface::Furnace, 2,
+                           rr.x + rr.w * 0.5f, rr.y + rr.h * 0.5f) ==
+              ui::UiSlot::none());
+    }
+}
+
 static void testMenuUiShiftClickDestinations() {
     Inventory inv;
     crafting::CraftingGrid craftGrid = grid(2);
@@ -2467,6 +2598,7 @@ int main() {
     testMenuUiStackClickHelpers();
     testMenuUiCraftingSlotsAndOutput();
     testMenuUiSurfaceHitTesting();
+    testMenuUiPanelLayout();
     testMenuUiShiftClickDestinations();
     testMenuUiTransientSaveSnapshot();
     testPlayerSaveSkipsLossyTransientSnapshot();

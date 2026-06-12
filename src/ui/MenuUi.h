@@ -51,8 +51,14 @@ struct SettingEffects {
 struct InventoryLayout {
     float slot = 56.0f;
     float pad = 4.0f;
-    float x0 = 0;
-    float y0 = 0;
+    float x0 = 0;  // left edge of the 3x9 main grid (inventory row 1)
+    float y0 = 0;  // top edge of the 3x9 main grid (inventory row 1)
+    // Panel composition metrics (derived in inventoryLayout); all in pixels.
+    float margin = 12.0f;     // gap between panel border and its contents
+    float titleH = 26.0f;     // reserved title band at the top of the panel
+    float topH = 0.0f;        // height of the top section (player box / craft / furnace)
+    float hotbarGap = 0.0f;   // vertical gap between main grid and the hotbar row
+    float panelX = 0, panelY = 0, panelW = 0, panelH = 0;
 };
 
 struct UiSlot {
@@ -204,17 +210,56 @@ inline std::string settingValueText(const Settings& s, SettingId setting) {
     return buf;
 }
 
+// The classic Minecraft inventory screen is one centered light-gray panel.
+// We lay it out top->bottom inside the panel: title band, a "top section"
+// (player box + 2x2 craft + arrow + output, or the furnace/3x3 variants drawn
+// by the renderer), the 3x9 main grid (inventory rows 1-3), a gap, then the
+// 9-slot hotbar row (inventory row 0). `x0,y0` anchor the main grid so the
+// existing inventorySlotRect math is preserved.
 inline InventoryLayout inventoryLayout(int w, int h) {
     InventoryLayout L;
-    float gw = Inventory::COLS * L.slot + (Inventory::COLS - 1) * L.pad;
-    float gh = Inventory::ROWS * L.slot + (Inventory::ROWS - 1) * L.pad + 14.0f;
-    L.x0 = (w - gw) * 0.5f;
-    L.y0 = (h - gh) * 0.5f;
+    const float step = L.slot + L.pad;            // 60 px per slot cell
+    // Top section is sized to hold the tallest variant: the player preview box
+    // (~3.5 slots tall). 2x2 craft / furnace fit inside the same band.
+    L.topH = 3.5f * L.slot;
+    L.hotbarGap = 0.45f * L.slot;                 // ~25 px gap before the hotbar
+
+    float gridW = Inventory::COLS * L.slot + (Inventory::COLS - 1) * L.pad;
+    // Main grid is 3 rows (inventory rows 1-3); hotbar is one more row below.
+    float gridH = 3 * step - L.pad;               // rows 1..3 span
+    float hotbarH = L.slot;
+
+    L.panelW = gridW + 2 * L.margin;
+    L.panelH = L.titleH + L.topH + L.margin + gridH + L.hotbarGap + hotbarH +
+               2 * L.margin;
+    L.panelX = (w - L.panelW) * 0.5f;
+    L.panelY = (h - L.panelH) * 0.5f;
+
+    L.x0 = L.panelX + L.margin;
+    L.y0 = L.panelY + L.margin + L.titleH + L.topH + L.margin;
     return L;
 }
 
+// Top edge of the player-preview / craft / furnace "top section".
+inline float topSectionY(const InventoryLayout& L) {
+    return L.panelY + L.margin + L.titleH;
+}
+
+// Outer light-gray panel. craftSurface (2=inventory screen, 3=crafting table)
+// does not change the panel size; both surfaces share one geometry.
+inline Rect panelRect(const InventoryLayout& L, InventorySurface, int) {
+    return {L.panelX, L.panelY, L.panelW, L.panelH};
+}
+
+// Dark inset player-preview box. Only meaningful on the inventory screen
+// (craftSurface 2); the crafting-table and furnace screens have no player box.
+inline Rect playerBoxRect(const InventoryLayout& L) {
+    return {L.x0, topSectionY(L), 2.0f * L.slot + L.pad, 3.5f * L.slot};
+}
+
 inline float inventorySlotY(const InventoryLayout& L, int row) {
-    if (row == 0) return L.y0 + 3 * (L.slot + L.pad) + 14.0f;
+    if (row == 0)  // hotbar row, below the 3-row main grid plus the gap
+        return L.y0 + 3 * (L.slot + L.pad) - L.pad + L.hotbarGap;
     return L.y0 + (row - 1) * (L.slot + L.pad);
 }
 
@@ -238,30 +283,101 @@ inline int inventorySlotAt(const InventoryLayout& L, float mx, float my) {
     return -1;
 }
 
+// Left edge of the crafting grid within the top section. On the inventory
+// screen (surface 2) it sits to the right of the player box; on the crafting
+// table (surface 3) the whole grid+arrow+output cluster is horizontally
+// centered in the panel.
+inline float craftGridLeft(const InventoryLayout& L, int surface) {
+    float gridW = surface * L.slot + (surface - 1) * L.pad;
+    if (surface >= 3) {
+        // 3x3 grid + arrow gap + output, centered.
+        float arrowGap = L.slot;  // space reserved for the arrow
+        float clusterW = gridW + arrowGap + L.slot;
+        return L.panelX + (L.panelW - clusterW) * 0.5f;
+    }
+    // Inventory screen: place to the right of the player box.
+    Rect box = playerBoxRect(L);
+    return box.x + box.w + L.slot * 0.6f;
+}
+
+// Top edge of the crafting grid, vertically centered within the top section.
+inline float craftGridTop(const InventoryLayout& L, int surface) {
+    float gridH = surface * L.slot + (surface - 1) * L.pad;
+    return topSectionY(L) + (L.topH - gridH) * 0.5f;
+}
+
 inline Rect craftSlotRect(const InventoryLayout& L, int surface, int x, int y) {
-    float panelW = surface * L.slot + (surface - 1) * L.pad;
-    float x0 = L.x0 - panelW - 86.0f;
-    return {x0 + x * (L.slot + L.pad), L.y0 + y * (L.slot + L.pad), L.slot, L.slot};
+    float gx = craftGridLeft(L, surface);
+    float gy = craftGridTop(L, surface);
+    return {gx + x * (L.slot + L.pad), gy + y * (L.slot + L.pad), L.slot, L.slot};
 }
 
 inline Rect craftOutputRect(const InventoryLayout& L, int surface) {
-    Rect last = craftSlotRect(L, surface, surface - 1, surface / 2);
-    return {last.x + L.slot + 20.0f, last.y, L.slot, L.slot};
+    float gridW = surface * L.slot + (surface - 1) * L.pad;
+    float gx = craftGridLeft(L, surface);
+    float outX = gx + gridW + L.slot;  // grid + arrow gap
+    float outY = craftGridTop(L, surface) + (gridW - L.slot) * 0.5f;
+    return {outX, outY, L.slot, L.slot};
 }
 
 inline Rect furnaceSlotRect(const InventoryLayout& L, FurnaceSlot slot) {
-    float x0 = L.x0 - 210.0f;
-    float y0 = L.y0 + 20.0f;
-    if (slot == FurnaceSlot::Input) return {x0, y0, L.slot, L.slot};
-    if (slot == FurnaceSlot::Fuel) return {x0, y0 + L.slot + 18.0f, L.slot, L.slot};
-    return {x0 + L.slot + 56.0f, y0 + (L.slot + 18.0f) * 0.5f, L.slot, L.slot};
+    // Input above fuel (with flame room between), output to the right.
+    float flameGap = L.slot * 0.7f;
+    float stackH = 2 * L.slot + flameGap;
+    float colX = craftGridLeft(L, 2);
+    float topY = topSectionY(L) + (L.topH - stackH) * 0.5f;
+    if (slot == FurnaceSlot::Input) return {colX, topY, L.slot, L.slot};
+    if (slot == FurnaceSlot::Fuel)
+        return {colX, topY + L.slot + flameGap, L.slot, L.slot};
+    float outX = colX + L.slot + L.slot;  // input column + arrow gap
+    float outY = topY + (stackH - L.slot) * 0.5f;
+    return {outX, outY, L.slot, L.slot};
+}
+
+// Arrow pointing at the output slot. Sits in the gap between the crafting
+// grid (or furnace input column) and the output slot.
+inline Rect arrowRect(const InventoryLayout& L, InventorySurface surface,
+                      int craftSurface) {
+    float aw = L.slot * 0.8f, ah = L.slot * 0.4f;
+    if (surface == InventorySurface::Furnace) {
+        Rect out = furnaceSlotRect(L, FurnaceSlot::Output);
+        Rect in = furnaceSlotRect(L, FurnaceSlot::Input);
+        float cx = (in.x + in.w + out.x) * 0.5f;
+        float cy = out.y + L.slot * 0.5f;
+        return {cx - aw * 0.5f, cy - ah * 0.5f, aw, ah};
+    }
+    float gridW = craftSurface * L.slot + (craftSurface - 1) * L.pad;
+    float gx = craftGridLeft(L, craftSurface);
+    Rect out = craftOutputRect(L, craftSurface);
+    float cx = (gx + gridW + out.x) * 0.5f;
+    float cy = out.y + L.slot * 0.5f;
+    return {cx - aw * 0.5f, cy - ah * 0.5f, aw, ah};
+}
+
+// Smaller recipe-reference panel attached to the right edge of the main panel
+// (crafting surfaces only). Recipe slots are 30 px, 3 per row.
+inline constexpr float RECIPE_SLOT = 30.0f;
+inline constexpr float RECIPE_STEP = 34.0f;
+inline constexpr int RECIPE_COLS = 3;
+
+inline Rect recipePanelRect(const InventoryLayout& L) {
+    int count = int(crafting::recipeCount());
+    int rows = (count + RECIPE_COLS - 1) / RECIPE_COLS;
+    float innerW = RECIPE_COLS * RECIPE_STEP - (RECIPE_STEP - RECIPE_SLOT);
+    float innerH = rows * RECIPE_STEP - (RECIPE_STEP - RECIPE_SLOT);
+    float pad = 8.0f;
+    return {L.panelX + L.panelW + 6.0f, L.panelY, innerW + 2 * pad,
+            innerH + 2 * pad};
 }
 
 inline Rect recipeReferenceSlotRect(const InventoryLayout& L, int index) {
-    float rx = L.x0 + Inventory::COLS * (L.slot + L.pad) + 30.0f;
-    float ry = L.y0;
-    return {rx + float(index % 3) * 34.0f, ry + float(index / 3) * 34.0f,
-            30.0f, 30.0f};
+    Rect panel = recipePanelRect(L);
+    float pad = 8.0f;
+    float rx = panel.x + pad;
+    float ry = panel.y + pad;
+    return {rx + float(index % RECIPE_COLS) * RECIPE_STEP,
+            ry + float(index / RECIPE_COLS) * RECIPE_STEP,
+            RECIPE_SLOT, RECIPE_SLOT};
 }
 
 inline int recipeReferenceSlotAt(const InventoryLayout& L, float mx, float my,
