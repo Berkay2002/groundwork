@@ -19,10 +19,14 @@
 #include "platform/Settings.h"
 #include "audio/Sounds.h"
 #include "ui/MenuUi.h"
+#include "render/ViewParams.h"
 #include "render/Texture.h"
 #include "render/BreakOverlay.h"
 #include "platform/SaveIO.h"
 #include "sim/TickClock.h"
+#include "assets/AssetManager.h"
+#include "assets/AssetManifest.h"
+#include "assets/ModelAsset.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -2137,6 +2141,102 @@ static void testEntityBucketsAndDrops() {
     std::filesystem::remove_all("test_ent_save4");
 }
 
+static void buildEntityTestPlatform(World& w, int y = 70) {
+    for (int x = -4; x <= 22; ++x)
+        for (int z = -4; z <= 4; ++z) {
+            w.setBlock(x, y, z, Block::Stone);
+            for (int airY = y + 1; airY <= y + 4; ++airY)
+                w.setBlock(x, airY, z, Block::Air);
+        }
+}
+
+static void testLivingEntitySpawnTickFreezeAndCollision() {
+    std::filesystem::remove_all("test_living_sim");
+    World w(1337, "test_living_sim");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId id =
+        ents.spawnLiving(glm::vec3(0.5f, 71.0f, 0.5f), "creature.kenney_zombie_a");
+    CHECK(id != 0);
+    CHECK(ents.living().size() == 1);
+    const LivingEntity& e0 = *ents.living()[0];
+    CHECK(e0.health == LIVING_MAX_HEALTH);
+    CHECK(e0.modelId == "creature.kenney_zombie_a");
+    CHECK(e0.body.halfWidth <= 0.35f);
+    CHECK(e0.body.height <= 1.8f);
+
+    ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(ents.living()[0]->ageTicks == 1);
+    CHECK(glm::distance(ents.living()[0]->prevPos, glm::vec3(0.5f, 71.0f, 0.5f)) <
+          0.001f);
+    CHECK(glm::distance(ents.living()[0]->body.pos, ents.living()[0]->prevPos) >
+          0.001f);
+
+    w.setBlock(1, 71, 0, Block::Stone);
+    w.setBlock(1, 72, 0, Block::Stone);
+    for (int i = 0; i < 12; ++i)
+        ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(ents.living()[0]->body.pos.x < 1.0f - ents.living()[0]->body.halfWidth + 0.01f);
+
+    LivingEntityId farId =
+        ents.spawnLiving(glm::vec3(10000.5f, 80.0f, 10000.5f), "creature.kenney_zombie_a");
+    CHECK(farId != 0);
+    LivingEntity* frozen = nullptr;
+    for (auto& up : ents.living())
+        if (up->id == farId) frozen = up.get();
+    CHECK(frozen != nullptr);
+    glm::vec3 before = frozen->body.pos;
+    glm::vec3 beforePrev = frozen->prevPos;
+    uint32_t beforeAge = frozen->ageTicks;
+    ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(glm::distance(frozen->body.pos, before) < 0.001f);
+    CHECK(glm::distance(frozen->prevPos, beforePrev) < 0.001f);
+    CHECK(frozen->ageTicks == beforeAge);
+    std::filesystem::remove_all("test_living_sim");
+}
+
+static void testLivingEntityDamageDropsAndQueries() {
+    std::filesystem::remove_all("test_living_damage");
+    World w(1337, "test_living_damage");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId a =
+        ents.spawnLiving(glm::vec3(0.5f, 71.0f, 0.5f), "creature.kenney_zombie_a");
+    LivingEntityId b =
+        ents.spawnLiving(glm::vec3(17.5f, 71.0f, 0.5f), "creature.kenney_zombie_a");
+    CHECK(ents.livingNear(glm::vec3(0.5f, 71.0f, 0.5f), 2.0f).size() == 1);
+    CHECK(ents.livingNear(glm::vec3(8.5f, 71.0f, 0.5f), 20.0f).size() == 2);
+
+    CHECK(ents.damageLiving(a, 4));
+    CHECK(ents.living().size() == 2);
+    CHECK(ents.living()[0]->health == 6 || ents.living()[1]->health == 6);
+    CHECK(ents.items().empty());
+
+    CHECK(ents.damageLiving(a, 6));
+    CHECK(ents.livingNear(glm::vec3(0.5f, 71.0f, 0.5f), 2.0f).empty());
+    CHECK(ents.living().size() == 1);
+    CHECK(ents.items().size() == 1);
+    CHECK(ents.items()[0]->stack.item == ItemId::Coal);
+    CHECK(ents.items()[0]->stack.count == 1);
+    CHECK(!ents.damageLiving(a, 1));
+    CHECK(ents.livingNear(glm::vec3(17.5f, 71.0f, 0.5f), 2.0f).size() == 1);
+
+    ChunkKey key{1, 0};
+    ents.saveAndUnloadChunkEntities("test_living_damage", key, true);
+    CHECK(ents.living().size() == 1); // living entities are not persisted/unloaded here
+    std::vector<SavedDroppedItem> loaded;
+    EntityChunkLoadStatus status =
+        loadEntityChunkFile(entityChunkPath("test_living_damage", key), key, loaded);
+    CHECK(status == EntityChunkLoadStatus::Missing || status == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.empty());
+    (void)b;
+    std::filesystem::remove_all("test_living_damage");
+}
+
 static void testItemAgeTicksAndDespawn() {
     std::filesystem::remove_all("test_ent_age_ticks");
     World w(1337, "test_ent_age_ticks");
@@ -2713,6 +2813,28 @@ static void testKeyBinds() {
     CHECK(t.keyForward == 'Z' && t.keyJump == keys::TAB);
     CHECK(t.keySneak == keys::CAPSLOCK && t.keyInventory == 'E');
     CHECK(t.keyModeToggle == 'N');
+
+    {
+        std::ofstream f("test_settings.cfg");
+        f << "render_distance=999\n";
+    }
+    Settings high = Settings::load("test_settings.cfg");
+    CHECK(high.renderDistance == RENDER_DISTANCE_MAX);
+
+    high.save("test_settings.cfg");
+    Settings highRoundtrip = Settings::load("test_settings.cfg");
+    CHECK(highRoundtrip.renderDistance == RENDER_DISTANCE_MAX);
+
+    {
+        std::ofstream f("test_settings.cfg");
+        f << "render_distance=-20\n";
+    }
+    Settings low = Settings::load("test_settings.cfg");
+    CHECK(low.renderDistance == RENDER_DISTANCE_MIN);
+
+    low.save("test_settings.cfg");
+    Settings lowRoundtrip = Settings::load("test_settings.cfg");
+    CHECK(lowRoundtrip.renderDistance == RENDER_DISTANCE_MIN);
     std::filesystem::remove("test_settings.cfg");
 }
 
@@ -2801,14 +2923,18 @@ static void testMenuUiAdjustSettings() {
     Settings s;
     std::vector<int> fps = {30, 60, 144, 0};
 
-    s.renderDistance = 16;
+    s.renderDistance = RENDER_DISTANCE_MAX;
     ui::SettingEffects e = ui::adjustSetting(s, ui::SettingId::RenderDistance, 1, fps);
-    CHECK(s.renderDistance == 16);
+    CHECK(s.renderDistance == RENDER_DISTANCE_MAX);
     CHECK(e.saveSettings);
 
-    s.renderDistance = 2;
+    s.renderDistance = RENDER_DISTANCE_MAX;
     e = ui::adjustSetting(s, ui::SettingId::RenderDistance, -1, fps);
-    CHECK(s.renderDistance == 2);
+    CHECK(s.renderDistance == RENDER_DISTANCE_MAX - 1);
+
+    s.renderDistance = RENDER_DISTANCE_MIN;
+    e = ui::adjustSetting(s, ui::SettingId::RenderDistance, -1, fps);
+    CHECK(s.renderDistance == RENDER_DISTANCE_MIN);
 
     s.fov = 75.0f;
     e = ui::adjustSetting(s, ui::SettingId::Fov, 1, fps);
@@ -2840,6 +2966,110 @@ static void testMenuUiAdjustSettings() {
     CHECK(ui::settingValueText(s, ui::SettingId::Volume) == "70%");
     s.fpsMax = 0;
     CHECK(ui::settingValueText(s, ui::SettingId::FpsMax) == "unlimited");
+}
+
+static void testProjectionFarPlaneCoversFogRange() {
+    float fogEnd = float(RENDER_DISTANCE_MAX * CHUNK_SIZE);
+    CHECK(projectionFarPlaneForRenderDistance(RENDER_DISTANCE_MAX) > fogEnd);
+    CHECK(projectionFarPlaneForRenderDistance(RENDER_DISTANCE_MIN) >= 600.0f);
+}
+
+static void writeTextFile(const std::filesystem::path& path, const std::string& text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream f(path);
+    f << text;
+}
+
+static void testAssetManifestParsing() {
+    AssetManifest manifest;
+    std::string error;
+    CHECK(loadAssetManifest("assets/manifest.json", manifest, &error));
+    CHECK(manifest.version == 1);
+    const ModelManifestEntry* entry = manifest.modelById("creature.kenney_zombie_a");
+    CHECK(entry != nullptr);
+    if (entry) {
+        CHECK(entry->path == "characters/kenney_blocky/character-o.glb");
+        CHECK(entry->scale > 0.0f);
+    }
+
+    std::filesystem::remove_all("test_assets_manifest");
+    std::filesystem::create_directories("test_assets_manifest/models");
+    writeTextFile("test_assets_manifest/models/a.glb", "not a real glb");
+
+    CHECK(!loadAssetManifest("test_assets_manifest/missing.json", manifest, &error));
+    CHECK(!error.empty());
+
+    writeTextFile("test_assets_manifest/duplicate.json",
+        "{\"version\":1,\"models\":["
+        "{\"id\":\"a\",\"path\":\"models/a.glb\"},"
+        "{\"id\":\"a\",\"path\":\"models/a.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/duplicate.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/missing-id.json",
+        "{\"version\":1,\"models\":[{\"path\":\"models/a.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/missing-id.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/fractional-version.json",
+        "{\"version\":1.5,\"models\":[{\"id\":\"a\",\"path\":\"models/a.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/fractional-version.json", manifest,
+                             &error));
+
+    writeTextFile("test_assets_manifest/absolute.json",
+        "{\"version\":1,\"models\":[{\"id\":\"a\",\"path\":\"C:/tmp/a.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/absolute.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/traversal.json",
+        "{\"version\":1,\"models\":[{\"id\":\"a\",\"path\":\"../a.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/traversal.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/missing-file.json",
+        "{\"version\":1,\"models\":[{\"id\":\"a\",\"path\":\"models/nope.glb\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/missing-file.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/malformed.json", "{\"version\":1,");
+    CHECK(!loadAssetManifest("test_assets_manifest/malformed.json", manifest, &error));
+    std::filesystem::remove_all("test_assets_manifest");
+}
+
+static void testModelAssetLoadAndExternalTexture() {
+    AssetManifest manifest;
+    std::string error;
+    CHECK(loadAssetManifest("assets/manifest.json", manifest, &error));
+    const ModelManifestEntry* entry = manifest.modelById("creature.kenney_zombie_a");
+    CHECK(entry != nullptr);
+    if (!entry) return;
+
+    ModelAsset model;
+    CHECK(loadModelAsset("assets", *entry, model, &error));
+    CHECK(!model.vertices.empty());
+    CHECK(!model.indices.empty());
+    CHECK(!model.parts.empty());
+    CHECK(!model.materials.empty());
+    CHECK(!model.images.empty());
+    if (!model.images.empty()) {
+        const ModelImage& image = model.images[0];
+        CHECK(image.uri == "Textures/texture-o.png");
+        CHECK(image.width > 0 && image.height > 0);
+        CHECK(image.channels == 4);
+        // Kenney UVs run outside [0,1] and rely on repeat wrapping (the
+        // glTF sampler default); clamping smears the atlas edges.
+        CHECK(image.wrapS == 10497 && image.wrapT == 10497);
+        CHECK(!image.pixels.empty());
+        CHECK(image.sourcePath.generic_string().find("Textures/texture-o.png") != std::string::npos);
+    }
+    CHECK(model.boundsMax.y > model.boundsMin.y);
+}
+
+static void testAssetManagerCacheAndMissingIds() {
+    AssetManager assets;
+    std::string error;
+    CHECK(assets.loadManifest("assets/manifest.json", &error));
+    const ModelAsset* first = assets.model("creature.kenney_zombie_a", &error);
+    CHECK(first != nullptr);
+    const ModelAsset* second = assets.model("creature.kenney_zombie_a", &error);
+    CHECK(second == first);
+    CHECK(assets.model("creature.nope", &error) == nullptr);
+    CHECK(!error.empty());
 }
 
 static void testMenuUiInventoryHelpers() {
@@ -3331,6 +3561,8 @@ int main() {
     testEntityStreamQuitLoad();
     testEntityStreamUnloadLoadAndNoAging();
     testEntityStreamCrossingAutosaveAndDemoIsolation();
+    testLivingEntitySpawnTickFreezeAndCollision();
+    testLivingEntityDamageDropsAndQueries();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();
@@ -3343,6 +3575,10 @@ int main() {
     testSoundBank();
     testMenuUiHitTesting();
     testMenuUiAdjustSettings();
+    testProjectionFarPlaneCoversFogRange();
+    testAssetManifestParsing();
+    testModelAssetLoadAndExternalTexture();
+    testAssetManagerCacheAndMissingIds();
     testMenuUiInventoryHelpers();
     testMenuUiStackClickHelpers();
     testMenuUiCraftingSlotsAndOutput();

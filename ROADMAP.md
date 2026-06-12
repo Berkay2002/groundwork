@@ -22,8 +22,11 @@ deliberately being left for later.
   screen, pause/settings menu, debug overlay, item icons, mining cracks, and
   first-person held items.
 - See lighting, fog, day/night, water surfaces, smoother terrain shading, basic
-  audio, item pickup, and generated or embedded art. The game still has no
-  external asset files.
+  audio, item pickup, generated or embedded voxel/UI art, and the first authored
+  blocky character asset loaded from `assets/`.
+- Spawn and render a first simple living entity in a save-isolated demo. It has
+  health, deterministic movement, terrain collision, damage/death, and a drop,
+  but no persistence or real AI yet.
 - Run benchmark and screenshot checks for performance and visual regressions,
   plus headless world tests for core game logic.
 
@@ -36,8 +39,10 @@ deliberately being left for later.
 - Windows and Linux should remain first-class targets.
 - The build should stay warning-free, and world logic should stay covered by the
   headless test binary.
-- New features should avoid adding asset files unless that is an explicit
-  product decision.
+- Procedural/embedded content should stay procedural where it fits. Authored
+  characters, mobs, props, structures, music, and similar content may use
+  runtime assets, with manifest ids and source/license notes rather than
+  hardcoded one-off paths.
 
 ## Next roadmap areas
 
@@ -51,11 +56,14 @@ deliberately being left for later.
 - The `MCEN` entity-file format is typed so future world entities can share
   the same persistence layer.
 
-### Add simple creatures
+### Add simple creatures (foundation started)
 
-- Add a small living-entity foundation: health, damage, spawning, simple
-  movement, and drops.
-- Keep behavior modest at first. Complex pathfinding should wait until the game
+- Done: small living-entity foundation with health, damage, spawning, simple
+  deterministic movement, terrain collision, model id, rendered GLB character,
+  and a basic drop.
+- Next: decide how creatures enter normal worlds, how they face/move, what they
+  drop, and whether they persist or respawn from deterministic spawn rules.
+- Keep behavior modest for now. Complex pathfinding should wait until the game
   clearly needs it.
 
 ### Expand crafting and recipes
@@ -114,7 +122,8 @@ deliberately being left for later.
 
 ### Move stable data out of C++
 
-- Start with low-risk data such as recipes, tuning values, or simple tables.
+- Started with `assets/manifest.json` for authored model ids. Continue with
+  low-risk data such as recipes, tuning values, or simple tables.
 - Delay full modding, custom blocks, and scripting until the core rules have
   settled.
 

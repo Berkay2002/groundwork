@@ -12,6 +12,9 @@ constexpr float MAGNET_RADIUS = 2.0f;   // starts flying to the player inside th
 constexpr float MAGNET_SPEED = 8.0f;
 constexpr float PICKUP_RADIUS = 0.8f;
 constexpr float MERGE_RADIUS = 0.75f;
+constexpr float LIVING_GRAVITY = -22.0f;
+constexpr float LIVING_TERMINAL = -30.0f;
+constexpr float LIVING_WALK_SPEED = 0.75f;
 
 ChunkKey chunkForPos(glm::vec3 pos) {
     return {World::floorDiv((int)std::floor(pos.x), CHUNK_SIZE),
@@ -75,6 +78,39 @@ void Entities::spawnBlockDrop(const glm::ivec3& blockPos, Block broken) {
     spawnBlockDrop(blockPos, makeItemStack(d.dropItem, d.dropCount));
 }
 
+LivingEntityId Entities::spawnLiving(const glm::vec3& pos, const std::string& modelId) {
+    if (modelId.empty()) return 0;
+    auto e = std::make_unique<LivingEntity>();
+    e->id = nextLivingId_++;
+    e->body.pos = pos;
+    e->body.halfWidth = LIVING_HALF_WIDTH;
+    e->body.height = LIVING_HEIGHT;
+    e->prevPos = pos;
+    e->modelId = modelId;
+    LivingEntityId id = e->id;
+    living_.push_back(std::move(e));
+    rebuildBuckets();
+    return id;
+}
+
+bool Entities::damageLiving(LivingEntityId id, int amount) {
+    if (amount <= 0) return false;
+    for (auto& up : living_) {
+        LivingEntity& e = *up;
+        if (e.id != id || e.dead) continue;
+        e.health -= amount;
+        if (e.health <= 0) {
+            e.dead = true;
+            spawnItem(e.body.pos + glm::vec3(0.0f, 0.4f, 0.0f),
+                      glm::vec3(0.0f, 2.5f, 0.0f), ItemId::Coal, 1);
+            cleanupLiving();
+            rebuildBuckets();
+        }
+        return true;
+    }
+    return false;
+}
+
 void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* inv, float dt) {
     const glm::vec3 target = playerPos + glm::vec3(0, 0.9f, 0); // player torso
     for (auto& up : items_) {
@@ -125,13 +161,39 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
     items_.erase(std::remove_if(items_.begin(), items_.end(),
                      [](const std::unique_ptr<ItemEntity>& e) { return e->dead; }),
                  items_.end());
+
+    for (auto& up : living_) {
+        LivingEntity& e = *up;
+        if (e.dead) continue;
+        if (!world.isAreaReady(e.body.pos, 1)) continue;
+        e.prevPos = e.body.pos;
+        if (e.ageTicks < UINT32_MAX) ++e.ageTicks;
+        if (e.ageTicks > 0 && e.ageTicks % 40 == 0) ++e.movePhase;
+        float angle = float(e.movePhase % 4u) * 1.5707963f;
+        e.body.vel.x = std::cos(angle) * LIVING_WALK_SPEED;
+        e.body.vel.z = std::sin(angle) * LIVING_WALK_SPEED;
+        e.body.vel.y += LIVING_GRAVITY * dt;
+        if (e.body.vel.y < LIVING_TERMINAL) e.body.vel.y = LIVING_TERMINAL;
+        moveBody(world, e.body, dt);
+    }
+    cleanupLiving();
     rebuildBuckets();
+}
+
+void Entities::cleanupLiving() {
+    living_.erase(std::remove_if(living_.begin(), living_.end(),
+                      [](const std::unique_ptr<LivingEntity>& e) { return e->dead; }),
+                  living_.end());
 }
 
 void Entities::rebuildBuckets() {
     buckets_.clear();
     for (auto& up : items_) {
         buckets_[chunkForPos(up->body.pos)].push_back(up.get());
+    }
+    livingBuckets_.clear();
+    for (auto& up : living_) {
+        livingBuckets_[chunkForPos(up->body.pos)].push_back(up.get());
     }
 }
 
@@ -229,6 +291,22 @@ std::vector<ItemEntity*> Entities::itemsNear(const glm::vec3& pos, float radius)
             if (it == buckets_.end()) continue;
             for (ItemEntity* e : it->second)
                 if (glm::distance(e->body.pos, pos) <= radius) out.push_back(e);
+        }
+    return out;
+}
+
+std::vector<LivingEntity*> Entities::livingNear(const glm::vec3& pos, float radius) const {
+    std::vector<LivingEntity*> out;
+    int cx0 = World::floorDiv((int)std::floor(pos.x - radius), CHUNK_SIZE);
+    int cx1 = World::floorDiv((int)std::floor(pos.x + radius), CHUNK_SIZE);
+    int cz0 = World::floorDiv((int)std::floor(pos.z - radius), CHUNK_SIZE);
+    int cz1 = World::floorDiv((int)std::floor(pos.z + radius), CHUNK_SIZE);
+    for (int cz = cz0; cz <= cz1; ++cz)
+        for (int cx = cx0; cx <= cx1; ++cx) {
+            auto it = livingBuckets_.find(ChunkKey{cx, cz});
+            if (it == livingBuckets_.end()) continue;
+            for (LivingEntity* e : it->second)
+                if (!e->dead && glm::distance(e->body.pos, pos) <= radius) out.push_back(e);
         }
     return out;
 }

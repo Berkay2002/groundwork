@@ -40,6 +40,9 @@ add_executable(groundwork
   src/world/Lighting.cpp
   src/world/World.cpp
   src/world/WorldSave.cpp
+  src/assets/AssetManifest.cpp
+  src/assets/AssetManager.cpp
+  src/assets/ModelAsset.cpp
   src/sim/Player.cpp
   src/sim/Physics.cpp
   src/sim/Mining.cpp
@@ -48,6 +51,7 @@ add_executable(groundwork
   src/sim/EntitySave.cpp
   src/render/BreakOverlay.cpp
   src/render/ItemRenderer.cpp
+  src/render/ModelRenderer.cpp
   src/render/GLCompat.cpp
   src/render/Texture.cpp
   src/ui/Hud.cpp
@@ -62,6 +66,7 @@ target_link_libraries(groundwork PRIVATE
   OpenGL::GL
   Threads::Threads)
 target_include_directories(groundwork PRIVATE src)
+target_include_directories(groundwork SYSTEM PRIVATE third_party)
 if(NOT WIN32)
   target_compile_definitions(groundwork PRIVATE GL_GLEXT_PROTOTYPES)
 endif()
@@ -80,9 +85,10 @@ if(ENABLE_AUDIO)
 endif()
 
 # Release packaging: `cmake --install build --strip --prefix dist` yields a
-# stripped, asset-file-free Linux binary; Windows installs the GLFW runtime
-# DLL beside the executable.
+# stripped Linux binary plus runtime authored assets; Windows also installs the
+# GLFW runtime DLL beside the executable.
 install(TARGETS groundwork RUNTIME DESTINATION bin)
+install(DIRECTORY assets DESTINATION .)
 if(WIN32)
   install(FILES $<TARGET_FILE:${GROUNDWORK_GLFW_TARGET}> DESTINATION bin)
 endif()
@@ -96,6 +102,9 @@ add_executable(world_tests
   src/world/World.cpp
   src/world/WorldSave.cpp
   src/world/Terrain.cpp
+  src/assets/AssetManifest.cpp
+  src/assets/AssetManager.cpp
+  src/assets/ModelAsset.cpp
   src/sim/Player.cpp
   src/sim/Physics.cpp
   src/sim/Mining.cpp
@@ -106,6 +115,7 @@ add_executable(world_tests
 )
 target_link_libraries(world_tests PRIVATE OpenGL::GL Threads::Threads ${GROUNDWORK_GLM_TARGET})
 target_include_directories(world_tests PRIVATE src)
+target_include_directories(world_tests SYSTEM PRIVATE third_party)
 if(NOT WIN32)
   target_compile_definitions(world_tests PRIVATE GL_GLEXT_PROTOTYPES)
 endif()
@@ -115,6 +125,7 @@ else()
   target_compile_options(world_tests PRIVATE -Wall -O2)
 endif()
 add_test(NAME world_tests COMMAND world_tests)
+set_tests_properties(world_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Golden-screenshot regression test: needs Python plus a display; the script
 # skips cleanly without a display or PIL.

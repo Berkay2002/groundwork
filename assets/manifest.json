@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "creature.kenney_zombie_a",
+      "name": "Kenney Blocky Zombie A",
+      "path": "characters/kenney_blocky/character-o.glb",
+      "scale": 0.65
+    },
+    {
+      "id": "creature.kenney_zombie_b",
+      "name": "Kenney Blocky Zombie B",
+      "path": "characters/kenney_blocky/character-l.glb",
+      "scale": 0.65
+    }
+  ]
+}

@@ -142,7 +142,7 @@ inline SettingEffects adjustSetting(Settings& s, SettingId setting, int dir,
     SettingEffects effects;
     switch (setting) {
         case SettingId::RenderDistance:
-            s.renderDistance = std::min(16, std::max(2, s.renderDistance + dir));
+            s.renderDistance = clampRenderDistance(s.renderDistance + dir);
             break;
         case SettingId::Fov:
             s.fov = std::min(110.0f, std::max(30.0f, s.fov + 5.0f * dir));

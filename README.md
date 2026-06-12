@@ -35,9 +35,10 @@ cmake --build build -j
 .\build\groundwork.exe
 ```
 
-That's the whole install. Every texture, font, and sound effect is generated or
-embedded at startup, so there are no asset files to ship alongside it. Requires
-a C++17 compiler, CMake ≥ 3.16, GLFW 3, GLM, and OpenGL 3.3.
+That's the whole install. Voxel block textures and the HUD font are generated
+at startup, and sound effects are embedded in the binary. Authored character
+content now lives under `assets/` and is loaded through a manifest. Requires a
+C++17 compiler, CMake ≥ 3.16, GLFW 3, GLM, and OpenGL 3.3.
 
 For a stripped release binary:
 
@@ -51,6 +52,8 @@ On Windows:
 cmake --install build --prefix dist           # -> dist\bin\groundwork.exe + glfw3.dll
 ```
 
+Install also copies the runtime `assets/` directory beside `bin/`.
+
 Sound can be compiled out with `-DENABLE_AUDIO=OFF` at configure time (the
 game also simply stays silent when no audio device can be opened).
 
@@ -61,6 +64,11 @@ Run the headless world-logic tests with `./build/world_tests` on Linux or
 exits (useful for automated checks). `./build/groundwork --bench 300` runs 300
 frames with vsync forced off, prints performance counters (fps, chunks
 drawn/loaded, mesh uploads, worker timings), and exits.
+
+`./build/groundwork --demo-creature --frames 300` spawns the first authored
+blocky character model in a save-isolated demo run. It writes a screenshot but
+must not create, update, or delete files under `saves/world1`; the Windows
+check is `powershell -ExecutionPolicy Bypass -File tests\demo_save_isolation.ps1`.
 
 `ctest --test-dir build` additionally runs a golden-screenshot regression
 test (`tests/golden_screenshot.py`) when Python is available. It renders a
@@ -208,12 +216,25 @@ stacks; right-click splits or places one item.
   rendering interpolates positions between the last two ticks. This keeps
   physics deterministic across machines and is the groundwork a future
   multiplayer mode would need.
-- **Entities** (`src/sim/Entity.h/.cpp`) — a minimal entity layer whose first
-  citizen is the dropped item: a small textured cube (`src/render/ItemRenderer.cpp`)
-  that bobs and spins, falls with the shared AABB physics, magnetizes to the
-  player within ~2 blocks, and stacks into the inventory on contact. Entities
-  are bucketed per chunk for proximity queries, freeze while their chunk is
-  unloaded, and despawn after 5 minutes; they are not saved across runs.
+- **Authored assets** (`assets/`, `src/assets/*`) — runtime content that is not
+  naturally procedural starts in `assets/`. `assets/manifest.json` maps stable
+  ids such as `creature.kenney_wanderer` to model files; `AssetManager` parses
+  the manifest, caches CPU-side model data, and keeps app/render code off
+  hardcoded asset paths. The first imported content is Kenney's CC0 Blocky
+  Characters `character-a.glb` with its external PNG texture and source/license
+  notes beside it.
+- **Entities** (`src/sim/Entity.h/.cpp`) — dropped items and living entities
+  share the main-thread entity manager but use separate storage and queries.
+  Dropped items are small textured cubes (`src/render/ItemRenderer.cpp`) that
+  bob and spin, fall with shared AABB physics, magnetize to the player, stack
+  into the inventory, freeze while their chunk is unloaded, despawn after 5
+  minutes, and persist in chunk-scoped entity files. Living entities now have a
+  body, previous position, health, tick state, model id, deterministic movement,
+  terrain collision, damage/death, and a simple coal drop. They are not saved in
+  this batch.
+- **Model rendering** (`src/render/ModelRenderer.cpp`) — uploads manifest-loaded
+  CPU-side GLB meshes and PNG textures to GL on the main thread, then draws
+  living entities by model id. Simulation never owns asset files or GL objects.
 - **Survival loop** (`src/sim/Mining.*`, `src/sim/Crafting.*`,
   `src/world/BlockEntity.*`) — registry-driven hardness, tool class, harvest
   tier, drops, and durability feed timed mining. Crafting recipes are pure
@@ -224,7 +245,7 @@ stacks; right-click splits or places one item.
   the tests; the inventory/crafting/furnace UI is drawn with HUD primitives.
 - **Textures** (`src/render/Texture.cpp`, `src/render/BreakOverlay.cpp`) — all
   block tiles, item icons, and mining crack stages are generated procedurally
-  at startup, so there are no asset files. The same tile functions fill both a
+  at startup. The same tile functions fill both a
   texture array (chunk rendering, repeat wrapping for merged faces) and a 2D
   atlas strip (HUD icons).
 - **HUD** (`src/ui/Hud.cpp`) — 2D overlay renderer (debug text, hotbar,

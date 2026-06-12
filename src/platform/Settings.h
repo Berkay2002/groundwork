@@ -6,6 +6,15 @@
 
 #include "platform/KeyBinds.h"
 
+inline constexpr int RENDER_DISTANCE_MIN = 2;
+inline constexpr int RENDER_DISTANCE_MAX = 64;
+
+inline int clampRenderDistance(int value) {
+    if (value < RENDER_DISTANCE_MIN) return RENDER_DISTANCE_MIN;
+    if (value > RENDER_DISTANCE_MAX) return RENDER_DISTANCE_MAX;
+    return value;
+}
+
 struct Settings {
     float mouseSensitivity = 0.12f;
     float fov = 75.0f;
@@ -64,8 +73,7 @@ struct Settings {
         // Clamp to sane ranges.
         if (s.fov < 30.0f) s.fov = 30.0f;
         if (s.fov > 110.0f) s.fov = 110.0f;
-        if (s.renderDistance < 2) s.renderDistance = 2;
-        if (s.renderDistance > 64) s.renderDistance = 64;
+        s.renderDistance = clampRenderDistance(s.renderDistance);
         if (s.mouseSensitivity <= 0.0f) s.mouseSensitivity = 0.12f;
         if (s.fpsMax < 0) s.fpsMax = 0;
         if (s.fpsMax > 0 && s.fpsMax < 30) s.fpsMax = 30;
@@ -80,7 +88,7 @@ struct Settings {
         f << "# Groundwork settings\n"
           << "mouse_sensitivity=" << mouseSensitivity << "\n"
           << "fov=" << fov << "\n"
-          << "render_distance=" << renderDistance << "\n"
+          << "render_distance=" << clampRenderDistance(renderDistance) << "\n"
           << "vsync=" << (vsync ? 1 : 0) << "\n"
           << "# frame cap when vsync is off; 0 = unlimited\n"
           << "fps_max=" << fpsMax << "\n"

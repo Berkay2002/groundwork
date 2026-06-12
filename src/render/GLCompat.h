@@ -48,6 +48,9 @@ using GLsizeiptr = std::ptrdiff_t;
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
+#ifndef GL_MIRRORED_REPEAT
+#define GL_MIRRORED_REPEAT 0x8370
+#endif
 #ifndef GL_R8
 #define GL_R8 0x8229
 #endif

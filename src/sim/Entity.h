@@ -12,6 +12,11 @@
 
 constexpr uint32_t PICKUP_DELAY_TICKS = 8; // 0.4 s at 20 TPS
 constexpr uint32_t DESPAWN_TICKS = 6000;   // 5 min at 20 TPS
+constexpr int LIVING_MAX_HEALTH = 10;
+constexpr float LIVING_HALF_WIDTH = 0.3f;
+constexpr float LIVING_HEIGHT = 1.6f;
+
+using LivingEntityId = uint32_t;
 
 // The first entity: a dropped item. A small cube body that falls with the
 // shared sub-stepped AABB collision, magnetizes to the player, and is
@@ -22,6 +27,18 @@ struct ItemEntity {
     ItemStack stack;
     uint32_t ageTicks = 0; // active simulation ticks since spawn
     uint32_t spinSeed = 0; // de-syncs bob/spin phase between items
+    bool dead = false;
+    glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, body.pos, alpha); }
+};
+
+struct LivingEntity {
+    LivingEntityId id = 0;
+    Body body;
+    glm::vec3 prevPos{0.0f};
+    std::string modelId;
+    int health = LIVING_MAX_HEALTH;
+    uint32_t ageTicks = 0;
+    uint32_t movePhase = 0;
     bool dead = false;
     glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, body.pos, alpha); }
 };
@@ -40,6 +57,9 @@ public:
     // Correct-harvest drop for old callers that only know the broken block.
     void spawnBlockDrop(const glm::ivec3& blockPos, Block broken);
 
+    LivingEntityId spawnLiving(const glm::vec3& pos, const std::string& modelId);
+    bool damageLiving(LivingEntityId id, int amount);
+
     // One simulation tick: physics, magnetized pickup into `inv` (skipped
     // when inv is null), despawn, then rebuild the per-chunk buckets.
     void tick(const World& world, const glm::vec3& playerPos, Inventory* inv, float dt);
@@ -55,14 +75,20 @@ public:
                            bool saveEnabled);
 
     const std::vector<std::unique_ptr<ItemEntity>>& items() const { return items_; }
+    const std::vector<std::unique_ptr<LivingEntity>>& living() const { return living_; }
     // Bucket-accelerated proximity query (used by tests now, mobs later).
     std::vector<ItemEntity*> itemsNear(const glm::vec3& pos, float radius) const;
+    std::vector<LivingEntity*> livingNear(const glm::vec3& pos, float radius) const;
 
 private:
     std::vector<std::unique_ptr<ItemEntity>> items_;
     std::unordered_map<ChunkKey, std::vector<ItemEntity*>, ChunkKeyHash> buckets_;
+    std::vector<std::unique_ptr<LivingEntity>> living_;
+    std::unordered_map<ChunkKey, std::vector<LivingEntity*>, ChunkKeyHash> livingBuckets_;
     std::unordered_set<ChunkKey, ChunkKeyHash> loadedEntityChunks_;
+    LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();
+    void cleanupLiving();
     void rebuildBuckets();
 };

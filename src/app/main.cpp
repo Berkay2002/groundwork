@@ -15,6 +15,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "audio/Audio.h"
+#include "assets/AssetManager.h"
 #include "world/Block.h"
 #include "world/Chunk.h"
 #include "world/DayCycle.h"
@@ -27,6 +28,8 @@
 #include "sim/Mining.h"
 #include "render/BreakOverlay.h"
 #include "render/ItemRenderer.h"
+#include "render/ModelRenderer.h"
+#include "render/ViewParams.h"
 #include "ui/MenuUi.h"
 #include "sim/Player.h"
 #include "sim/PlayerSave.h"
@@ -44,6 +47,9 @@ constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
 constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
 constexpr uint32_t WORLD_SEED = 1337;
 const char* SAVE_DIR = "saves/world1";
+const char* ASSET_MANIFEST = "assets/manifest.json";
+const char* DEMO_CREATURE_MODELS[] = {"creature.kenney_zombie_a",
+                                      "creature.kenney_zombie_b"};
 
 const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
                         Block::Wood, Block::Leaves, Block::Sand, Block::Torch,
@@ -134,6 +140,7 @@ struct App {
     World* world = nullptr;
     Entities entities;
     Settings settings;
+    AssetManager assets;
     Audio audio;
     Menu menu = Menu::None;
     bool survival = false;
@@ -160,6 +167,47 @@ Block heldBlock() {
     if (!app.survival) return HOTBAR[app.hotbarSlot];
     const ItemStack& s = app.inv.slots[app.hotbarSlot];
     return s.empty() ? Block::Air : placeBlockForItem(s.item);
+}
+
+float modelFootingY(const ModelAsset& model) {
+    return model.boundsMin.y;
+}
+
+glm::mat4 livingEntityTransform(const LivingEntity& entity, const ModelAsset& model,
+                                float alpha) {
+    glm::vec3 center((model.boundsMin.x + model.boundsMax.x) * 0.5f,
+                     modelFootingY(model),
+                     (model.boundsMin.z + model.boundsMax.z) * 0.5f);
+    return glm::translate(glm::mat4(1.0f), entity.renderPos(alpha)) *
+           glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 1, 0)) *
+           glm::translate(glm::mat4(1.0f), -center);
+}
+
+void spawnDemoCreature(World& world) {
+    app.player.flying = true;
+    app.player.pitch = -8.0f;
+    glm::vec3 look2d(app.player.lookDir().x, 0.0f, app.player.lookDir().z);
+    if (glm::length(look2d) < 0.001f) look2d = glm::vec3(0.0f, 0.0f, -1.0f);
+    look2d = glm::normalize(look2d);
+    glm::vec3 base = app.player.pos() + look2d * 6.0f;
+    int x = int(std::floor(base.x));
+    int z = int(std::floor(base.z));
+    int y = CHUNK_HEIGHT - 2;
+    while (y > 1 && !isSolid(world.getBlock(x, y, z))) --y;
+    if (y <= 1) y = int(std::floor(app.player.pos().y)) - 1;
+
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dz = -1; dz <= 1; ++dz) {
+            world.setBlock(x + dx, y, z + dz, Block::Grass);
+            for (int airY = y + 1; airY <= y + 4; ++airY)
+                world.setBlock(x + dx, airY, z + dz, Block::Air);
+        }
+    app.entities.spawnLiving(glm::vec3(float(x) - 0.5f, float(y) + 1.0f,
+                                       float(z) + 0.5f),
+                             DEMO_CREATURE_MODELS[0]);
+    app.entities.spawnLiving(glm::vec3(float(x) + 1.5f, float(y) + 1.0f,
+                                       float(z) + 0.5f),
+                             DEMO_CREATURE_MODELS[1]);
 }
 
 void resetBreakProgress() {
@@ -661,6 +709,7 @@ int main(int argc, char** argv) {
     bool demoCraft = false;  // survival + stocked inventory, opens 3x3 crafting screen
     bool demoFurnace = false; // places a burning furnace and opens furnace screen
     bool demoWater = false;  // pours a water source over a staged trench
+    bool demoCreature = false; // spawns the first authored character model
     bool demoRun = false;    // set for any --demo-* flag; suppresses all save I/O
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
     float startTime = -1.0f;    // --time <0..1>: day fraction override
@@ -678,6 +727,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--demo-craft") == 0)    { demoCraft    = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-furnace") == 0)  { demoFurnace  = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-water") == 0)    { demoWater    = true; demoRun = true; }
+        if (std::strcmp(argv[i], "--demo-creature") == 0) { demoCreature = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-menu") == 0)     { demoMenu = Menu::Main;     demoRun = true; }
         if (std::strcmp(argv[i], "--demo-settings") == 0) { demoMenu = Menu::Settings; demoRun = true; }
     }
@@ -746,6 +796,7 @@ int main(int argc, char** argv) {
     const int originLoc = chunkShader.loc("uOrigin");
     Hud hud(atlas);
     ItemRenderer itemRenderer;
+    ModelRenderer modelRenderer;
     BreakOverlay breakOverlay(crackTextures);
 
     GLuint cubeVbo;
@@ -760,6 +811,17 @@ int main(int argc, char** argv) {
     // Audio stays silent if disabled at build time or no device opens.
     app.audio.init();
     app.audio.setVolume(settings.volume);
+
+    std::string assetError;
+    if (!app.assets.loadManifest(ASSET_MANIFEST, &assetError)) {
+        if (demoCreature) {
+            std::fprintf(stderr, "failed to load asset manifest: %s\n",
+                         assetError.c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "warning: failed to load asset manifest: %s\n",
+                     assetError.c_str());
+    }
 
     bool restored = loadPlayer();
     // Pre-load the area around the player so they don't fall through.
@@ -877,6 +939,16 @@ int main(int argc, char** argv) {
         world.setBlock(wx + 3, wy - 1, wz, Block::Air);
         world.setBlock(wx, wy + 1, wz, Block::Water);   // the poured source
     }
+    if (demoCreature) {
+        for (const char* id : DEMO_CREATURE_MODELS) {
+            if (!app.assets.model(id, &assetError)) {
+                std::fprintf(stderr, "failed to load demo creature model: %s\n",
+                             assetError.c_str());
+                return 1;
+            }
+        }
+        spawnDemoCreature(world);
+    }
     if (demoMenu != Menu::None) {
         openMenu();
         app.menu = demoMenu;
@@ -968,7 +1040,8 @@ int main(int argc, char** argv) {
         glm::vec3 eye = app.player.eyePos(alpha);
         glm::vec3 dir = app.player.lookDir();
         float aspect = height > 0 ? float(width) / float(height) : 1.0f;
-        glm::mat4 proj = glm::perspective(glm::radians(settings.fov), aspect, 0.05f, 600.0f);
+        glm::mat4 proj = glm::perspective(glm::radians(settings.fov), aspect, 0.05f,
+                                          projectionFarPlaneForRenderDistance(settings.renderDistance));
         glm::mat4 view = glm::lookAt(eye, eye + dir, glm::vec3(0, 1, 0));
         glm::mat4 viewProj = proj * view;
         Frustum frustum = Frustum::fromMatrix(viewProj);
@@ -1079,6 +1152,24 @@ int main(int argc, char** argv) {
         itemRenderer.draw(world, app.entities, viewProj, eye, alpha,
                           float(renderGameTime), sunLevel, heldLight);
         benchMark(6);
+
+        for (const auto& up : app.entities.living()) {
+            const LivingEntity& entity = *up;
+            std::string modelError;
+            const ModelAsset* model = app.assets.model(entity.modelId, &modelError);
+            if (!model) continue;
+            glm::vec3 p = entity.renderPos(alpha);
+            int wx = int(std::floor(p.x));
+            int wy = int(std::floor(p.y + entity.body.height * 0.5f));
+            int wz = int(std::floor(p.z));
+            float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
+            float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
+            float handLvl = std::max(0.0f, heldLight - glm::distance(p, eye));
+            float handBr = std::pow(0.85f, 15.0f - handLvl);
+            float light = std::max({sunBr * sunLevel, blkBr, handBr});
+            modelRenderer.draw(*model, viewProj, livingEntityTransform(entity, *model, alpha),
+                               light);
+        }
 
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.

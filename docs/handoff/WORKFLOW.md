@@ -16,6 +16,8 @@ promises, and future areas.
    - making the build warning-free,
    - passing `world_tests`,
    - visually checking rendering changes with a `--frames` screenshot run,
+   - keeping imported runtime assets under `assets/` with source/license notes
+     and manifest ids,
    - updating `ROADMAP.md` when the playable state or future roadmap changed,
    - updating `README.md` when controls, settings, or user-facing behavior
      changed,
