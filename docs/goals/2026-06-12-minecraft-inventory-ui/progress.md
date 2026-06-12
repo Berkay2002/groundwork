@@ -131,16 +131,26 @@
   round-tripped through the v3→v4 migration (lossless); chunks untouched;
   re-tested demo + test binaries afterward: no writes to saves/world1.
 
+### 2026-06-12 — M3 stage-2 quality review APPROVED + cleanup pass (`df17eb1`)
+
+- M3 code-quality review (Opus 4.8): APPROVED. Verified amended-R2
+  compliance for `4f47f9b` (armor decorative + midline balance + furnace
+  self-centered). One Minor: M3Q1, level.bin written from the World
+  constructor before setDemoMode() could gate it (fresh-machine seam).
+- Cleanup pass (all parked Minors resolved in one batch): remapSlot8to9
+  helper (M1 Q1); v2 test row-1 fixture (M1 Q2); recipe rects in the
+  pairwise non-overlap sweep (M2 Q1); y0 derived via topSectionY (M2 Q2);
+  arrowRect reads rects instead of re-deriving (M2 Q4); demo mode moved
+  into the World constructor — `World(seed, dir, demoMode)`, setDemoMode()
+  removed, constructor-time level.bin/create_directories gated (M3Q1).
+  ROADMAP/STATUS corrected (module owns drawing only; layout/hit-testing
+  stay in MenuUi.h).
+- Validation: build warning-free, `all tests passed`, all three demo runs
+  leave saves/world1 byte-identical (name+size+timestamp compare).
+- Mid-validation interruption: a LNK1104 was caused by the user's own live
+  play session holding groundwork.exe; user closed it, rebuild clean. The
+  2:35–2:43 PM saves/world1 changes were the user's legitimate gameplay.
+
 ## Parked Minor issues
 
-- Q1 (M1): remap math `(i/8)*9 + i%8` duplicated in v2 and v3 load loops —
-  extract `remapSlot8to9(i)` helper in PlayerSave.h. (cleanup pass)
-- Q2 (M1): v2 migration test only populates row-0 source slots; add one
-  row>0 fixture for symmetry with the v3 test. (cleanup pass)
-- Q1 (M2): recipe slot rects not included in the pairwise non-overlap
-  sweep on the inventory-screen test block. (cleanup pass)
-- Q2 (M2): `y0` and `topSectionY` share a re-derived prefix in MenuUi.h —
-  express y0 via topSectionY to remove drift risk. (cleanup pass)
-- ~~Q3 (M2)~~ RESOLVED in `4f47f9b`: furnace cluster now self-centered.
-- Q4 (M2): arrowRect re-derives gridW/craftGridLeft instead of reading the
-  rects it already fetches. (cleanup pass)
+- (none — all resolved in `4f47f9b` / `df17eb1`)
