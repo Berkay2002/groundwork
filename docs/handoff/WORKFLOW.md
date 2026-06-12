@@ -19,6 +19,4 @@ promises, and future areas.
    - updating `ROADMAP.md` when the playable state or future roadmap changed,
    - updating `README.md` when controls, settings, or user-facing behavior
      changed,
-   - updating `docs/handoff/STATUS.md` when significant state or gotchas
-     changed,
    - summarizing what changed and exactly what was verified.

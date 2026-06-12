@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-06-12, after dropped item persistence.
+Last updated: 2026-06-12, after render-distance polish.
 
 Groundwork is past MVP. The completed history is in `docs/goals/`; future work
 is organized by roadmap area in `ROADMAP.md`. Do not start roadmap work without
@@ -39,12 +39,6 @@ coverage includes MCEN persistence/corruption/isolation, entity unload/load and
 autosave, demo save isolation, water spread/drain/infinite/drop-seek/save/shore
 hop, and inventory/progression/furnace/UI migrations. Rendering changes were
 visually inspected with demo screenshots. Latest TSAN was not run.
-
-## Open Issue
-
-Render distance can exceed the fixed far plane. At distance 64, fog extends
-past what is drawn and the world hard-ends around 37 chunks. Decide whether to
-raise the far plane or cap the setting.
 
 ## Pointers
 
