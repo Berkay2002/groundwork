@@ -1,6 +1,8 @@
 #include "sim/Entity.h"
+#include "sim/EntitySave.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace {
 constexpr float ITEM_GRAVITY = -22.0f;
@@ -10,8 +12,15 @@ constexpr float MAGNET_RADIUS = 2.0f;   // starts flying to the player inside th
 constexpr float MAGNET_SPEED = 8.0f;
 constexpr float PICKUP_RADIUS = 0.8f;
 constexpr float MERGE_RADIUS = 0.75f;
-constexpr float PICKUP_DELAY = 0.4f;    // so fresh drops visibly pop out first
-constexpr float DESPAWN_SECONDS = 300.0f;
+
+ChunkKey chunkForPos(glm::vec3 pos) {
+    return {World::floorDiv((int)std::floor(pos.x), CHUNK_SIZE),
+            World::floorDiv((int)std::floor(pos.z), CHUNK_SIZE)};
+}
+
+bool sameChunk(glm::vec3 pos, ChunkKey key) {
+    return chunkForPos(pos) == key;
+}
 }
 
 float Entities::rand01() {
@@ -72,9 +81,9 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         ItemEntity& e = *up;
         e.prevPos = e.body.pos;
         if (!world.isAreaReady(e.body.pos, 0)) continue; // frozen in the void
-        e.age += dt;
+        if (e.ageTicks < UINT32_MAX) ++e.ageTicks;
         glm::vec3 center = e.body.pos + glm::vec3(0, e.body.height * 0.5f, 0);
-        bool canPick = e.age >= PICKUP_DELAY && inv != nullptr;
+        bool canPick = e.ageTicks >= PICKUP_DELAY_TICKS && inv != nullptr;
         if (canPick && glm::distance(center, target) < MAGNET_RADIUS) {
             e.body.vel = glm::normalize(target - center) * MAGNET_SPEED;
         } else {
@@ -92,7 +101,7 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             if (leftover == 0) e.dead = true;
             else e.stack.count = uint8_t(leftover); // inventory full: keep the remainder
         }
-        if (e.age > DESPAWN_SECONDS) e.dead = true;
+        if (e.ageTicks >= DESPAWN_TICKS) e.dead = true;
     }
 
     for (size_t i = 0; i < items_.size(); ++i) {
@@ -116,12 +125,87 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
     items_.erase(std::remove_if(items_.begin(), items_.end(),
                      [](const std::unique_ptr<ItemEntity>& e) { return e->dead; }),
                  items_.end());
+    rebuildBuckets();
+}
+
+void Entities::rebuildBuckets() {
     buckets_.clear();
     for (auto& up : items_) {
-        ChunkKey k{World::floorDiv((int)std::floor(up->body.pos.x), CHUNK_SIZE),
-                   World::floorDiv((int)std::floor(up->body.pos.z), CHUNK_SIZE)};
-        buckets_[k].push_back(up.get());
+        buckets_[chunkForPos(up->body.pos)].push_back(up.get());
     }
+}
+
+void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
+    if (loadedEntityChunks_.count(key)) return;
+    std::vector<SavedDroppedItem> saved;
+    EntityChunkLoadStatus status =
+        loadEntityChunkFile(entityChunkPath(saveDir, key), key, saved);
+    if (status == EntityChunkLoadStatus::Rejected) {
+        std::fprintf(stderr,
+                     "warning: entity chunk %d,%d has bad/old save format, discarding\n",
+                     key.x, key.z);
+    }
+    for (const SavedDroppedItem& s : saved) {
+        auto e = std::make_unique<ItemEntity>();
+        e->body.pos = s.pos;
+        e->body.vel = s.vel;
+        e->body.halfWidth = 0.125f;
+        e->body.height = 0.25f;
+        e->prevPos = s.pos;
+        e->stack = s.stack;
+        e->ageTicks = s.ageTicks;
+        e->spinSeed = s.spinSeed;
+        items_.push_back(std::move(e));
+    }
+    loadedEntityChunks_.insert(key);
+    rebuildBuckets();
+}
+
+bool Entities::saveLoadedChunkEntities(const std::string& saveDir, ChunkKey key,
+                                       bool saveEnabled) {
+    if (!loadedEntityChunks_.count(key)) return true;
+    if (!saveEnabled) return true;
+    std::vector<SavedDroppedItem> saved;
+    for (const auto& up : items_) {
+        const ItemEntity& e = *up;
+        if (!sameChunk(e.body.pos, key)) continue;
+        saved.push_back({e.body.pos, e.body.vel, e.ageTicks, e.spinSeed, e.stack});
+    }
+    bool ok = saveEntityChunkFile(entityChunkPath(saveDir, key), saved);
+    if (!ok)
+        std::fprintf(stderr, "warning: failed to save entity chunk %d,%d\n",
+                     key.x, key.z);
+    return ok;
+}
+
+void Entities::saveAndUnloadChunkEntities(const std::string& saveDir, ChunkKey key,
+                                          bool saveEnabled) {
+    if (saveEnabled) {
+        std::vector<SavedDroppedItem> saved;
+        for (const auto& up : items_) {
+            const ItemEntity& e = *up;
+            if (!sameChunk(e.body.pos, key)) continue;
+            saved.push_back({e.body.pos, e.body.vel, e.ageTicks, e.spinSeed, e.stack});
+        }
+        if (!saveEntityChunkFile(entityChunkPath(saveDir, key), saved))
+            std::fprintf(stderr, "warning: failed to save entity chunk %d,%d\n",
+                         key.x, key.z);
+    }
+    items_.erase(std::remove_if(items_.begin(), items_.end(),
+                     [&](const std::unique_ptr<ItemEntity>& e) {
+                         return sameChunk(e->body.pos, key);
+                     }),
+                 items_.end());
+    loadedEntityChunks_.erase(key);
+    rebuildBuckets();
+}
+
+void Entities::saveAllLoadedEntityChunks(const std::string& saveDir,
+                                         bool saveEnabled) {
+    if (!saveEnabled) return;
+    std::vector<ChunkKey> keys(loadedEntityChunks_.begin(), loadedEntityChunks_.end());
+    for (ChunkKey key : keys)
+        saveLoadedChunkEntities(saveDir, key, true);
 }
 
 std::vector<ItemEntity*> Entities::itemsNear(const glm::vec3& pos, float radius) const {

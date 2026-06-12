@@ -2108,6 +2108,109 @@ static void testEntityBucketsAndDrops() {
     std::filesystem::remove_all("test_ent_save4");
 }
 
+static void testItemAgeTicksAndDespawn() {
+    std::filesystem::remove_all("test_ent_age_ticks");
+    World w(1337, "test_ent_age_ticks");
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    w.setBlock(0, 70, 0, Block::Stone);
+
+    Entities ents;
+    ents.spawnItem(glm::vec3(0.5f, 71.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::Coal, 1));
+    CHECK(ents.items().size() == 1);
+    CHECK(ents.items()[0]->ageTicks == 0);
+    ents.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(ents.items()[0]->ageTicks == 1);
+
+    ents.items()[0]->ageTicks = DESPAWN_TICKS - 1;
+    ents.tick(w, glm::vec3(500.0f, 50.0f, 500.0f), nullptr, 0.05f);
+    CHECK(ents.items().empty());
+
+    std::filesystem::remove_all("test_ent_age_ticks");
+}
+
+static void testEntityChunkLifecycleApis() {
+    const char* dir = "test_ent_chunk_lifecycle";
+    std::filesystem::remove_all(dir);
+    ChunkKey a{0, 0}, b{1, 0}, empty{2, 0};
+
+    Entities ents;
+    ents.loadChunkEntities(dir, a);
+    ents.loadChunkEntities(dir, b);
+    ents.loadChunkEntities(dir, empty);
+
+    SavedDroppedItem stale;
+    stale.pos = {float(empty.x * CHUNK_SIZE) + 0.5f, 70.0f, 0.5f};
+    stale.stack = makeItemStack(ItemId::Coal, 1);
+    CHECK(saveEntityChunkFile(entityChunkPath(dir, empty), {stale}));
+    CHECK(ents.saveLoadedChunkEntities(dir, empty, true));
+    CHECK(!std::filesystem::exists(entityChunkPath(dir, empty)));
+
+    ents.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::Coal, 3));
+    ents.spawnItem(glm::vec3(17.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::DirtBlock, 1));
+    CHECK(ents.items().size() == 2);
+
+    CHECK(ents.saveLoadedChunkEntities(dir, a, true));
+    std::vector<SavedDroppedItem> loaded;
+    CHECK(loadEntityChunkFile(entityChunkPath(dir, a), a, loaded) ==
+          EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(loaded[0].stack.item == ItemId::Coal && loaded[0].stack.count == 3);
+
+    ents.loadChunkEntities(dir, a);
+    CHECK(ents.items().size() == 2); // idempotent: no duplicate load
+
+    ents.saveAndUnloadChunkEntities(dir, a, true);
+    CHECK(ents.items().size() == 1);
+    CHECK(ents.items()[0]->stack.item == ItemId::DirtBlock);
+
+    CHECK(loadEntityChunkFile(entityChunkPath(dir, a), a, loaded) ==
+          EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(loaded[0].stack.item == ItemId::Coal);
+
+    ents.saveAllLoadedEntityChunks(dir, true);
+    CHECK(loadEntityChunkFile(entityChunkPath(dir, b), b, loaded) ==
+          EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(loaded[0].stack.item == ItemId::DirtBlock);
+
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntitySaveDisabledDoesNotTouchDisk() {
+    const char* dir = "test_ent_save_disabled";
+    std::filesystem::remove_all(dir);
+    ChunkKey key{0, 0};
+
+    Entities ents;
+    ents.loadChunkEntities(dir, key);
+    ents.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::Coal, 1));
+    ents.saveAndUnloadChunkEntities(dir, key, false);
+    CHECK(ents.items().empty());
+    CHECK(!std::filesystem::exists(std::filesystem::path(dir) / "entities"));
+
+    SavedDroppedItem saved;
+    saved.pos = {0.5f, 70.0f, 0.5f};
+    saved.stack = makeItemStack(ItemId::Coal, 1);
+    std::string path = entityChunkPath(dir, key);
+    CHECK(saveEntityChunkFile(path, {saved}));
+    auto beforeSize = std::filesystem::file_size(path);
+
+    Entities loaded;
+    loaded.loadChunkEntities(dir, key);
+    CHECK(loaded.items().size() == 1);
+    loaded.saveAndUnloadChunkEntities(dir, key, false);
+    CHECK(loaded.items().empty());
+    CHECK(std::filesystem::exists(path));
+    CHECK(std::filesystem::file_size(path) == beforeSize);
+
+    std::filesystem::remove_all(dir);
+}
+
 static void testNonBlockItemIconMapping() {
     for (int i = 1; i < ITEM_TYPES; ++i) {
         ItemId id = ItemId(i);
@@ -3092,6 +3195,9 @@ int main() {
     testItemFrozenInUnloadedChunk();
     testItemEntityMerging();
     testEntityBucketsAndDrops();
+    testItemAgeTicksAndDespawn();
+    testEntityChunkLifecycleApis();
+    testEntitySaveDisabledDoesNotTouchDisk();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();
