@@ -2,9 +2,9 @@
 
 ## Status
 
-- **Current phase:** Execute (Phase 5)
-- **Current milestone:** M3 (InventoryUi module + visuals)
-- **Last checkpoint:** M2 reviewed and approved
+- **Current phase:** COMPLETE (verified 2026-06-12)
+- **Current milestone:** all (M1–M3) done, reviewed, cleaned up
+- **Last checkpoint:** final verification passed
 
 ## Log
 
@@ -150,6 +150,44 @@
 - Mid-validation interruption: a LNK1104 was caused by the user's own live
   play session holding groundwork.exe; user closed it, rebuild clean. The
   2:35–2:43 PM saves/world1 changes were the user's legitimate gameplay.
+
+### 2026-06-12 — FINAL VERIFICATION (goal complete)
+
+User skipped the final whole-implementation review (explicit instruction);
+verification ran in full. Because concurrent agents had unrelated in-flight
+edits in the shared working tree (a Block.h static_assert from their work
+broke the shared-tree build), verification ran against committed HEAD
+`a44f7ea` in an isolated git worktree, configured and built from scratch:
+
+- `cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_TOOLCHAIN_FILE=<vcpkg>` + `cmake --build build -j` → exit 0,
+  34/34 targets, warning-free.
+- `.\build\world_tests.exe` → `all tests passed`, exit 0 — includes the
+  9-column static_asserts, fill-all-36 overflow, v3→v4 migration
+  (r*8+c → r*9+c, durability preserved, column 8 empty), v4 round-trip,
+  updated v2 migration (row-0 and row-1 fixtures), v1/bad-header, panel
+  layout (non-overlap incl. recipe slots, uiSlotAt round-trips on all
+  three surfaces, armor slots decorative + hit-test none, midline
+  balance, fits at 1280×720).
+- `--demo-inv/--demo-craft/--demo-furnace --frames 240` → all exit 0,
+  screenshots written; controller-inspected: (a) inventory — gray beveled
+  panel, 4-slot armor column, dark player box, 2×2 grid + arrow + output
+  balanced in the right half, 3×9 grid, separated 9-slot hotbar, recipe
+  side panel, HUD hotbar dimmed under the overlay; (b) crafting — 3×3 +
+  arrow + output centered, same style; (c) furnace — input over fuel,
+  flame indicator, arrow, output, same style.
+- Fresh-machine save isolation: the worktree had NO saves/ directory;
+  after all three demo runs it still has none (constructor-time gating
+  works end-to-end). In the main tree, the earlier check confirmed
+  saves/world1 byte-identical across all three demo runs.
+- Stopping-condition walk: implementation committed (0307a56, 6245487,
+  a2233b2, 53c95d9, 94c227a, 19cd690+babed1c, b72c9ef, 4f47f9b, df17eb1);
+  inventory drawing lives in src/ui/InventoryUi.{h,cpp} and not main.cpp;
+  keys 1–9 select slots 0–8 (derived from HOTBAR_SLOTS=9, confirmed in M1
+  review); ROADMAP.md + docs/handoff/STATUS.md record the work; this
+  report is the final verification evidence.
+
+Goal complete.
 
 ## Parked Minor issues
 
