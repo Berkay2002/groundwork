@@ -2,9 +2,9 @@
 
 ## Status
 
-- **Current phase:** Plan (Phase 4)
-- **Current milestone:** —
-- **Last checkpoint:** spec approved
+- **Current phase:** Execute (Phase 5)
+- **Current milestone:** M1 (nine columns + save v4)
+- **Last checkpoint:** plan approved
 
 ## Log
 
@@ -34,6 +34,19 @@
 - Reviewer-model policy for this session (user instruction): Opus 4.8 for
   complex reviews (plan, milestone, final), Sonnet 4.6 for re-reviews/
   lighter checks.
+
+### 2026-06-12 — Plan approved
+
+- `plan.md` written: 3 milestones, 6 task contracts (M1: 9 cols + save v4,
+  M2: panel geometry, M3: InventoryUi module + visuals + demo flags).
+- Plan review round 1 (Opus 4.8): REJECTED — P1 Important (demo flags
+  persist demo state into real `saves/world1`; fixed: mandatory save
+  isolation skipping exit-path saves for all `--demo-*` runs + untouched-
+  saves validation), P2 Important (v2/v3 fixtures/readers must pin a
+  literal 32 source slots once SLOTS=36; fixed), P3–P5 Minor (ScreenKind
+  enum pinned to InventoryUi.h, HotbarView field types pinned, furnace
+  demo open-at-exact-position chain specified).
+- Re-review (Sonnet 4.6): APPROVED, all findings resolved, no regressions.
 
 ## Parked Minor issues
 
