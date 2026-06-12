@@ -22,6 +22,7 @@
 #include "render/Frustum.h"
 #include "render/GLCompat.h"
 #include "ui/Hud.h"
+#include "ui/InventoryUi.h"
 #include "sim/Inventory.h"
 #include "sim/Mining.h"
 #include "render/BreakOverlay.h"
@@ -109,7 +110,6 @@ void main() { FragColor = vec4(uColor, 1.0); }
 )";
 
 using Menu = ui::MenuPage; // pause-menu state
-enum class InventoryScreen { Inventory, CraftingTable, Furnace };
 
 struct App {
     GLFWwindow* window = nullptr;
@@ -119,7 +119,7 @@ struct App {
     Inventory inv;          // survival-mode item storage (row 0 = hotbar)
     ItemStack cursorStack;  // stack carried by the mouse in the inventory UI
     ui::CraftingUiState crafting{2};
-    InventoryScreen invScreen = InventoryScreen::Inventory;
+    ui::ScreenKind invScreen = ui::ScreenKind::Inventory;
     glm::ivec3 openFurnace{0};
     World* world = nullptr;
     Entities entities;
@@ -169,13 +169,13 @@ void returnCraftingGridToInventory() {
     }
 }
 
-void openInventoryScreen(GLFWwindow* w, InventoryScreen screen, glm::ivec3 pos = {}) {
+void openInventoryScreen(GLFWwindow* w, ui::ScreenKind screen, glm::ivec3 pos = {}) {
     resetBreakProgress();
     if (app.invOpen) returnCraftingGridToInventory();
     app.invOpen = true;
     app.invScreen = screen;
     app.openFurnace = pos;
-    app.crafting = ui::CraftingUiState(screen == InventoryScreen::CraftingTable ? 3 : 2);
+    app.crafting = ui::CraftingUiState(screen == ui::ScreenKind::CraftingTable ? 3 : 2);
     app.mouseCaptured = false;
     glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 }
@@ -217,7 +217,7 @@ void closeInventory(GLFWwindow* w) {
     resetBreakProgress();
     returnCraftingGridToInventory();
     app.invOpen = false;
-    app.invScreen = InventoryScreen::Inventory;
+    app.invScreen = ui::ScreenKind::Inventory;
     app.crafting = ui::CraftingUiState(2);
     if (!app.cursorStack.empty()) { // never destroy items on close
         int leftover = app.inv.addStack(app.cursorStack);
@@ -343,7 +343,7 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
         if (app.invOpen) {
             closeInventory(w);
         } else {
-            openInventoryScreen(w, InventoryScreen::Inventory);
+            openInventoryScreen(w, ui::ScreenKind::Inventory);
         }
     } else if (key == app.settings.keyModeToggle) {
         if (app.menu != Menu::None) return;
@@ -362,14 +362,14 @@ void keyCallback(GLFWwindow* w, int key, int, int action, int) {
 
 ui::UiSlot uiSlotAt(int w, int h, float mx, float my) {
     ui::InventoryLayout L = ui::inventoryLayout(w, h);
-    ui::InventorySurface surface = app.invScreen == InventoryScreen::Furnace
+    ui::InventorySurface surface = app.invScreen == ui::ScreenKind::Furnace
                                  ? ui::InventorySurface::Furnace
                                  : ui::InventorySurface::Crafting;
     return ui::uiSlotAt(L, surface, app.crafting.grid.width, mx, my);
 }
 
 FurnaceState* openFurnaceState() {
-    if (!app.world || app.invScreen != InventoryScreen::Furnace) return nullptr;
+    if (!app.world || app.invScreen != ui::ScreenKind::Furnace) return nullptr;
     return app.world->furnaceAt(app.openFurnace);
 }
 
@@ -596,112 +596,6 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
     // Drop shadow then text, for readability over bright sky.
     hud.drawText(11, 11, 2.0f, buf, 0, 0, 0, 0.6f);
     hud.drawText(10, 10, 2.0f, buf);
-}
-
-void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
-                   float brightness = 1.0f) {
-    if (s.empty()) return;
-    Block b = placeBlockForItem(s.item);
-    if (b != Block::Air) hud.drawTile(x, y, size, tileFor(b, 4), brightness);
-    else hud.drawTile(x, y, size, int(itemIconTile(s.item)), brightness);
-
-    const ItemDef& d = itemDef(s.item);
-    if (d.maxDurability > 0) {
-        float ratio = float(s.durability) / float(d.maxDurability);
-        hud.drawRect(x, y + size - 5.0f, size, 4.0f, 0.05f, 0.05f, 0.05f, 0.85f);
-        hud.drawRect(x + 1.0f, y + size - 4.0f, (size - 2.0f) * ratio, 2.0f,
-                     0.2f, 0.85f, 0.2f, 0.95f);
-    } else if (s.count > 1 || d.stackMax > 1) {
-        char cnt[4];
-        std::snprintf(cnt, sizeof(cnt), "%d", s.count);
-        float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
-        hud.drawText(x + size - cw - 2.0f, y + size - 14.0f, 1.5f, cnt);
-    }
-}
-
-void drawHotbar(Hud& hud, int screenW, int screenH) {
-    const float slot = 56.0f, pad = 4.0f, icon = slot - 2 * pad;
-    float totalW = HOTBAR_SLOTS * slot + (HOTBAR_SLOTS - 1) * pad;
-    float x0 = (screenW - totalW) * 0.5f;
-    float y = screenH - slot - 12.0f;
-    for (int i = 0; i < HOTBAR_SLOTS; ++i) {
-        float x = x0 + i * (slot + pad);
-        bool sel = (i == app.hotbarSlot);
-        if (sel) hud.drawRect(x - 3, y - 3, slot + 6, slot + 6, 1, 1, 1, 0.9f);
-        hud.drawRect(x, y, slot, slot, 0.1f, 0.1f, 0.1f, 0.65f);
-        // Icon: the side texture for grass, base tile otherwise. Survival
-        // shows the inventory's hotbar row with stack counts instead of the
-        // fixed creative palette.
-        if (app.survival) {
-            const ItemStack& s = app.inv.slots[i];
-            drawItemStack(hud, s, x + pad, y + pad, icon, sel ? 1.0f : 0.8f);
-        } else {
-            hud.drawTile(x + pad, y + pad, icon, tileFor(HOTBAR[i], 4), sel ? 1.0f : 0.8f);
-        }
-        char num[2] = {char('1' + i), 0};
-        hud.drawText(x + 4, y + 4, 1.0f, num, 1, 1, 1, 0.8f);
-    }
-    Block held = heldBlock();
-    if (!(app.survival && held == Block::Air)) { // empty slot: no label
-        const char* name = blockName(held);
-        float nameW = std::strlen(name) * Hud::GLYPH * 2.0f;
-        hud.drawText((screenW - nameW) * 0.5f, y - 26.0f, 2.0f, name);
-    }
-}
-
-void drawInventory(Hud& hud, GLFWwindow* w, int screenW, int screenH) {
-    hud.drawRect(0, 0, float(screenW), float(screenH), 0, 0, 0, 0.55f);
-    ui::InventoryLayout L = ui::inventoryLayout(screenW, screenH);
-    hud.drawText(L.x0, L.y0 - 26.0f, 2.0f, "Inventory");
-    for (int i = 0; i < Inventory::SLOTS; ++i) {
-        ui::Rect r = ui::inventorySlotRect(L, i);
-        hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, 0.9f);
-        drawItemStack(hud, app.inv.slots[i], r.x + L.pad, r.y + L.pad,
-                      L.slot - 2 * L.pad);
-    }
-    if (app.invScreen == InventoryScreen::Furnace) {
-        FurnaceState* f = openFurnaceState();
-        for (ui::FurnaceSlot slot : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
-                                     ui::FurnaceSlot::Output}) {
-            ui::Rect r = ui::furnaceSlotRect(L, slot);
-            hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
-            if (f) drawItemStack(hud, ui::furnaceSlotRef(*f, slot),
-                                 r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
-        }
-        if (f && f->burnTicksRemaining > 0)
-            hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).x + L.slot + 10.0f,
-                         ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).y + 8.0f,
-                         8.0f, 34.0f, 0.95f, 0.45f, 0.12f, 0.9f);
-        if (f && f->cookTicks > 0)
-            hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).x - 42.0f,
-                         ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).y + 24.0f,
-                         34.0f * (float(f->cookTicks) / 200.0f), 8.0f,
-                         0.8f, 0.8f, 0.8f, 0.9f);
-    } else {
-        int surface = app.crafting.grid.width;
-        for (int y = 0; y < surface; ++y)
-            for (int x = 0; x < surface; ++x) {
-                ui::Rect r = ui::craftSlotRect(L, surface, x, y);
-                hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
-                drawItemStack(hud, app.crafting.grid.at(x, y),
-                              r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
-            }
-        ui::Rect out = ui::craftOutputRect(L, surface);
-        hud.drawRect(out.x, out.y, out.w, out.h, 0.22f, 0.22f, 0.16f, 0.92f);
-        drawItemStack(hud, crafting::craftingOutput(app.crafting.grid),
-                      out.x + L.pad, out.y + L.pad, L.slot - 2 * L.pad);
-        std::vector<ItemStack> recipes = ui::recipeReferenceOutputs();
-        for (size_t i = 0; i < recipes.size(); ++i) {
-            ui::Rect r = ui::recipeReferenceSlotRect(L, int(i));
-            hud.drawRect(r.x, r.y, r.w, r.h, 0.12f, 0.12f, 0.12f, 0.75f);
-            drawItemStack(hud, recipes[i], r.x + 3.0f, r.y + 3.0f, 24.0f, 0.9f);
-        }
-    }
-    if (!app.cursorStack.empty()) { // stack riding the mouse
-        double mx, my;
-        glfwGetCursorPos(w, &mx, &my);
-        drawItemStack(hud, app.cursorStack, float(mx) - 20, float(my) - 20, 40);
-    }
 }
 
 void drawCrosshair(Hud& hud, int screenW, int screenH) {
@@ -1027,7 +921,7 @@ int main(int argc, char** argv) {
             app.breakProgress.ticks = 55;
             app.breakProgress.requiredTicks = 100;
         }
-        if (app.invOpen && app.invScreen == InventoryScreen::Furnace &&
+        if (app.invOpen && app.invScreen == ui::ScreenKind::Furnace &&
             !isFurnaceBlock(world.getBlock(app.openFurnace.x, app.openFurnace.y, app.openFurnace.z))) {
             closeInventory(app.window);
         }
@@ -1042,10 +936,10 @@ int main(int argc, char** argv) {
             if (app.survival && !app.input.sneak) {
                 Block target = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
                 if (target == Block::CraftingTable) {
-                    openInventoryScreen(app.window, InventoryScreen::CraftingTable);
+                    openInventoryScreen(app.window, ui::ScreenKind::CraftingTable);
                     app.placePressed = false;
                 } else if (isFurnaceBlock(target)) {
-                    openInventoryScreen(app.window, InventoryScreen::Furnace, hit.block);
+                    openInventoryScreen(app.window, ui::ScreenKind::Furnace, hit.block);
                     if (!world.furnaceAt(hit.block)) world.getOrCreateFurnace(hit.block);
                     app.placePressed = false;
                 }
@@ -1166,8 +1060,23 @@ int main(int argc, char** argv) {
         // Gameplay/debug UI is hidden while the pause menu owns the screen
         // (user feedback); F3 also toggles the debug overlay on its own.
         if (app.showDebug && !paused) drawDebugOverlay(hud, world, fps, frameMs, hit);
-        if (!paused) drawHotbar(hud, width, height);
-        if (app.invOpen) drawInventory(hud, app.window, width, height);
+        if (!paused) {
+            // Empty survival slot: no label. Otherwise show the held block name.
+            Block held = heldBlock();
+            const char* heldName =
+                (app.survival && held == Block::Air) ? nullptr : blockName(held);
+            ui::HotbarView hv{app.hotbarSlot, app.survival, app.inv,
+                              HOTBAR, HOTBAR_SLOTS, heldName};
+            ui::drawHotbar(hud, hv, width, height);
+        }
+        if (app.invOpen) {
+            double mx, my;
+            glfwGetCursorPos(app.window, &mx, &my);
+            ui::InventoryView iv{app.inv,    app.cursorStack, app.crafting,
+                                 app.invScreen, openFurnaceState(),
+                                 float(mx), float(my)};
+            ui::drawInventoryScreen(hud, iv, width, height);
+        }
         if (paused) drawPauseMenu(hud, app.window, width, height);
         hud.end();
 

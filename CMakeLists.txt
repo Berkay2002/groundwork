@@ -50,6 +50,7 @@ add_executable(groundwork
   src/render/GLCompat.cpp
   src/render/Texture.cpp
   src/ui/Hud.cpp
+  src/ui/InventoryUi.cpp
   src/world/Terrain.cpp
   src/audio/Audio.cpp
 )
