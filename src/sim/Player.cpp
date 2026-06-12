@@ -16,6 +16,15 @@ constexpr float TERMINAL = -60.0f;
 constexpr float WATER_GRAVITY = -10.0f;
 constexpr float WATER_TERMINAL = -4.0f;
 constexpr float SWIM_SPEED = 4.5f;
+// Swimming against a ledge with jump held: a moderately stronger climb
+// speed (Minecraft's out-of-water boost) so the player can get onto a
+// 1-block shore. It is applied every tick while still in the water and
+// pushing the wall — a sustained climb, not one launched impulse — and
+// deliberately only a little above SWIM_SPEED so the exit reads as
+// climbing out, with a small hop at the top. The plain SWIM_SPEED rise
+// dies under full gravity the moment the body leaves the water and just
+// bounces off the lip.
+constexpr float SHORE_HOP = 5.5f;
 }
 
 glm::vec3 Player::lookDir() const {
@@ -59,10 +68,16 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
         if (in.jump)  vel().y = speed;
         if (in.sneak) vel().y = -speed;
     } else {
-        // Swimming when the body's center is in water.
-        bool inWater = world.getBlock((int)std::floor(pos().x),
-                                      (int)std::floor(pos().y + HEIGHT * 0.5f),
-                                      (int)std::floor(pos().z)) == Block::Water;
+        // Swim physics keys off the body's CENTER only: that is what makes
+        // the player float chest-deep. Sampling the feet here too pushes
+        // the whole body above the surface — it reads as walking on water.
+        int bx = (int)std::floor(pos().x), bz = (int)std::floor(pos().z);
+        bool inWater = isWater(world.getBlock(
+            bx, (int)std::floor(pos().y + HEIGHT * 0.5f), bz));
+        // The feet check only extends the shore climb (below), so the push
+        // doesn't cut out while the body is already half over the lip.
+        bool feetInWater =
+            isWater(world.getBlock(bx, (int)std::floor(pos().y), bz));
         float speed = in.sprint ? SPRINT_SPEED : WALK_SPEED;
         if (inWater) speed *= 0.6f;
         vel().x = wish.x * speed;
@@ -71,11 +86,19 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
         float terminal = inWater ? WATER_TERMINAL : TERMINAL;
         if (vel().y < terminal) vel().y = terminal;
         if (in.jump) {
-            if (inWater) {
-                vel().y = SWIM_SPEED;
-            } else if (onGround()) {
+            if (onGround() && !inWater) {
+                // Standing (incl. wading with a dry torso): a real jump.
+                // Not when the center is submerged — a full jump impulse
+                // under water gravity would launch the player off a lakebed.
                 vel().y = JUMP_SPEED;
                 onGround() = false;
+            } else if ((inWater || feetInWater) && body_.hitWall) {
+                // Pressed against a ledge: a sustained, slightly stronger
+                // push that lasts until the feet clear the water — the
+                // player climbs out smoothly instead of being launched.
+                vel().y = SHORE_HOP;
+            } else if (inWater) {
+                vel().y = SWIM_SPEED;
             }
         }
     }

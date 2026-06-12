@@ -45,6 +45,7 @@ void moveBodyAxis(const World& world, Body& b, int axis, float amount) {
                 b.vel.y = 0.0f;
             } else {
                 b.vel[axis] = 0.0f;
+                b.hitWall = true;
             }
             break;
         }
@@ -53,6 +54,7 @@ void moveBodyAxis(const World& world, Body& b, int axis, float amount) {
 
 void moveBody(const World& world, Body& b, float dt) {
     b.onGround = false;
+    b.hitWall = false;
     moveBodyAxis(world, b, 1, b.vel.y * dt); // Y first for ground detection
     moveBodyAxis(world, b, 0, b.vel.x * dt);
     moveBodyAxis(world, b, 2, b.vel.z * dt);

@@ -1,4 +1,54 @@
-# Status (last updated: 2026-06-12, after Batch I inventory-UI addenda)
+# Status (last updated: 2026-06-12, after water physics + shore exit)
+
+### Water physics + shore-exit fix (2026-06-12)
+
+User-requested: Minecraft-style flowing water and a fix for being unable to
+climb out of water onto a 1-block shore.
+
+- **Block ids 24–31** (`WaterFlow1..7`, `WaterFall`, `BLOCK_TYPES = 32`):
+  flow level baked into the id like furnace facing — append-only, no save
+  version bump. `isWater()/waterLevel()/waterFlowBlock()` in `Block.h`; all
+  water rows share the source's predicates.
+- **Fluid sim** (`World::tickFluids`, main thread): queue-driven MC rules at
+  a 5-game-tick cadence (`FLUID_TICK_INTERVAL`). `setBlock` schedules the
+  cell + 6 neighbors (water only); flowing cells re-derive their level from
+  what feeds them (drain on source removal), water flows down as `WaterFall`
+  before creeping sideways at level−1, drop-seeking within 4 blocks (BFS),
+  and the ≥2-source infinite-pool rule keeps lakes/2×2 pools self-healing.
+  **Chunk integration seeds only *flowing* cells** (new chunk + neighbor
+  border ring) — border *sources* are deliberately never auto-scheduled, so
+  pristine generated lakes (all sources) stay byte-stable even when a cave
+  opens across a chunk border. Stable water never enters the queue.
+- **Mesher**: water left the greedy sweep; a dedicated per-cell pass emits
+  faces with level heights in exact 1/16ths (`round(16·L/9)`, source = the
+  classic 14/16, full under water above) and top corners blending to the max
+  of the cells sharing the corner (sloped flow). Known simplification:
+  water–water faces between different heights are still culled.
+- **Shore exit**: `Body.hitWall` (set on X/Z collision in `moveBodyAxis`).
+  Swim *float* physics keys off the body center only — sampling the feet
+  too made the player ride on top of the surface ("walking on water", user
+  feedback). The feet block extends only the shore *climb*: jump + hitWall
+  + (center or feet in water) applies `SHORE_HOP = 5.5` every tick, a
+  sustained climb that lasts until the feet clear the water, not one big
+  impulse (the first cut's 7.5 re-firing read as a launch — user feedback).
+  Jump priority: onGround + dry center = real jump (so wading against a
+  step still jumps 9.2), but never when the center is submerged (a full
+  impulse under water gravity would launch the player off a lakebed).
+  Torches still block water (no item-drop plumbing in `World`) — accepted
+  simplification.
+- `--demo-water` stages a poured source + stepped trench (save-isolated).
+  Tests: spread/decay symmetry, fall + drain-to-empty-queue, infinite
+  source + scoop refill, drop-seek directionality, flow-id save roundtrip
+  (+ resume queueing on load), sloped mesh corners, shore hop. NOTE for
+  fluid tests: platforms must be wide enough (17×17) that the radius-7
+  spread can't pour over the edge, or the cascade keeps the queue busy
+  past any tick cap.
+- Verified: warning-free incremental build, `world_tests` ×3, demo
+  screenshot inspected (pool with sub-block surface heights). TSAN not run
+  (Windows/MSVC session); rerun on Linux when convenient. Test runs show
+  sporadic `failed to write level.bin/chunk` warnings that appear to be
+  *concurrent* world_tests.exe instances (multiple agents) racing on the
+  shared `test_saves_*` temp dirs — all save-roundtrip CHECKs pass.
 
 ### Batch I inventory-UI addenda (2026-06-12)
 

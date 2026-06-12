@@ -119,7 +119,8 @@ ItemRenderer::~ItemRenderer() {
 
 void ItemRenderer::draw(const World& world, const Entities& entities,
                         const glm::mat4& viewProj, const glm::vec3& eye,
-                        float alpha, float time, float sunLevel) {
+                        float alpha, float time, float sunLevel,
+                        float heldLight) {
     if (entities.items().empty()) return;
     shader_.use();
     glDisable(GL_CULL_FACE);
@@ -157,7 +158,14 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         // day/night cycle, torch light doesn't.
         float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
         float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
-        glUniform1f(locLight_, std::max(sunBr * sunLevel, blkBr));
+        // Hand-light falloff (matches the chunk shader's uHeldLight) plus
+        // self-glow: a dropped torch is lit by its own emission.
+        float handLvl = std::max(0.0f, heldLight - glm::distance(p, eye));
+        float handBr = std::pow(0.85f, 15.0f - handLvl);
+        float selfBr = std::pow(
+            0.85f, float(15 - lightEmission(placeBlockForItem(e.stack.item))));
+        glUniform1f(locLight_,
+                    std::max({sunBr * sunLevel, blkBr, handBr, selfBr}));
         glBindVertexArray(cube ? cubeVao_ : billboardVao_);
         glDrawArrays(GL_TRIANGLES, 0, cube ? 36 : 6);
     }
@@ -170,6 +178,9 @@ void ItemRenderer::drawHeld(const World& world, const ItemStack& stack,
                             float swing) {
     bool arm = stack.empty();
     bool cube = !arm && itemUsesBlockCube(stack.item);
+    // Sprite-drawn placeables (torch): held upright, flame up — the rolled
+    // tool pose would lay the torch on its side.
+    bool upright = !arm && !cube && placeBlockForItem(stack.item) != Block::Air;
 
     shader_.use();
     glClear(GL_DEPTH_BUFFER_BIT); // viewmodel never clips into world geometry
@@ -179,11 +190,18 @@ void ItemRenderer::drawHeld(const World& world, const ItemStack& stack,
     glm::mat4 proj = glm::perspective(glm::radians(62.0f), aspect, 0.05f, 4.0f);
     float s = std::sin(swing * 3.14159265f); // 0..1..0 chop arc
     glm::mat4 m(1.0f);
-    m = glm::translate(m, cube || arm
+    m = glm::translate(m, cube || arm || upright
                               ? glm::vec3(0.78f - 0.26f * s, -0.68f - 0.2f * s, -1.15f)
                               : glm::vec3(1.0f - 0.3f * s, -0.48f - 0.22f * s, -1.15f));
     m = glm::rotate(m, glm::radians(-70.0f) * s, glm::vec3(1, 0, 0));
-    if (cube) {
+    if (upright) {
+        // Single upright sprite, slightly yawed so it isn't edge-on, tilted
+        // a touch toward the view like Minecraft's held torch.
+        m = glm::rotate(m, glm::radians(-35.0f), glm::vec3(0, 1, 0));
+        m = glm::rotate(m, glm::radians(12.0f), glm::vec3(0, 0, 1));
+        m = glm::scale(m, glm::vec3(0.75f));
+        m = glm::translate(m, glm::vec3(0, -0.35f, 0));
+    } else if (cube) {
         // Mini block held at a Minecraft-like angle.
         m = glm::rotate(m, glm::radians(40.0f), glm::vec3(0, 1, 0));
         m = glm::scale(m, glm::vec3(0.4f));
@@ -224,7 +242,12 @@ void ItemRenderer::drawHeld(const World& world, const ItemStack& stack,
         wz = (int)std::floor(eye.z);
     float sunBr = std::pow(0.85f, float(15 - world.sunLightAt(wx, wy, wz)));
     float blkBr = std::pow(0.85f, float(15 - world.blockLightAt(wx, wy, wz)));
-    glUniform1f(locLight_, std::max(sunBr * sunLevel, blkBr));
+    // An emissive held item (torch) lights itself: never darker than its
+    // own emission, so the viewmodel flame glows in a pitch-black cave.
+    float selfBr = arm ? 0.0f
+                       : std::pow(0.85f, float(15 - lightEmission(
+                                              placeBlockForItem(stack.item))));
+    glUniform1f(locLight_, std::max({sunBr * sunLevel, blkBr, selfBr}));
 
     bool useCubeVao = cube || arm;
     glBindVertexArray(useCubeVao ? cubeVao_ : billboardVao_);

@@ -12,6 +12,7 @@ struct Body {
     float halfWidth = 0.3f;
     float height = 1.8f;
     bool onGround = false;
+    bool hitWall = false; // collided on X or Z during the last moveBody
 };
 
 bool bodyCollidesAt(const World& world, const Body& b, const glm::vec3& p);

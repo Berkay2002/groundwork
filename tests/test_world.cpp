@@ -35,7 +35,7 @@ static int failures = 0;
 } while (0)
 
 static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
-static_assert(BLOCK_TYPES == 24, "Block ids are saved data; append ids only");
+static_assert(BLOCK_TYPES == 32, "Block ids are saved data; append ids only");
 
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
@@ -354,6 +354,37 @@ static void testRaycast() {
     // A ray pointing at the sky hits nothing.
     RaycastHit miss = w.raycast(glm::vec3(8.5f, top + 3.0f, 8.5f), glm::vec3(0, 1, 0), 10.0f);
     CHECK(!miss.hit);
+    std::filesystem::remove_all(dir);
+}
+
+static void testTorchRaycastTargetsPost() {
+    const char* dir = "test_saves_tmp_torch";
+    std::filesystem::remove_all(dir);
+    World w(7, dir);
+    w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+
+    // Torch in open air with a stone block one cell behind it.
+    w.setBlock(8, 70, 8, Block::Torch);
+    w.setBlock(8, 70, 10, Block::Stone);
+
+    // Straight at the post: hits the torch, adjacent is the approach cell.
+    RaycastHit onPost = w.raycast(glm::vec3(8.5f, 70.3f, 6.0f), glm::vec3(0, 0, 1), 10.0f);
+    CHECK(onPost.hit);
+    CHECK(onPost.block == glm::ivec3(8, 70, 8));
+    CHECK(onPost.adjacent == glm::ivec3(8, 70, 7));
+
+    // Through the torch's cell but past the thin post (x left of it): the ray
+    // must pass through and hit the stone behind instead of the torch.
+    RaycastHit pastPost = w.raycast(glm::vec3(8.1f, 70.3f, 6.0f), glm::vec3(0, 0, 1), 10.0f);
+    CHECK(pastPost.hit);
+    CHECK(pastPost.block == glm::ivec3(8, 70, 10));
+    CHECK(pastPost.adjacent == glm::ivec3(8, 70, 9));
+
+    // Above the post (torch is only 10/16 tall): also passes through.
+    RaycastHit abovePost = w.raycast(glm::vec3(8.5f, 70.8f, 6.0f), glm::vec3(0, 0, 1), 10.0f);
+    CHECK(abovePost.hit);
+    CHECK(abovePost.block == glm::ivec3(8, 70, 10));
+
     std::filesystem::remove_all(dir);
 }
 
@@ -682,6 +713,10 @@ static void testWaterMesh() {
     MeshData md = buildMeshData(s);
     CHECK(md.inds.empty());
     CHECK(md.waterInds.size() == 6u * 6);
+    // A surface source renders at the classic 14/16 height.
+    int maxY = 0;
+    for (const ChunkVertex& v : md.waterVerts) maxY = std::max(maxY, int(v.y));
+    CHECK(maxY == 40 * 16 + 14);
 
     // Water on stone: the shared pair is one stone face (drawn, water is not
     // opaque) and one water face (culled against opaque).
@@ -690,12 +725,218 @@ static void testWaterMesh() {
     CHECK(md.inds.size() == 6u * 6);      // all stone faces incl. under water
     CHECK(md.waterInds.size() == 5u * 6); // water bottom culled
 
-    // Stacked water culls the water-water pair, and the uniformly-lit side
-    // columns greedy-merge: 4 sides + top + bottom = 6 quads.
+    // Stacked water culls the water-water pair. Water is meshed per cell
+    // (heights vary with fluid level), so the column is bottom cell 4 sides
+    // + bottom face, top cell 4 sides + top = 10 quads.
     s.blocks[at(8, 39, 8)] = Block::Water;
     md = buildMeshData(s);
     CHECK(md.inds.empty());
-    CHECK(md.waterInds.size() == 6u * 6);
+    CHECK(md.waterInds.size() == 10u * 6);
+    // The submerged bottom cell's sides reach the full 16/16; the exposed
+    // top cell renders at source height again.
+    maxY = 0;
+    for (const ChunkVertex& v : md.waterVerts) maxY = std::max(maxY, int(v.y));
+    CHECK(maxY == 40 * 16 + 14);
+}
+
+static void testWaterFlowMeshSlope() {
+    // A source next to a level-7 flow on a stone floor: the flow's top face
+    // slopes from the shared corners (source height 14) down to its far
+    // corners (level-7 height 12).
+    ChunkSnapshot s;
+    s.blocks.assign(Chunk::rawSize(), Block::Air);
+    auto at = [](int x, int y, int z) { return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x; };
+    for (int x = 7; x <= 10; ++x)
+        for (int z = 7; z <= 9; ++z) s.blocks[at(x, 39, z)] = Block::Stone;
+    s.blocks[at(8, 40, 8)] = Block::Water;
+    s.blocks[at(9, 40, 8)] = Block::WaterFlow7;
+    MeshData md = buildMeshData(s);
+    bool sharedCorner = false, farCorner = false;
+    for (const ChunkVertex& v : md.waterVerts) {
+        if (v.x == 9 * 16 && v.y == 40 * 16 + 14) sharedCorner = true;
+        if (v.x == 10 * 16 && v.y == 40 * 16 + 12) farCorner = true;
+    }
+    CHECK(sharedCorner);
+    CHECK(farCorner);
+}
+
+// Advance n fluid steps (each is FLUID_TICK_INTERVAL game ticks).
+static void stepFluids(World& w, int n) {
+    for (int i = 0; i < n * World::FLUID_TICK_INTERVAL; ++i) w.tickFluids();
+}
+
+// Stamp a one-block-thick stone floor (and clear the two layers above it)
+// so fluid tests run on deterministic mid-air terrain like the body tests.
+static void stampFloor(World& w, int x0, int x1, int z0, int z1, int y) {
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z) {
+            w.setBlock(x, y, z, Block::Stone);
+            w.setBlock(x, y + 1, z, Block::Air);
+            w.setBlock(x, y + 2, z, Block::Air);
+        }
+}
+
+static void testWaterHelpers() {
+    CHECK(isWater(Block::Water));
+    CHECK(isWater(Block::WaterFlow1) && isWater(Block::WaterFlow7));
+    CHECK(isWater(Block::WaterFall));
+    CHECK(!isWater(Block::Air) && !isWater(Block::Stone));
+    CHECK(waterLevel(Block::Water) == 8);
+    CHECK(waterLevel(Block::WaterFall) == 8);
+    CHECK(waterLevel(Block::WaterFlow1) == 1);
+    CHECK(waterLevel(Block::WaterFlow7) == 7);
+    CHECK(waterLevel(Block::Stone) == 0);
+    CHECK(waterFlowBlock(7) == Block::WaterFlow7);
+    CHECK(waterFlowBlock(1) == Block::WaterFlow1);
+    // Flow blocks share the source's predicates.
+    for (Block b : {Block::WaterFlow1, Block::WaterFlow7, Block::WaterFall}) {
+        CHECK(!isSolid(b) && !isCollidable(b) && !isOpaque(b));
+        CHECK(dimsSunlight(b));
+    }
+}
+
+static void testWaterSpreads() {
+    std::filesystem::remove_all("test_fluid_spread");
+    {
+    World w(1337, "test_fluid_spread");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 2, 10000);
+    // 17x17 open floor: no holes anywhere near, so water spreads evenly.
+    stampFloor(w, 0, 16, 0, 16, 70);
+    w.setBlock(8, 71, 8, Block::Water);
+    stepFluids(w, 12);
+    // Classic spread: level decays one per block, 7 blocks in each direction.
+    CHECK(w.getBlock(9, 71, 8) == Block::WaterFlow7);
+    CHECK(w.getBlock(12, 71, 8) == Block::WaterFlow4);
+    CHECK(w.getBlock(15, 71, 8) == Block::WaterFlow1);
+    CHECK(w.getBlock(16, 71, 8) == Block::Air); // out of range
+    CHECK(w.getBlock(8, 71, 1) == Block::WaterFlow1);  // symmetric in z
+    CHECK(w.getBlock(1, 71, 8) == Block::WaterFlow1);  // and in -x
+    // The source itself never degrades.
+    CHECK(w.getBlock(8, 71, 8) == Block::Water);
+    }
+    std::filesystem::remove_all("test_fluid_spread");
+}
+
+static void testWaterFlowsDownAndDrains() {
+    std::filesystem::remove_all("test_fluid_fall");
+    {
+    World w(1337, "test_fluid_fall");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 2, 10000);
+    // 17x17: wide enough that the radius-7 spread never pours over the
+    // platform edge (an edge waterfall cascades down the terrain below and
+    // keeps the queue busy for hundreds of ticks).
+    stampFloor(w, 0, 16, 0, 16, 70);
+    for (int y = 72; y <= 75; ++y) w.setBlock(8, y, 8, Block::Air);
+    // A source held in the air: water falls as a full column, then spreads
+    // from where it lands.
+    w.setBlock(8, 75, 8, Block::Water);
+    stepFluids(w, 16);
+    CHECK(w.getBlock(8, 74, 8) == Block::WaterFall);
+    CHECK(w.getBlock(8, 71, 8) == Block::WaterFall);
+    CHECK(w.getBlock(9, 71, 8) == Block::WaterFlow7);
+    CHECK(w.getBlock(8, 71, 9) == Block::WaterFlow7);
+    // Removing the source drains the whole flow.
+    w.setBlock(8, 75, 8, Block::Air);
+    for (int i = 0; i < 300 && w.fluidQueueSize() > 0; ++i) w.tickFluids();
+    CHECK(w.fluidQueueSize() == 0);
+    for (int y = 70; y <= 75; ++y)
+        for (int x = 0; x <= 16; ++x)
+            for (int z = 0; z <= 16; ++z)
+                CHECK(!isWater(w.getBlock(x, y, z)));
+    }
+    std::filesystem::remove_all("test_fluid_fall");
+}
+
+static void testInfiniteSourceRule() {
+    std::filesystem::remove_all("test_fluid_inf");
+    {
+    World w(1337, "test_fluid_inf");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 2, 10000);
+    stampFloor(w, 0, 16, 0, 16, 70); // wide: no spill over the edges
+    // Two sources with a gap: the cell between them has two horizontal
+    // source neighbors over solid ground and becomes a source itself.
+    w.setBlock(7, 71, 8, Block::Water);
+    w.setBlock(9, 71, 8, Block::Water);
+    stepFluids(w, 6);
+    CHECK(w.getBlock(8, 71, 8) == Block::Water);
+    // Scooping the new source refills it (the infinite 2x2-pool mechanic).
+    w.setBlock(8, 71, 8, Block::Air);
+    stepFluids(w, 6);
+    CHECK(w.getBlock(8, 71, 8) == Block::Water);
+    }
+    std::filesystem::remove_all("test_fluid_inf");
+}
+
+static void testDropSeeking() {
+    std::filesystem::remove_all("test_fluid_seek");
+    {
+    World w(1337, "test_fluid_seek");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 2, 10000);
+    stampFloor(w, 2, 14, 2, 14, 70);
+    // A hole in the floor 3 blocks east of the source: water seeks it and
+    // spreads only toward it instead of in all four directions.
+    w.setBlock(11, 70, 8, Block::Air);
+    w.setBlock(8, 71, 8, Block::Water);
+    stepFluids(w, 1);
+    CHECK(w.getBlock(9, 71, 8) == Block::WaterFlow7);
+    CHECK(w.getBlock(7, 71, 8) == Block::Air);
+    CHECK(w.getBlock(8, 71, 9) == Block::Air);
+    CHECK(w.getBlock(8, 71, 7) == Block::Air);
+    }
+    std::filesystem::remove_all("test_fluid_seek");
+}
+
+static void testFlowBlocksSaveRoundtrip() {
+    const char* dir = "test_fluid_save";
+    std::filesystem::remove_all(dir);
+    {
+        World w(99, dir);
+        w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+        w.setBlock(5, 60, 5, Block::WaterFlow3);
+        w.setBlock(5, 61, 5, Block::WaterFall);
+        w.saveAllModified();
+    }
+    {
+        // Flow ids are saved bytes like any other block; loading must not
+        // clamp them away (and must queue them to resume flowing).
+        World w(99, dir);
+        w.waitUntilLoaded(glm::vec3(8, 40, 8), 1, 5000);
+        CHECK(w.getBlock(5, 60, 5) == Block::WaterFlow3);
+        CHECK(w.getBlock(5, 61, 5) == Block::WaterFall);
+        CHECK(w.fluidQueueSize() > 0);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+static void testShoreHop() {
+    std::filesystem::remove_all("test_shore_hop");
+    {
+    World w(1337, "test_shore_hop");
+    w.waitUntilLoaded(glm::vec3(8.5f, 50.0f, 8.5f), 1, 10000);
+    // A 1x1 pool sunk into a stone deck: the player swims against the
+    // east wall holding jump and must climb out onto the 1-block lip.
+    for (int x = 6; x <= 12; ++x)
+        for (int z = 6; z <= 12; ++z)
+            for (int y = 69; y <= 70; ++y) w.setBlock(x, y, z, Block::Stone);
+    for (int x = 6; x <= 12; ++x)
+        for (int z = 6; z <= 12; ++z)
+            for (int y = 71; y <= 74; ++y) w.setBlock(x, y, z, Block::Air);
+    w.setBlock(8, 70, 8, Block::Water);
+
+    Player p;
+    p.pos() = glm::vec3(8.5f, 70.0f, 8.5f);
+    p.yaw = 0.0f; // +X
+    PlayerInput in;
+    in.forward = true;
+    in.jump = true;
+    bool out = false;
+    for (int i = 0; i < 120 && !out; ++i) {
+        p.update(w, in, 0.05f);
+        out = p.pos().x > 9.2f && p.pos().y >= 70.95f;
+    }
+    CHECK(out); // without the shore hop the player just bounces off the lip
+    }
+    std::filesystem::remove_all("test_shore_hop");
 }
 
 static void testTorchMesh() {
@@ -1655,7 +1896,10 @@ static void testEntityBucketsAndDrops() {
 static void testNonBlockItemIconMapping() {
     for (int i = 1; i < ITEM_TYPES; ++i) {
         ItemId id = ItemId(i);
-        bool blockItem = placeBlockForItem(id) != Block::Air;
+        // The torch is the one placeable that renders as a flat sprite (its
+        // in-world shape is a thin post, not a cube).
+        bool blockItem = placeBlockForItem(id) != Block::Air &&
+                         id != ItemId::TorchBlock;
         if (blockItem) {
             CHECK(itemUsesBlockCube(id));
         } else {
@@ -1664,6 +1908,7 @@ static void testNonBlockItemIconMapping() {
             CHECK(int(itemIconTile(id)) < ATLAS_TILES);
         }
     }
+    CHECK(itemIconTile(ItemId::TorchBlock) == TileId::Torch);
     CHECK(itemIconTile(ItemId::Coal) != itemIconTile(ItemId::IronIngot));
     CHECK(itemIconTile(ItemId::WoodPickaxe) != itemIconTile(ItemId::WoodAxe));
 }
@@ -2578,6 +2823,14 @@ int main() {
     testWaterPredicates();
     testWaterGeneration();
     testWaterMesh();
+    testWaterFlowMeshSlope();
+    testWaterHelpers();
+    testWaterSpreads();
+    testWaterFlowsDownAndDrains();
+    testInfiniteSourceRule();
+    testDropSeeking();
+    testFlowBlocksSaveRoundtrip();
+    testShoreHop();
     testWaterLight();
     testSunlight();
     testTorchLight();
@@ -2595,6 +2848,7 @@ int main() {
     testAtomicSaveOverwritesExisting();
     testUnloadSaves();
     testRaycast();
+    testTorchRaycastTargetsPost();
     testBodyPhysics();
     testMoveBodyAxisFlushBoundaries();
     testPlayerOwnsCanonicalBody();

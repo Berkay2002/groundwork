@@ -238,21 +238,19 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                 for (int gu = 0; gu < NU; ++gu, idx += STRIDE[A.ua]) {
                     Key key{0, 0};
                     Block b = s.blocks[idx];
-                    if (b != Block::Air && b != Block::Torch) {
+                    // Torch and water are non-cube geometry with their own
+                    // dedicated passes below.
+                    if (b != Block::Air && b != Block::Torch && !isWater(b)) {
                         p[A.ua] = gu;
                         int np[3] = {p[0], p[1], p[2]};
                         np[A.na] += A.ns;
                         Block nb = edgeSlice ? blockAt(np[0], np[1], np[2])
                                              : s.blocks[idx + nstep];
-                        bool water = (b == Block::Water);
-                        // Water faces show only against air/torch: water-water
-                        // and water-opaque pairs are culled, so a lake is one
-                        // surface. Non-cubes (torch, water) don't hide faces.
-                        bool visible = water ? !(nb == Block::Water || isOpaque(nb))
-                                             : !isOpaque(nb);
+                        // Non-cubes (torch, water) don't hide cube faces.
+                        bool visible = !isOpaque(nb);
                         if (visible) {
                             uint8_t qs[4], qb[4];
-                            shadeFace(f, np[0], np[1], np[2], water, qs, qb);
+                            shadeFace(f, np[0], np[1], np[2], false, qs, qb);
                             key.first = (1ull << 40) | (uint64_t(b) << 32) |
                                         (uint64_t(qs[0]) << 24) | (uint64_t(qs[1]) << 16) |
                                         (uint64_t(qs[2]) << 8) | qs[3];
@@ -286,9 +284,7 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                                      uint8_t(key.first >> 8), uint8_t(key.first)};
                     uint8_t qb[4] = {uint8_t(key.second >> 24), uint8_t(key.second >> 16),
                                      uint8_t(key.second >> 8), uint8_t(key.second)};
-                    bool water = (b == Block::Water);
-                    emitQuad(water ? md.waterVerts : md.verts,
-                             water ? md.waterInds : md.inds,
+                    emitQuad(md.verts, md.inds,
                              f, n, gu, gv, w, h, tileFor(b, f), qs, qb);
                     gu += w;
                 }
@@ -331,6 +327,85 @@ MeshData buildMeshData(const ChunkSnapshot& s) {
                     }
                     md.inds.push_back(base + 0); md.inds.push_back(base + 1); md.inds.push_back(base + 2);
                     md.inds.push_back(base + 0); md.inds.push_back(base + 2); md.inds.push_back(base + 3);
+                }
+            }
+        }
+    }
+
+    // Water is meshed per cell, not greedily: a surface cell renders at its
+    // fluid level's height, sloping toward lower neighbors like Minecraft,
+    // so quads differ cell to cell. Culling keeps it cheap — water-water and
+    // water-opaque faces are invisible, so a lake still only draws its
+    // surface and the edges that touch air. Heights are integer 1/16ths
+    // (h = round(16 * level / 9); a source is the classic 14/16), so the
+    // packed vertex format holds them exactly.
+    {
+        static const int H16[9] = {0, 2, 4, 5, 7, 9, 11, 12, 14};
+        // Surface height at a top lattice corner (cx, cz in {0,1}): the
+        // highest of the up-to-four water cells sharing the corner; full if
+        // any of them is submerged (has water above), since the surface
+        // continues above this cell's top.
+        auto cornerH = [&](int x, int y, int z, int cx, int cz) -> int {
+            int h = 0;
+            for (int dz = cz - 1; dz <= cz; ++dz)
+                for (int dx = cx - 1; dx <= cx; ++dx) {
+                    Block n = blockAt(x + dx, y, z + dz);
+                    if (!isWater(n)) continue;
+                    if (isWater(blockAt(x + dx, y + 1, z + dz))) return 16;
+                    h = std::max(h, H16[waterLevel(n)]);
+                }
+            return h;
+        };
+        const int tile = tileFor(Block::Water, 0);
+        for (int y = 0; y <= topY; ++y) {
+            for (int z = 0; z < CS; ++z) {
+                for (int x = 0; x < CS; ++x) {
+                    Block b = s.blocks[(y * CS + z) * CS + x];
+                    if (!isWater(b)) continue;
+                    Block above = blockAt(x, y + 1, z);
+                    bool full = isWater(above);
+                    int ch[2][2];
+                    for (int cz2 = 0; cz2 < 2; ++cz2)
+                        for (int cx2 = 0; cx2 < 2; ++cx2)
+                            ch[cx2][cz2] = full ? 16 : cornerH(x, y, z, cx2, cz2);
+                    // One face per open side; flat per-face water lighting
+                    // (shadeFace's water path) keeps a lake one even sheet.
+                    auto pushQuad = [&](int f, int lx2, int ly2, int lz2) {
+                        uint8_t qs[4], qb[4];
+                        shadeFace(f, lx2, ly2, lz2, true, qs, qb);
+                        const FaceDef& fd = FACES[f];
+                        uint32_t base = uint32_t(md.waterVerts.size());
+                        for (int v = 0; v < 4; ++v) {
+                            int gx = int(fd.corners[v][0]);
+                            int gy = int(fd.corners[v][1]);
+                            int gz = int(fd.corners[v][2]);
+                            // Top vertices follow the corner surface height.
+                            int hy = gy ? ch[gx][gz] : 0;
+                            int u = int(FACE_UV[v][0]) * 16;
+                            // Side faces map v to the height so the tile is
+                            // not stretched; top/bottom keep the full tile.
+                            int vv = (f == 2 || f == 3) ? int(FACE_UV[v][1]) * 16 : hy;
+                            md.waterVerts.push_back(
+                                {uint16_t(x * 16 + gx * 16),
+                                 uint16_t(y * 16 + hy),
+                                 uint16_t(z * 16 + gz * 16),
+                                 uint16_t(u), uint16_t(vv),
+                                 qs[v], qb[v], uint8_t(tile), 0});
+                        }
+                        md.waterInds.push_back(base + 0);
+                        md.waterInds.push_back(base + 1);
+                        md.waterInds.push_back(base + 2);
+                        md.waterInds.push_back(base + 0);
+                        md.waterInds.push_back(base + 2);
+                        md.waterInds.push_back(base + 3);
+                    };
+                    auto open = [&](Block n) { return !isWater(n) && !isOpaque(n); };
+                    if (open(above)) pushQuad(2, x, y + 1, z);
+                    if (open(blockAt(x, y - 1, z))) pushQuad(3, x, y - 1, z);
+                    if (open(blockAt(x + 1, y, z))) pushQuad(0, x + 1, y, z);
+                    if (open(blockAt(x - 1, y, z))) pushQuad(1, x - 1, y, z);
+                    if (open(blockAt(x, y, z + 1))) pushQuad(4, x, y, z + 1);
+                    if (open(blockAt(x, y, z - 1))) pushQuad(5, x, y, z - 1);
                 }
             }
         }

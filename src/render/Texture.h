@@ -16,11 +16,15 @@ unsigned createBlockTextureArray();
 unsigned createBreakTextureArray();
 
 inline bool itemUsesBlockCube(ItemId item) {
-    return placeBlockForItem(item) != Block::Air;
+    // The torch places a block but isn't a cube in-world (thin post), so its
+    // dropped/held form is the flat cut-out sprite, like Minecraft.
+    Block b = placeBlockForItem(item);
+    return b != Block::Air && b != Block::Torch;
 }
 
 inline TileId itemIconTile(ItemId item) {
     switch (item) {
+        case ItemId::TorchBlock: return TileId::Torch;
         case ItemId::Stick: return TileId::ItemStick;
         case ItemId::Coal: return TileId::ItemCoal;
         case ItemId::RawIron: return TileId::ItemRawIron;

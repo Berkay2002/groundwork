@@ -90,6 +90,14 @@ public:
     void saveAllModified();
     WorldStats stats() const;
 
+    // Minecraft-style water spreading, main thread only. Call once per game
+    // tick; cells actually re-evaluate every FLUID_TICK_INTERVAL ticks
+    // (Minecraft's water rate). Only cells touched by setBlock (or resumed
+    // flows on chunk load) are queued — stable water costs nothing.
+    static constexpr int FLUID_TICK_INTERVAL = 5;
+    void tickFluids();
+    size_t fluidQueueSize() const { return fluidQueue_.size(); }
+
     FurnaceState& getOrCreateFurnace(glm::ivec3 pos);
     FurnaceState* furnaceAt(glm::ivec3 pos);
     const FurnaceState* furnaceAt(glm::ivec3 pos) const;
@@ -125,6 +133,13 @@ private:
     void markDirty(Chunk& c);
     ChunkSnapshot snapshot(const Chunk& c) const;
 
+    // Fluid simulation internals (see tickFluids).
+    void scheduleFluid(int wx, int wy, int wz);
+    void scheduleFluidAround(int wx, int wy, int wz);
+    void seedFluidsFromChunk(int cx, int cz);
+    void updateFluidCell(int wx, int wy, int wz);
+    int fluidSpreadMask(int wx, int wy, int wz) const;
+
     bool demoMode_ = false; // if true, all save operations are suppressed
     uint32_t seed_;
     float dayTime_ = 0.0f; // seconds; 0 = morning
@@ -132,6 +147,11 @@ private:
     std::string saveDir_;
     std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash> chunks_;
     BlockEntityStore blockEntities_;
+
+    // Pending fluid cells (queue + dedupe set of packed positions).
+    std::vector<glm::ivec3> fluidQueue_;
+    std::unordered_set<int64_t> fluidPending_;
+    int fluidTickCounter_ = 0;
 
     // Generation pipeline (pendingGen_ is main-thread only).
     std::unordered_set<ChunkKey, ChunkKeyHash> pendingGen_;

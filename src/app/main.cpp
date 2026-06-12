@@ -65,12 +65,14 @@ out vec2 vUV;
 flat out float vLayer;
 out float vLight;
 out float vDist;
+out vec3 vWorld;
 void main() {
     vUV = vec2(aUV) / 16.0;
     vLayer = float(aLightLayer.z);
     vLight = max(float(aLightLayer.x) / 255.0 * uSunLevel,
                  float(aLightLayer.y) / 255.0);
-    vec4 p = uViewProj * vec4(uOrigin + vec3(aPos) / 16.0, 1.0);
+    vWorld = uOrigin + vec3(aPos) / 16.0;
+    vec4 p = uViewProj * vec4(vWorld, 1.0);
     vDist = length(p.xyz);
     gl_Position = p;
 }
@@ -82,14 +84,22 @@ in vec2 vUV;
 flat in float vLayer;
 in float vLight;
 in float vDist;
+in vec3 vWorld;
 uniform sampler2DArray uAtlas;
 uniform vec3 uSky;
 uniform float uFogStart;
 uniform float uFogEnd;
+uniform vec3 uHeldLightPos;  // player eye, world space
+uniform float uHeldLight;    // emission (0..15) of the held item, 0 = none
 out vec4 FragColor;
 uniform float uAlpha;
 void main() {
-    vec3 c = texture(uAtlas, vec3(vUV, vLayer)).rgb * vLight;
+    // Hand light: the held torch lights nearby geometry, fading one light
+    // level per block like placed-torch light (baked levels stay authoritative
+    // wherever they're brighter).
+    float heldLvl = clamp(uHeldLight - distance(vWorld, uHeldLightPos), 0.0, 15.0);
+    float light = max(vLight, pow(0.85, 15.0 - heldLvl));
+    vec3 c = texture(uAtlas, vec3(vUV, vLayer)).rgb * light;
     float fog = clamp((vDist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
     FragColor = vec4(mix(c, uSky, fog), uAlpha);
 }
@@ -650,6 +660,7 @@ int main(int argc, char** argv) {
     bool demoSurvival = false; // survival loop hotbar + break feedback
     bool demoCraft = false;  // survival + stocked inventory, opens 3x3 crafting screen
     bool demoFurnace = false; // places a burning furnace and opens furnace screen
+    bool demoWater = false;  // pours a water source over a staged trench
     bool demoRun = false;    // set for any --demo-* flag; suppresses all save I/O
     Menu demoMenu = Menu::None; // pause menu page opened at start, for screenshots
     float startTime = -1.0f;    // --time <0..1>: day fraction override
@@ -666,6 +677,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--demo-survival") == 0) { demoSurvival = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-craft") == 0)    { demoCraft    = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-furnace") == 0)  { demoFurnace  = true; demoRun = true; }
+        if (std::strcmp(argv[i], "--demo-water") == 0)    { demoWater    = true; demoRun = true; }
         if (std::strcmp(argv[i], "--demo-menu") == 0)     { demoMenu = Menu::Main;     demoRun = true; }
         if (std::strcmp(argv[i], "--demo-settings") == 0) { demoMenu = Menu::Settings; demoRun = true; }
     }
@@ -847,6 +859,23 @@ int main(int argc, char** argv) {
         fs.cookTicks = 5; // non-zero so the progress bar is visible
         openInventoryScreen(app.window, ui::ScreenKind::Furnace, fpos);
     }
+    if (demoWater) {
+        // Pour a source onto the terrain a few blocks ahead, one block up,
+        // so the spread/cascade is visible from the spawn viewpoint. Also
+        // dig a stepped trench in front of it so the flow has somewhere to
+        // seek and fall into.
+        app.player.flying = true;
+        glm::vec3 look2d = glm::normalize(
+            glm::vec3(app.player.lookDir().x, 0.0f, app.player.lookDir().z));
+        glm::vec3 base = app.player.pos() + look2d * 5.0f;
+        int wx = (int)std::floor(base.x), wz = (int)std::floor(base.z);
+        int wy = CHUNK_HEIGHT - 1;
+        while (wy > 1 && !isSolid(world.getBlock(wx, wy, wz))) --wy;
+        world.setBlock(wx + 2, wy, wz, Block::Air);     // 1-deep step
+        world.setBlock(wx + 3, wy, wz, Block::Air);     // 2-deep hole
+        world.setBlock(wx + 3, wy - 1, wz, Block::Air);
+        world.setBlock(wx, wy + 1, wz, Block::Water);   // the poured source
+    }
     if (demoMenu != Menu::None) {
         openMenu();
         app.menu = demoMenu;
@@ -915,6 +944,7 @@ int main(int argc, char** argv) {
             app.player.update(world, app.invOpen ? PlayerInput{} : app.input, float(TickClock::TICK_DT));
             survivalMiningTick(world);
             world.tickBlockEntities();
+            world.tickFluids();
             if (app.player.onGround() && !app.player.flying) {
                 glm::vec3 d = app.player.pos() - app.player.prevPos;
                 stepDist += std::sqrt(d.x * d.x + d.z * d.z);
@@ -1031,6 +1061,10 @@ int main(int argc, char** argv) {
         chunkShader.setInt("uAtlas", 0);
         chunkShader.setFloat("uAlpha", 1.0f);
         chunkShader.setFloat("uSunLevel", sunLevel);
+        // Held-item hand light (torch): lights chunks, water, and drops.
+        const float heldLight = float(lightEmission(heldBlock()));
+        chunkShader.setVec3("uHeldLightPos", eye);
+        chunkShader.setFloat("uHeldLight", heldLight);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures);
         world.drawChunks(frustum, eye, originLoc);
@@ -1040,7 +1074,7 @@ int main(int argc, char** argv) {
         // submerged drops blend correctly under the surface.
         const double renderGameTime = gameTime + alpha * TickClock::TICK_DT;
         itemRenderer.draw(world, app.entities, viewProj, eye, alpha,
-                          float(renderGameTime), sunLevel);
+                          float(renderGameTime), sunLevel, heldLight);
         benchMark(6);
 
         // Translucent water pass: after all opaque geometry, blended, with
@@ -1065,8 +1099,10 @@ int main(int argc, char** argv) {
             lineShader.use();
             glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(hit.block));
             if (world.getBlock(hit.block.x, hit.block.y, hit.block.z) == Block::Torch) {
-                model = glm::translate(model, glm::vec3(7.0f / 16.0f, 0.0f, 7.0f / 16.0f));
-                model = glm::scale(model, glm::vec3(2.0f / 16.0f, 10.0f / 16.0f, 2.0f / 16.0f));
+                model = glm::translate(model, glm::vec3(TORCH_BOX_MIN, 0.0f, TORCH_BOX_MIN));
+                model = glm::scale(model, glm::vec3(TORCH_BOX_MAX - TORCH_BOX_MIN,
+                                                    TORCH_BOX_TOP,
+                                                    TORCH_BOX_MAX - TORCH_BOX_MIN));
             }
             lineShader.setMat4("uMVP", viewProj * model);
             lineShader.setVec3("uColor", glm::vec3(0.05f));

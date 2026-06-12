@@ -31,8 +31,20 @@ enum class Block : uint8_t {
     FurnaceLitPX = 21,
     FurnaceLitNX = 22,
     FurnaceLitNZ = 23,
+    // Flowing water, level baked into the block id like furnace facing
+    // (no metadata bytes in chunk saves). Water (11) is the still source;
+    // WaterFlowN spreads N-1 more blocks sideways (7 = next to a source,
+    // 1 = thinnest edge); WaterFall is a full-height falling column cell.
+    WaterFlow1 = 24,
+    WaterFlow2 = 25,
+    WaterFlow3 = 26,
+    WaterFlow4 = 27,
+    WaterFlow5 = 28,
+    WaterFlow6 = 29,
+    WaterFlow7 = 30,
+    WaterFall = 31,
 };
-constexpr int BLOCK_TYPES = 24;
+constexpr int BLOCK_TYPES = 32;
 
 // Texture tile identity. The numeric value is the texture-array layer and the
 // column in the HUD's horizontal strip atlas — a renderer/content ID with no
@@ -85,6 +97,13 @@ enum class TileId : uint8_t {
 constexpr int ATLAS_TILES = int(TileId::Count);
 
 constexpr float UNBREAKABLE = -1.0f;
+
+// Torch post extents in block-local units. Must match the mesher's thin-post
+// geometry in Chunk.cpp (2/16 wide, 10/16 tall, centered): the raycast and
+// the selection outline both target this box, not the full voxel cell.
+constexpr float TORCH_BOX_MIN = 7.0f / 16.0f;
+constexpr float TORCH_BOX_MAX = 9.0f / 16.0f;
+constexpr float TORCH_BOX_TOP = 10.0f / 16.0f;
 
 // Sound material: which family of break/place recordings a block uses
 // (dirt must not clink like stone). None = silent (air, water).
@@ -147,6 +166,12 @@ constexpr BlockDef sideTopBot(const char* name, bool solid, bool collid,
             tool, tier, dropItem, dropCount, wrongDropItem, wrongDropCount,
             {side, side, top, bot, side, side}};
 }
+// Water row: every water id (source, flow levels, falling) shares the same
+// predicates — non-solid, walk-through, translucent, dims sunlight, silent.
+constexpr BlockDef water(const char* name) {
+    return same(name, false, false, false, true, 0, 0.0f, Block::Air,
+                SoundMat::None, TileId::Water);
+}
 // Furnace row: the front tile sits on exactly one horizontal face
 // (mesher face order: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z).
 constexpr BlockDef furnace(uint8_t em, TileId front, int frontFace) {
@@ -175,7 +200,7 @@ constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
     /*  8 */ tiledef::same("Torch",          true,  false, false, false, 14, 0.0f,        Block::Torch,       SoundMat::Wood,  TileId::Torch, ToolClass::None, ToolTier::Hand, ItemId::TorchBlock, 1, ItemId::TorchBlock, 1),
     /*  9 */ tiledef::same("Coal Ore",       true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::CoalOre, ToolClass::Pickaxe, ToolTier::Wood, ItemId::Coal, 1),
     /* 10 */ tiledef::same("Iron Ore",       true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::IronOre, ToolClass::Pickaxe, ToolTier::Stone, ItemId::RawIron, 1),
-    /* 11 */ tiledef::same("Water",          false, false, false, true,  0,  0.0f,        Block::Air,         SoundMat::None,  TileId::Water),
+    /* 11 */ tiledef::water("Water"),
     /* 12 */ tiledef::same("Cobblestone",    true,  true,  true,  false, 0,  2.0f,        Block::Cobblestone, SoundMat::Stone, TileId::Cobblestone, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1),
     /* 13 */ tiledef::same("Planks",         true,  true,  true,  false, 0,  2.0f,        Block::Planks,      SoundMat::Wood,  TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::PlanksBlock, 1, ItemId::PlanksBlock, 1),
     /* 14 */ tiledef::sideTopBot("Crafting Table", true, true, true, false, 0, 2.5f,      Block::CraftingTable, SoundMat::Wood, TileId::CraftingTableSide, TileId::CraftingTableTop, TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::CraftingTableBlock, 1, ItemId::CraftingTableBlock, 1),
@@ -188,6 +213,14 @@ constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
     /* 21 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 0),
     /* 22 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 1),
     /* 23 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 5),
+    /* 24 */ tiledef::water("Water Flow 1"),
+    /* 25 */ tiledef::water("Water Flow 2"),
+    /* 26 */ tiledef::water("Water Flow 3"),
+    /* 27 */ tiledef::water("Water Flow 4"),
+    /* 28 */ tiledef::water("Water Flow 5"),
+    /* 29 */ tiledef::water("Water Flow 6"),
+    /* 30 */ tiledef::water("Water Flow 7"),
+    /* 31 */ tiledef::water("Water Fall"),
 };
 
 // All furnace facings/lit states are one logical block (shared block
@@ -225,6 +258,26 @@ inline Block furnaceUnlitVariant(Block b) {
 inline Block furnaceFacing(float dx, float dz) {
     if (dx * dx > dz * dz) return dx > 0 ? Block::FurnacePX : Block::FurnaceNX;
     return dz > 0 ? Block::Furnace : Block::FurnaceNZ;
+}
+
+// All water ids are one logical fluid; gameplay code that asks "is this
+// water?" (swimming, placement-into-water, fluid ticks) must accept every
+// variant. The level is the fluid strength used by the spread rules:
+// source and falling columns are full strength (8), flows are 1..7.
+inline bool isWater(Block b) {
+    return b == Block::Water ||
+           (uint8_t(b) >= uint8_t(Block::WaterFlow1) &&
+            uint8_t(b) <= uint8_t(Block::WaterFall));
+}
+inline int waterLevel(Block b) {
+    if (b == Block::Water || b == Block::WaterFall) return 8;
+    if (uint8_t(b) >= uint8_t(Block::WaterFlow1) &&
+        uint8_t(b) <= uint8_t(Block::WaterFlow7))
+        return int(uint8_t(b) - uint8_t(Block::WaterFlow1)) + 1;
+    return 0;
+}
+inline Block waterFlowBlock(int level) { // level must be 1..7
+    return Block(uint8_t(Block::WaterFlow1) + (level - 1));
 }
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }

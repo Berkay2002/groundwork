@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <thread>
+#include <utility>
 
 namespace {
 int workerCount() {
@@ -135,6 +136,10 @@ void World::setBlock(int wx, int wy, int wz, Block b) {
 
     LightingAccess light(*this);
     lighting::onBlockChanged(light, old, b, glm::ivec3(wx, wy, wz));
+
+    // Any edit can start, feed, or cut off a flow: queue whatever water
+    // is in or around the changed cell for the next fluid tick.
+    scheduleFluidAround(wx, wy, wz);
 }
 
 uint8_t World::sunLightAt(int wx, int wy, int wz) const {
@@ -218,6 +223,7 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
         markDirty(*c); // fresh chunks arrive dirty; register them in the queue
         LightingAccess light(*this);
         lighting::onChunkAdded(light, key.x, key.z); // exchange light with neighbors
+        seedFluidsFromChunk(key.x, key.z); // resume interrupted flows
     }
 
     int pcx = floorDiv((int)std::floor(playerPos.x), CHUNK_SIZE);
@@ -492,10 +498,29 @@ RaycastHit World::raycast(const glm::vec3& origin, const glm::vec3& dir, float m
                    boundary(origin.y, pos.y, step.y) * tDelta.y,
                    boundary(origin.z, pos.z, step.z) * tDelta.z);
 
+    // Torches don't fill their voxel cell: the targetable shape is the thin
+    // post, so a ray that crosses the cell but misses the post keeps going
+    // (Minecraft-style per-block selection shapes).
+    auto hitsTorchPost = [&](glm::ivec3 cell) {
+        glm::vec3 lo = glm::vec3(cell) + glm::vec3(TORCH_BOX_MIN, 0.0f, TORCH_BOX_MIN);
+        glm::vec3 hi = glm::vec3(cell) + glm::vec3(TORCH_BOX_MAX, TORCH_BOX_TOP, TORCH_BOX_MAX);
+        float t0 = 0.0f, t1 = maxDist;
+        for (int a = 0; a < 3; ++a) {
+            float ta = (lo[a] - origin[a]) * invDir[a];
+            float tb = (hi[a] - origin[a]) * invDir[a];
+            if (ta > tb) std::swap(ta, tb);
+            t0 = std::max(t0, ta);
+            t1 = std::min(t1, tb);
+            if (t0 > t1) return false;
+        }
+        return true;
+    };
+
     glm::ivec3 prev = pos;
     float t = 0.0f;
     while (t <= maxDist) {
-        if (isSolid(getBlock(pos.x, pos.y, pos.z))) {
+        Block b = getBlock(pos.x, pos.y, pos.z);
+        if (isSolid(b) && (b != Block::Torch || hitsTorchPost(pos))) {
             out.hit = true;
             out.block = pos;
             out.adjacent = prev;
@@ -543,6 +568,187 @@ std::vector<ItemStack> World::takeFurnaceContents(glm::ivec3 pos) {
     if (!f->output.empty()) out.push_back(f->output);
     blockEntities_.removeFurnace(pos);
     return out;
+}
+
+// --- Water simulation -------------------------------------------------
+// Minecraft-style cellular water, main thread only, queue-driven: setBlock
+// schedules the touched cells, tickFluids() re-evaluates them every
+// FLUID_TICK_INTERVAL game ticks. Generated lakes are all source blocks on
+// solid ground and are never queued, so still water costs nothing.
+
+void World::scheduleFluid(int wx, int wy, int wz) {
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return;
+    if (!isWater(getBlock(wx, wy, wz))) return;
+    // Injective packing for |x|,|z| < 2^23: x bits 40..63, z 16..39, y 0..15.
+    int64_t key = (int64_t(wx + (1 << 23)) << 40) |
+                  (int64_t(wz + (1 << 23)) << 16) | wy;
+    if (fluidPending_.insert(key).second)
+        fluidQueue_.push_back({wx, wy, wz});
+}
+
+void World::scheduleFluidAround(int wx, int wy, int wz) {
+    scheduleFluid(wx, wy, wz);
+    scheduleFluid(wx + 1, wy, wz);
+    scheduleFluid(wx - 1, wy, wz);
+    scheduleFluid(wx, wy + 1, wz);
+    scheduleFluid(wx, wy - 1, wz);
+    scheduleFluid(wx, wy, wz + 1);
+    scheduleFluid(wx, wy, wz - 1);
+}
+
+// Resume interrupted flows when a chunk enters memory (fresh or loaded from
+// disk): flowing cells only. Border *sources* are deliberately not seeded —
+// a pristine lake must not start draining into a cave just because the
+// neighbor chunk streamed in; sources only move after a player edit.
+void World::seedFluidsFromChunk(int cx, int cz) {
+    Chunk* c = getChunk(cx, cz);
+    if (!c) return;
+    const int bx = cx * CHUNK_SIZE, bz = cz * CHUNK_SIZE;
+    for (int y = 0; y < CHUNK_HEIGHT; ++y)
+        for (int z = 0; z < CHUNK_SIZE; ++z)
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                Block b = c->get(x, y, z);
+                if (isWater(b) && b != Block::Water)
+                    scheduleFluid(bx + x, y, bz + z);
+            }
+    // Flows in loaded neighbors right at this chunk's border may have been
+    // waiting for it to load before they could continue.
+    for (int y = 0; y < CHUNK_HEIGHT; ++y)
+        for (int i = 0; i < CHUNK_SIZE; ++i) {
+            const int probes[4][2] = {{bx - 1, bz + i},
+                                      {bx + CHUNK_SIZE, bz + i},
+                                      {bx + i, bz - 1},
+                                      {bx + i, bz + CHUNK_SIZE}};
+            for (auto& p : probes) {
+                Block b = getBlock(p[0], y, p[1]);
+                if (isWater(b) && b != Block::Water)
+                    scheduleFluid(p[0], y, p[1]);
+            }
+        }
+}
+
+// Minecraft's drop-seeking: spreading water prefers the direction(s) whose
+// nearest hole (a cell it could fall into) is closest within 4 blocks,
+// searching through cells water could occupy. No hole anywhere -> all
+// open directions. Returns a bitmask over the H[] direction order.
+int World::fluidSpreadMask(int wx, int wy, int wz) const {
+    static const int H[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    constexpr int R = 4;             // MC's seek radius
+    constexpr int G = 2 * R + 1;     // local grid side (9x9 around the cell)
+    auto enterable = [&](int x, int z) {
+        Block b = getBlock(x, wy, z);
+        return b == Block::Air || isWater(b);
+    };
+    auto isHole = [&](int x, int z) {
+        Block below = getBlock(x, wy - 1, z);
+        return below == Block::Air ||
+               (isWater(below) && below != Block::Water);
+    };
+    int dist[4];
+    int best = INT_MAX;
+    for (int d = 0; d < 4; ++d) {
+        dist[d] = INT_MAX;
+        int sx = wx + H[d][0], sz = wz + H[d][1];
+        if (!enterable(sx, sz)) continue;
+        // Breadth-first flood from the first step, capped at R steps.
+        bool seen[G * G] = {};
+        glm::ivec2 q[G * G];
+        int qd[G * G];
+        int head = 0, tail = 0;
+        q[tail] = {sx, sz};
+        qd[tail++] = 1;
+        seen[(sz - wz + R) * G + (sx - wx + R)] = true;
+        while (head < tail) {
+            glm::ivec2 p = q[head];
+            int pd = qd[head++];
+            if (wy > 0 && isHole(p.x, p.y)) { dist[d] = pd; break; }
+            if (pd == R) continue;
+            for (auto& h : H) {
+                int nx = p.x + h[0], nz = p.y + h[1];
+                int gx = nx - wx + R, gz = nz - wz + R;
+                if (gx < 0 || gx >= G || gz < 0 || gz >= G) continue;
+                if (seen[gz * G + gx] || !enterable(nx, nz)) continue;
+                seen[gz * G + gx] = true;
+                q[tail] = {nx, nz};
+                qd[tail++] = pd + 1;
+            }
+        }
+        best = std::min(best, dist[d]);
+    }
+    int mask = 0;
+    for (int d = 0; d < 4; ++d) {
+        if (best == INT_MAX ? enterable(wx + H[d][0], wz + H[d][1])
+                            : dist[d] == best)
+            mask |= 1 << d;
+    }
+    return mask;
+}
+
+void World::updateFluidCell(int wx, int wy, int wz) {
+    static const int H[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    Block b = getBlock(wx, wy, wz);
+    if (!isWater(b)) return;
+
+    Block below = wy > 0 ? getBlock(wx, wy - 1, wz) : Block::Bedrock;
+    // 1. Flowing cells re-derive their level from what still feeds them —
+    //    this is what makes water drain away when its source is removed.
+    if (b != Block::Water) {
+        int sources = 0, feed = 0;
+        for (auto& h : H) {
+            Block n = getBlock(wx + h[0], wy, wz + h[1]);
+            if (n == Block::Water) ++sources;
+            feed = std::max(feed, waterLevel(n));
+        }
+        bool supported = isCollidable(below) || below == Block::Water;
+        Block want;
+        if (sources >= 2 && supported) {
+            want = Block::Water; // infinite-source rule: 2x2 pools refill
+        } else if (isWater(getBlock(wx, wy + 1, wz))) {
+            want = Block::WaterFall; // fed from above: full falling column
+        } else {
+            int lvl = std::min(feed - 1, 7);
+            want = lvl >= 1 ? waterFlowBlock(lvl) : Block::Air;
+        }
+        if (want != b) {
+            setBlock(wx, wy, wz, want); // schedules the neighborhood
+            if (!isWater(want)) return;
+            b = want;
+        }
+    }
+
+    // 2. Spread: down first; only water that can't fall creeps sideways.
+    bool belowEnterable =
+        below == Block::Air ||
+        (isWater(below) && below != Block::Water && below != Block::WaterFall);
+    if (wy > 0 && belowEnterable) {
+        setBlock(wx, wy - 1, wz, Block::WaterFall);
+        return;
+    }
+    if (!(isCollidable(below) || below == Block::Water))
+        return; // mid-air falling column: keeps falling, never spreads
+    int out = std::min(waterLevel(b) - 1, 7);
+    if (out < 1) return;
+    int mask = fluidSpreadMask(wx, wy, wz);
+    for (int d = 0; d < 4; ++d) {
+        if (!(mask & (1 << d))) continue;
+        int nx = wx + H[d][0], nz = wz + H[d][1];
+        Block n = getBlock(nx, wy, nz);
+        bool can = n == Block::Air ||
+                   (isWater(n) && n != Block::Water && waterLevel(n) < out);
+        if (can) setBlock(nx, wy, nz, waterFlowBlock(out));
+    }
+}
+
+void World::tickFluids() {
+    if (++fluidTickCounter_ < FLUID_TICK_INTERVAL) return;
+    fluidTickCounter_ = 0;
+    if (fluidQueue_.empty()) return;
+    // Swap the queue out: cells touched while processing land in the fresh
+    // queue and run on the NEXT fluid tick, which is what paces the flow.
+    std::vector<glm::ivec3> cells;
+    cells.swap(fluidQueue_);
+    fluidPending_.clear();
+    for (const auto& p : cells) updateFluidCell(p.x, p.y, p.z);
 }
 
 void World::tickBlockEntities() {
