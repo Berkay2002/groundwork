@@ -1,5 +1,6 @@
 #include "ui/InventoryUi.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -114,6 +115,44 @@ void drawHotbar(Hud& hud, const HotbarView& view, int screenW, int screenH) {
     if (view.heldName && view.heldName[0] != '\0') {
         float nameW = std::strlen(view.heldName) * Hud::GLYPH * 2.0f;
         hud.drawText((screenW - nameW) * 0.5f, y - 26.0f, 2.0f, view.heldName);
+    }
+}
+
+void drawHearts(Hud& hud, int health, int maxHealth, int screenW, int screenH) {
+    // 7x6-pixel heart as per-row horizontal spans [start, end).
+    struct RowSpans { int count; int span[2][2]; };
+    static constexpr RowSpans HEART[6] = {
+        {2, {{1, 3}, {4, 6}}},
+        {1, {{0, 7}, {0, 0}}},
+        {1, {{0, 7}, {0, 0}}},
+        {1, {{1, 6}, {0, 0}}},
+        {1, {{2, 5}, {0, 0}}},
+        {1, {{3, 4}, {0, 0}}},
+    };
+    const float slot = 56.0f, pad = 4.0f;
+    const float px = 3.0f;                  // heart "pixel" size
+    const float step = 7 * px + 3.0f;       // heart width + gap
+    // Anchor to the hotbar: same left edge, one row above it.
+    float totalW = 9 * slot + 8 * pad;
+    float x0 = (screenW - totalW) * 0.5f;
+    float y0 = (screenH - slot - 12.0f) - 6 * px - 8.0f;
+    int hearts = (maxHealth + 1) / 2;
+    for (int i = 0; i < hearts; ++i) {
+        int hp = std::max(0, std::min(2, health - 2 * i));
+        // Filled width: whole heart, the left ~half, or nothing.
+        int fillCols = hp == 2 ? 7 : hp == 1 ? 4 : 0;
+        float hx = x0 + i * step;
+        for (int row = 0; row < 6; ++row) {
+            for (int s = 0; s < HEART[row].count; ++s) {
+                int a = HEART[row].span[s][0], b = HEART[row].span[s][1];
+                hud.drawRect(hx + a * px, y0 + row * px, (b - a) * px, px,
+                             0.18f, 0.03f, 0.03f, 0.9f); // empty backing
+                int fb = std::min(b, fillCols);
+                if (fb > a)
+                    hud.drawRect(hx + a * px, y0 + row * px, (fb - a) * px, px,
+                                 0.86f, 0.12f, 0.12f, 1.0f);
+            }
+        }
     }
 }
 

@@ -25,6 +25,7 @@ enum class SettingId {
     Volume,
     Vsync,
     FpsMax,
+    KeepInventory,
     Count
 };
 
@@ -87,7 +88,8 @@ struct CraftingUiState {
 inline constexpr const char* MENU_BUTTONS[] = {"Resume", "Settings", "Quit"};
 inline constexpr int MENU_BUTTON_COUNT = 3;
 inline constexpr const char* SETTING_LABELS[] = {
-    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync", "Max FPS"};
+    "Render distance", "FOV", "Mouse sensitivity", "Volume", "VSync", "Max FPS",
+    "Keep inventory"};
 inline constexpr int SETTING_COUNT = int(SettingId::Count);
 
 inline Rect menuButtonRect(int w, int h, int i) {
@@ -171,6 +173,9 @@ inline SettingEffects adjustSetting(Settings& s, SettingId setting, int dir,
             s.fpsMax = fpsOptions[idx];
             break;
         }
+        case SettingId::KeepInventory:
+            s.keepInventory = !s.keepInventory;
+            break;
         case SettingId::Count:
             break;
     }
@@ -203,6 +208,9 @@ inline std::string settingValueText(const Settings& s, SettingId setting) {
         case SettingId::FpsMax:
             if (s.fpsMax == 0) std::snprintf(buf, sizeof(buf), "unlimited");
             else std::snprintf(buf, sizeof(buf), "%d", s.fpsMax);
+            break;
+        case SettingId::KeepInventory:
+            std::snprintf(buf, sizeof(buf), "%s", s.keepInventory ? "on" : "off");
             break;
         case SettingId::Count:
             break;

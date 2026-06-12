@@ -91,6 +91,7 @@ enum class TileId : uint8_t {
     ItemDiamondPickaxe,
     ItemDiamondAxe,
     ItemDiamondShovel,
+    ItemRottenFlesh,
     Error,
     Count
 };

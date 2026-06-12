@@ -68,6 +68,7 @@ constexpr ItemDef ITEM_DEFS[ITEM_TYPES] = {
     /* 31 */ itemdef::block("Crafting Table", Block::CraftingTable),
     /* 32 */ itemdef::block("Furnace", Block::Furnace),
     /* 33 */ itemdef::block("Diamond Ore", Block::DiamondOre),
+    /* 34 */ itemdef::simple("Rotten Flesh"),
 };
 
 inline const ItemDef& itemDef(ItemId id) {

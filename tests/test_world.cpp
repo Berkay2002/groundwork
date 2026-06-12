@@ -42,7 +42,7 @@ static int failures = 0;
     if (!(cond)) { std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++failures; } \
 } while (0)
 
-static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
+static_assert(ITEM_TYPES == 35, "ItemId is saved data; append ids only");
 static_assert(BLOCK_TYPES == 32, "Block ids are saved data; append ids only");
 
 static void testFloorDivMod() {
@@ -317,29 +317,67 @@ static void testEntityChunkSaveFormatRoundtrip() {
     a.stack = makeToolStack(ItemId::IronPickaxe);
     a.stack.durability = 7;
 
-    CHECK(saveEntityChunkFile(path, {a}));
-    std::vector<SavedDroppedItem> loaded;
-    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(std::fabs(loaded[0].pos.x - a.pos.x) < 1e-6f);
-    CHECK(std::fabs(loaded[0].pos.y - a.pos.y) < 1e-6f);
-    CHECK(std::fabs(loaded[0].pos.z - a.pos.z) < 1e-6f);
-    CHECK(std::fabs(loaded[0].vel.x - a.vel.x) < 1e-6f);
-    CHECK(std::fabs(loaded[0].vel.y - a.vel.y) < 1e-6f);
-    CHECK(std::fabs(loaded[0].vel.z - a.vel.z) < 1e-6f);
-    CHECK(loaded[0].ageTicks == a.ageTicks);
-    CHECK(loaded[0].spinSeed == a.spinSeed);
-    CHECK(loaded[0].stack.item == ItemId::IronPickaxe);
-    CHECK(loaded[0].stack.count == 1);
-    CHECK(loaded[0].stack.durability == 7);
+    SavedLivingEntity z;
+    z.pos = {-30.5f, 71.0f, 50.5f};
+    z.vel = {0.25f, -1.0f, 0.5f};
+    z.health = 7;
+    z.ageTicks = 4321;
+    z.movePhase = 3;
+    z.facingYaw = 1.25f;
+    z.ambient = true;
+    z.homeChunk = {-2, 3};
+    z.modelId = "creature.kenney_zombie_a";
 
-    CHECK(saveEntityChunkFile(path, {}));
+    SavedEntityChunk chunk;
+    chunk.items.push_back(a);
+    chunk.living.push_back(z);
+    chunk.ambientSpawnConsumed = true;
+
+    CHECK(saveEntityChunkFile(path, chunk));
+    SavedEntityChunk loaded;
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.items.size() == 1);
+    CHECK(std::fabs(loaded.items[0].pos.x - a.pos.x) < 1e-6f);
+    CHECK(std::fabs(loaded.items[0].pos.y - a.pos.y) < 1e-6f);
+    CHECK(std::fabs(loaded.items[0].pos.z - a.pos.z) < 1e-6f);
+    CHECK(std::fabs(loaded.items[0].vel.x - a.vel.x) < 1e-6f);
+    CHECK(std::fabs(loaded.items[0].vel.y - a.vel.y) < 1e-6f);
+    CHECK(std::fabs(loaded.items[0].vel.z - a.vel.z) < 1e-6f);
+    CHECK(loaded.items[0].ageTicks == a.ageTicks);
+    CHECK(loaded.items[0].spinSeed == a.spinSeed);
+    CHECK(loaded.items[0].stack.item == ItemId::IronPickaxe);
+    CHECK(loaded.items[0].stack.count == 1);
+    CHECK(loaded.items[0].stack.durability == 7);
+    CHECK(loaded.living.size() == 1);
+    CHECK(glm::distance(loaded.living[0].pos, z.pos) < 1e-5f);
+    CHECK(glm::distance(loaded.living[0].vel, z.vel) < 1e-5f);
+    CHECK(loaded.living[0].health == 7);
+    CHECK(loaded.living[0].ageTicks == 4321);
+    CHECK(loaded.living[0].movePhase == 3);
+    CHECK(std::fabs(loaded.living[0].facingYaw - 1.25f) < 1e-6f);
+    CHECK(loaded.living[0].ambient);
+    CHECK(loaded.living[0].homeChunk == key);
+    CHECK(loaded.living[0].modelId == "creature.kenney_zombie_a");
+    CHECK(loaded.ambientSpawnConsumed);
+
+    // A marker-only file must survive the empty-file cleanup: the marker is
+    // what keeps a chunk from re-running its ambient spawn forever.
+    SavedEntityChunk markerOnly;
+    markerOnly.ambientSpawnConsumed = true;
+    CHECK(saveEntityChunkFile(path, markerOnly));
+    CHECK(std::filesystem::exists(path));
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.items.empty() && loaded.living.empty());
+    CHECK(loaded.ambientSpawnConsumed);
+
+    CHECK(saveEntityChunkFile(path, SavedEntityChunk{}));
     CHECK(!std::filesystem::exists(path));
-    loaded.push_back(a);
+    loaded.items.push_back(a);
     CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Missing);
     CHECK(loaded.empty());
 
-    std::vector<SavedDroppedItem> tooMany(4097, a);
+    SavedEntityChunk tooMany;
+    tooMany.items.assign(4097, a);
     CHECK(!saveEntityChunkFile(path, tooMany));
     CHECK(!std::filesystem::exists(path));
     std::filesystem::remove_all(dir);
@@ -415,10 +453,10 @@ static void testEntityChunkSaveRejectsBadFiles() {
     std::filesystem::remove_all(dir);
     ChunkKey key{0, 0};
     std::string path = entityChunkPath(dir, key);
-    std::vector<SavedDroppedItem> loaded;
+    SavedEntityChunk loaded;
 
     writeManualEntityFile(path, {}, 1, "NOPE");
-    loaded.push_back({});
+    loaded.items.push_back({});
     CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
     CHECK(loaded.empty());
 
@@ -463,7 +501,32 @@ static void testEntityChunkSaveRejectsBadFiles() {
     CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
     CHECK(loaded.empty());
 
+    // An ambient-spawn marker record must have an empty payload.
+    writeManualEntityFile(path, {{3, "junk"}});
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
     std::filesystem::remove_all(dir);
+}
+
+static std::string livingEntityPayload(const SavedLivingEntity& e) {
+    std::ostringstream out(std::ios::binary);
+    writeRawF32(out, e.pos.x);
+    writeRawF32(out, e.pos.y);
+    writeRawF32(out, e.pos.z);
+    writeRawF32(out, e.vel.x);
+    writeRawF32(out, e.vel.y);
+    writeRawF32(out, e.vel.z);
+    writeRawU32(out, uint32_t(e.health));
+    writeRawU32(out, e.ageTicks);
+    writeRawU32(out, e.movePhase);
+    writeRawF32(out, e.facingYaw);
+    writeRawU8(out, e.ambient ? 1 : 0);
+    writeRawU32(out, uint32_t(e.homeChunk.x));
+    writeRawU32(out, uint32_t(e.homeChunk.z));
+    writeRawU16(out, uint16_t(e.modelId.size()));
+    out.write(e.modelId.data(), (std::streamsize)e.modelId.size());
+    return out.str();
 }
 
 static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
@@ -479,20 +542,41 @@ static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
     valid.spinSeed = 20;
     valid.stack = makeItemStack(ItemId::Coal, 3);
 
+    SavedLivingEntity validLiving;
+    validLiving.pos = {3.5f, 70.0f, 3.5f};
+    validLiving.health = 5;
+    validLiving.modelId = "creature.kenney_zombie_a";
+
+    SavedLivingEntity wrongChunkLiving = validLiving;
+    wrongChunkLiving.pos = {1000.5f, 70.0f, 0.5f};
+    SavedLivingEntity deadLiving = validLiving;
+    deadLiving.health = 0;
+    SavedLivingEntity noModelLiving = validLiving;
+    noModelLiving.modelId = "";
+
     writeManualEntityFile(path, {
         {99, "abc"},
         {1, droppedItemPayloadRawStack({1.5f, 70.0f, 1.5f}, 65000, 1, 0)},
         {1, droppedItemPayloadRawStack({2.5f, 70.0f, 2.5f}, uint16_t(ItemId::Coal), 0, 0)},
         {1, droppedItemPayloadRawStack({1000.5f, 70.0f, 0.5f}, uint16_t(ItemId::Coal), 1, 0)},
         {1, droppedItemPayload(valid)},
+        {2, "garbage living payload"},
+        {2, livingEntityPayload(wrongChunkLiving)},
+        {2, livingEntityPayload(deadLiving)},
+        {2, livingEntityPayload(noModelLiving)},
+        {2, livingEntityPayload(validLiving)},
     });
 
-    std::vector<SavedDroppedItem> loaded;
+    SavedEntityChunk loaded;
     CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(loaded[0].stack.item == ItemId::Coal);
-    CHECK(loaded[0].stack.count == 3);
-    CHECK(loaded[0].ageTicks == 10);
+    CHECK(loaded.items.size() == 1);
+    CHECK(loaded.items[0].stack.item == ItemId::Coal);
+    CHECK(loaded.items[0].stack.count == 3);
+    CHECK(loaded.items[0].ageTicks == 10);
+    CHECK(loaded.living.size() == 1);
+    CHECK(loaded.living[0].health == 5);
+    CHECK(glm::distance(loaded.living[0].pos, validLiving.pos) < 1e-5f);
+    CHECK(!loaded.ambientSpawnConsumed);
 
     std::filesystem::remove_all(dir);
 }
@@ -508,7 +592,7 @@ static void testEntityChunkCorruptionDoesNotTouchBlockChunk() {
 
     std::string entityPath = entityChunkPath(dir, key);
     writeManualEntityFile(entityPath, {}, 2);
-    std::vector<SavedDroppedItem> ignored;
+    SavedEntityChunk ignored;
     CHECK(loadEntityChunkFile(entityPath, key, ignored) == EntityChunkLoadStatus::Rejected);
 
     std::vector<uint8_t> loaded(blocks.size(), 0);
@@ -2220,19 +2304,29 @@ static void testLivingEntityDamageDropsAndQueries() {
     CHECK(ents.livingNear(glm::vec3(0.5f, 71.0f, 0.5f), 2.0f).empty());
     CHECK(ents.living().size() == 1);
     CHECK(ents.items().size() == 1);
-    CHECK(ents.items()[0]->stack.item == ItemId::Coal);
+    CHECK(ents.items()[0]->stack.item == ItemId::RottenFlesh);
     CHECK(ents.items()[0]->stack.count == 1);
     CHECK(!ents.damageLiving(a, 1));
     CHECK(ents.livingNear(glm::vec3(17.5f, 71.0f, 0.5f), 2.0f).size() == 1);
 
+    // Unloading the survivor's chunk persists it and removes it from runtime.
     ChunkKey key{1, 0};
     ents.saveAndUnloadChunkEntities("test_living_damage", key, true);
-    CHECK(ents.living().size() == 1); // living entities are not persisted/unloaded here
-    std::vector<SavedDroppedItem> loaded;
+    CHECK(ents.living().empty());
+    SavedEntityChunk loaded;
     EntityChunkLoadStatus status =
         loadEntityChunkFile(entityChunkPath("test_living_damage", key), key, loaded);
-    CHECK(status == EntityChunkLoadStatus::Missing || status == EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.empty());
+    CHECK(status == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.living.size() == 1);
+    CHECK(loaded.living[0].health == LIVING_MAX_HEALTH);
+    CHECK(loaded.living[0].modelId == "creature.kenney_zombie_a");
+
+    // Reloading the chunk restores the creature instead of dropping it.
+    ents.loadChunkEntities("test_living_damage", key);
+    CHECK(ents.living().size() == 1);
+    CHECK(ents.living()[0]->health == LIVING_MAX_HEALTH);
+    CHECK(glm::distance(ents.living()[0]->body.pos,
+                        glm::vec3(17.5f, 71.0f, 0.5f)) < 0.001f);
     (void)b;
     std::filesystem::remove_all("test_living_damage");
 }
@@ -2343,19 +2437,43 @@ static void testAmbientLivingStreamLifecycle() {
     CHECK(ents.living().size() == 1);
     CHECK(glm::distance(ents.living()[0]->body.pos, firstPos) < 0.001f);
 
+    // Unloading persists the creature plus the ambient-spawn marker.
+    ents.living()[0]->health = 4;
     ChunkStreamEvents unloaded;
     unloaded.unloaded.push_back(key);
     ents.applyStreamEvents(dir, unloaded, true, &w, true);
     CHECK(ents.living().empty());
 
-    std::vector<SavedDroppedItem> savedItems;
-    EntityChunkLoadStatus status =
-        loadEntityChunkFile(entityChunkPath(dir, key), key, savedItems);
-    CHECK(status == EntityChunkLoadStatus::Missing || status == EntityChunkLoadStatus::Loaded);
-    CHECK(savedItems.empty());
+    SavedEntityChunk savedChunk;
+    CHECK(loadEntityChunkFile(entityChunkPath(dir, key), key, savedChunk) ==
+          EntityChunkLoadStatus::Loaded);
+    CHECK(savedChunk.living.size() == 1);
+    CHECK(savedChunk.living[0].health == 4);
+    CHECK(savedChunk.living[0].ambient);
+    CHECK(savedChunk.living[0].homeChunk == key);
+    CHECK(savedChunk.ambientSpawnConsumed);
 
+    // Reloading restores the saved creature; the marker keeps the ambient
+    // rule from spawning a duplicate next to it.
     ents.applyStreamEvents(dir, loaded, true, &w, true);
     CHECK(ents.living().size() == 1);
+    CHECK(ents.living()[0]->health == 4);
+    CHECK(glm::distance(ents.living()[0]->body.pos, firstPos) < 0.001f);
+
+    // Kill it: after unload+reload the marker must keep the chunk empty —
+    // each chunk's ambient spawn happens exactly once per world.
+    LivingEntityId id = ents.living()[0]->id;
+    CHECK(ents.damageLiving(id, 100));
+    CHECK(ents.living().empty());
+    ents.applyStreamEvents(dir, unloaded, true, &w, true);
+    ents.applyStreamEvents(dir, loaded, true, &w, true);
+    CHECK(ents.living().empty());
+
+    // A fresh session (new Entities) over the same save must respect the
+    // on-disk marker too.
+    Entities fresh;
+    fresh.applyStreamEvents(dir, loaded, true, &w, true);
+    CHECK(fresh.living().empty());
 
     std::filesystem::remove_all(dir);
 }
@@ -2389,6 +2507,90 @@ static void testLivingEntityFacingUpdates() {
     std::filesystem::remove_all("test_living_facing");
 }
 
+static void testLivingHostileChaseAndAttack() {
+    std::filesystem::remove_all("test_living_hostile");
+    World w(1337, "test_living_hostile");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId id =
+        ents.spawnLiving(glm::vec3(0.5f, 71.0f, 0.5f), DEFAULT_CREATURE_MODEL_ID);
+    CHECK(id != 0);
+
+    // No target: pure wandering (the pre-combat behavior, unchanged).
+    // ("near"/"far" are Windows macros — hence the longer names.)
+    Player distantPlayer;
+    distantPlayer.pos() = glm::vec3(100.0f, 71.0f, 0.5f);
+    for (int i = 0; i < 10; ++i)
+        ents.tick(w, distantPlayer.pos(), nullptr, float(TickClock::TICK_DT),
+                  &distantPlayer);
+    CHECK(ents.living()[0]->body.pos.x < 2.0f); // didn't sprint anywhere
+
+    // Live player nearby with line of sight: the creature closes in.
+    Player closePlayer;
+    closePlayer.pos() = glm::vec3(8.5f, 71.0f, 0.5f);
+    float startX = ents.living()[0]->body.pos.x;
+    for (int i = 0; i < 40; ++i)
+        ents.tick(w, closePlayer.pos(), nullptr, float(TickClock::TICK_DT),
+                  &closePlayer);
+    CHECK(ents.living()[0]->body.pos.x > startX + 1.5f);
+
+    // Adjacent: it bites, with a cooldown (not once per tick).
+    closePlayer.pos() = glm::vec3(ents.living()[0]->body.pos.x + 0.9f, 71.0f,
+                                  ents.living()[0]->body.pos.z);
+    int before = closePlayer.health;
+    for (int i = 0; i < 10; ++i)
+        ents.tick(w, closePlayer.pos(), nullptr, float(TickClock::TICK_DT),
+                  &closePlayer);
+    CHECK(closePlayer.health < before);
+    CHECK(closePlayer.health >= before - 4); // i-frames + cooldown bound the loss
+
+    // A dead player is left alone.
+    Player dead;
+    dead.pos() = closePlayer.pos();
+    dead.health = 0;
+    int creatureHp = ents.living()[0]->health;
+    for (int i = 0; i < 30; ++i)
+        ents.tick(w, dead.pos(), nullptr, float(TickClock::TICK_DT), &dead);
+    CHECK(dead.health == 0 && creatureHp == ents.living()[0]->health);
+
+    std::filesystem::remove_all("test_living_hostile");
+}
+
+static void testLivingMeleeRaycastAndKnockback() {
+    std::filesystem::remove_all("test_living_melee");
+    World w(1337, "test_living_melee");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId id =
+        ents.spawnLiving(glm::vec3(3.5f, 71.0f, 0.5f), DEFAULT_CREATURE_MODEL_ID);
+    CHECK(id != 0);
+
+    glm::vec3 eye(0.5f, 72.6f, 0.5f);
+    glm::vec3 dir(1.0f, -0.2f, 0.0f);
+    dir = glm::normalize(dir);
+    float t = 0.0f;
+    LivingEntity* hit = ents.raycastLiving(eye, dir, 3.5f, &t);
+    CHECK(hit != nullptr && hit->id == id);
+    CHECK(t > 2.0f && t < 3.5f);
+
+    // A miss: looking away.
+    CHECK(ents.raycastLiving(eye, glm::vec3(-1.0f, 0.0f, 0.0f), 3.5f) == nullptr);
+    // Out of reach.
+    CHECK(ents.raycastLiving(eye, dir, 1.5f) == nullptr);
+
+    // A non-lethal hit knocks the creature away from the attacker.
+    CHECK(ents.damageLiving(id, 3, dir));
+    CHECK(hit->body.vel.x > 3.0f);
+    CHECK(hit->body.vel.y > 2.0f);
+    CHECK(hit->hurtTicks > 0);
+
+    std::filesystem::remove_all("test_living_melee");
+}
+
 static void testItemAgeTicksAndDespawn() {
     std::filesystem::remove_all("test_ent_age_ticks");
     World w(1337, "test_ent_age_ticks");
@@ -2420,10 +2622,12 @@ static void testEntityChunkLifecycleApis() {
     ents.loadChunkEntities(dir, b);
     ents.loadChunkEntities(dir, empty);
 
+    SavedEntityChunk staleChunk;
     SavedDroppedItem stale;
     stale.pos = {float(empty.x * CHUNK_SIZE) + 0.5f, 70.0f, 0.5f};
     stale.stack = makeItemStack(ItemId::Coal, 1);
-    CHECK(saveEntityChunkFile(entityChunkPath(dir, empty), {stale}));
+    staleChunk.items.push_back(stale);
+    CHECK(saveEntityChunkFile(entityChunkPath(dir, empty), staleChunk));
     CHECK(ents.saveLoadedChunkEntities(dir, empty, true));
     CHECK(!std::filesystem::exists(entityChunkPath(dir, empty)));
 
@@ -2434,11 +2638,11 @@ static void testEntityChunkLifecycleApis() {
     CHECK(ents.items().size() == 2);
 
     CHECK(ents.saveLoadedChunkEntities(dir, a, true));
-    std::vector<SavedDroppedItem> loaded;
+    SavedEntityChunk loaded;
     CHECK(loadEntityChunkFile(entityChunkPath(dir, a), a, loaded) ==
           EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(loaded[0].stack.item == ItemId::Coal && loaded[0].stack.count == 3);
+    CHECK(loaded.items.size() == 1);
+    CHECK(loaded.items[0].stack.item == ItemId::Coal && loaded.items[0].stack.count == 3);
 
     ents.loadChunkEntities(dir, a);
     CHECK(ents.items().size() == 2); // idempotent: no duplicate load
@@ -2449,14 +2653,14 @@ static void testEntityChunkLifecycleApis() {
 
     CHECK(loadEntityChunkFile(entityChunkPath(dir, a), a, loaded) ==
           EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(loaded[0].stack.item == ItemId::Coal);
+    CHECK(loaded.items.size() == 1);
+    CHECK(loaded.items[0].stack.item == ItemId::Coal);
 
     ents.saveAllLoadedEntityChunks(dir, true);
     CHECK(loadEntityChunkFile(entityChunkPath(dir, b), b, loaded) ==
           EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(loaded[0].stack.item == ItemId::DirtBlock);
+    CHECK(loaded.items.size() == 1);
+    CHECK(loaded.items[0].stack.item == ItemId::DirtBlock);
 
     std::filesystem::remove_all(dir);
 }
@@ -2474,11 +2678,13 @@ static void testEntitySaveDisabledDoesNotTouchDisk() {
     CHECK(ents.items().empty());
     CHECK(!std::filesystem::exists(std::filesystem::path(dir) / "entities"));
 
+    SavedEntityChunk savedChunk;
     SavedDroppedItem saved;
     saved.pos = {0.5f, 70.0f, 0.5f};
     saved.stack = makeItemStack(ItemId::Coal, 1);
+    savedChunk.items.push_back(saved);
     std::string path = entityChunkPath(dir, key);
-    CHECK(saveEntityChunkFile(path, {saved}));
+    CHECK(saveEntityChunkFile(path, savedChunk));
     auto beforeSize = std::filesystem::file_size(path);
 
     Entities loaded;
@@ -2569,11 +2775,11 @@ static void testEntityStreamCrossingAutosaveAndDemoIsolation() {
     CHECK(ents.items().size() == 1); // autosave does not unload runtime items
     ChunkKey chunk0{0, 0}, chunk1{1, 0};
     CHECK(!std::filesystem::exists(entityChunkPath(dir, chunk0)));
-    std::vector<SavedDroppedItem> loaded;
+    SavedEntityChunk loaded;
     CHECK(loadEntityChunkFile(entityChunkPath(dir, chunk1), chunk1, loaded) ==
           EntityChunkLoadStatus::Loaded);
-    CHECK(loaded.size() == 1);
-    CHECK(loaded[0].stack.item == ItemId::Coal && loaded[0].stack.count == 2);
+    CHECK(loaded.items.size() == 1);
+    CHECK(loaded.items[0].stack.item == ItemId::Coal && loaded.items[0].stack.count == 2);
 
     const char* demoDir = "test_ent_stream_demo";
     std::filesystem::remove_all(demoDir);
@@ -2661,17 +2867,101 @@ static void testPlayerSaveV4Roundtrip() {
     // exercise the full 36-slot range unique to v4.
     a.inv.slots[8]  = makeItemStack(ItemId::StoneBlock, 7);   // col 8, row 0
     a.inv.slots[17] = makeItemStack(ItemId::Coal, 3);          // col 8, row 1
+    a.health = 13;
     CHECK(savePlayerFile("test_psave/player.bin", a));
     PlayerState b;
     CHECK(loadPlayerFile("test_psave/player.bin", b));
     CHECK(b.pos == a.pos && b.yaw == a.yaw && b.pitch == a.pitch);
     CHECK(b.flying && b.hotbarSlot == 3);
+    CHECK(b.health == 13);
     for (int i = 0; i < Inventory::SLOTS; ++i) {
         CHECK(b.inv.slots[i].item == a.inv.slots[i].item);
         CHECK(b.inv.slots[i].count == a.inv.slots[i].count);
         CHECK(b.inv.slots[i].durability == a.inv.slots[i].durability);
     }
     std::filesystem::remove_all("test_psave");
+}
+
+static void testPlayerSaveV4LoadsAtFullHealth() {
+    // Hand-craft a v4 file (no health field); it must load at full health.
+    std::filesystem::create_directories("test_psave_v4mig");
+    {
+        std::ofstream f("test_psave_v4mig/player.bin", std::ios::binary);
+        f.write("MCPL", 4);
+        uint32_t v = 4;
+        f.write(reinterpret_cast<const char*>(&v), 4);
+        glm::vec3 pos(1.0f, 60.0f, 2.0f);
+        float yaw = 0.0f, pitch = 0.0f;
+        f.write(reinterpret_cast<const char*>(&pos), sizeof(pos));
+        f.write(reinterpret_cast<const char*>(&yaw), 4);
+        f.write(reinterpret_cast<const char*>(&pitch), 4);
+        uint8_t flying = 0, slot = 1;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+        for (int i = 0; i < Inventory::SLOTS; ++i) {
+            uint16_t id = i == 0 ? uint16_t(ItemId::Coal) : 0;
+            uint8_t count = i == 0 ? 4 : 0;
+            uint16_t dur = 0;
+            f.write(reinterpret_cast<const char*>(&id), 2);
+            f.write(reinterpret_cast<const char*>(&count), 1);
+            f.write(reinterpret_cast<const char*>(&dur), 2);
+        }
+    }
+    PlayerState s;
+    s.health = 1; // must be overwritten by the default
+    CHECK(loadPlayerFile("test_psave_v4mig/player.bin", s));
+    CHECK(s.health == PLAYER_SAVE_MAX_HEALTH);
+    CHECK(s.inv.slots[0].item == ItemId::Coal && s.inv.slots[0].count == 4);
+
+    // Out-of-range stored health (e.g. dead-at-save) clamps to full.
+    PlayerState bad;
+    bad.pos = glm::vec3(1.0f, 60.0f, 2.0f);
+    bad.health = 0;
+    CHECK(savePlayerFile("test_psave_v4mig/player.bin", bad));
+    PlayerState clamped;
+    CHECK(loadPlayerFile("test_psave_v4mig/player.bin", clamped));
+    CHECK(clamped.health == PLAYER_SAVE_MAX_HEALTH);
+    std::filesystem::remove_all("test_psave_v4mig");
+}
+
+static void testPlayerHealthDamageAndRegen() {
+    Player p;
+    CHECK(p.health == Player::MAX_HEALTH);
+
+    // A hit lands, then i-frames absorb the follow-up.
+    CHECK(p.damage(2));
+    CHECK(p.health == Player::MAX_HEALTH - 2);
+    CHECK(!p.damage(2));
+    CHECK(p.health == Player::MAX_HEALTH - 2);
+
+    // After the i-frame window the next hit lands again.
+    for (uint32_t i = 0; i < Player::HURT_IFRAME_TICKS; ++i) p.healthTick();
+    CHECK(p.damage(3));
+    CHECK(p.health == Player::MAX_HEALTH - 5);
+
+    // No regen during the grace period...
+    for (uint32_t i = 0; i < Player::REGEN_GRACE_TICKS - 1; ++i) p.healthTick();
+    CHECK(p.health == Player::MAX_HEALTH - 5);
+    // ...then 1 HP per interval afterwards.
+    for (uint32_t i = 0; i < Player::REGEN_INTERVAL_TICKS + 1; ++i) p.healthTick();
+    CHECK(p.health == Player::MAX_HEALTH - 4);
+    for (uint32_t i = 0; i < 10 * Player::REGEN_INTERVAL_TICKS; ++i) p.healthTick();
+    CHECK(p.health == Player::MAX_HEALTH); // caps at max
+
+    // Taking damage resets the grace period.
+    CHECK(p.damage(1));
+    for (uint32_t i = 0; i < Player::REGEN_GRACE_TICKS / 2; ++i) p.healthTick();
+    CHECK(p.damage(1));
+    for (uint32_t i = 0; i < Player::REGEN_GRACE_TICKS / 2 + 2; ++i) p.healthTick();
+    CHECK(p.health == Player::MAX_HEALTH - 2); // grace restarted, no regen yet
+
+    // Lethal damage floors at 0; dead players take no further hits.
+    Player q;
+    CHECK(q.damage(999));
+    CHECK(q.health == 0);
+    CHECK(!q.damage(1));
+    q.resetHealth();
+    CHECK(q.health == Player::MAX_HEALTH && !q.outOfWorld);
 }
 
 static void testPlayerSaveV3ToV4Migration() {
@@ -2815,6 +3105,8 @@ static void testPlayerSaveV4UnknownItemSanitizes() {
             f.write(reinterpret_cast<const char*>(&count), 1);
             f.write(reinterpret_cast<const char*>(&durability), 2);
         }
+        int32_t health = PLAYER_SAVE_MAX_HEALTH;
+        f.write(reinterpret_cast<const char*>(&health), 4);
     }
     PlayerState s;
     CHECK(loadPlayerFile("test_psave3/player.bin", s));
@@ -3718,10 +4010,14 @@ int main() {
     testAmbientLivingSpawnRules();
     testAmbientLivingStreamLifecycle();
     testLivingEntityFacingUpdates();
+    testLivingHostileChaseAndAttack();
+    testLivingMeleeRaycastAndKnockback();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();
     testPlayerSaveV4Roundtrip();
+    testPlayerSaveV4LoadsAtFullHealth();
+    testPlayerHealthDamageAndRegen();
     testPlayerSaveV3ToV4Migration();
     testPlayerSaveV2BlockInventoryMigrates();
     testPlayerSaveV4UnknownItemSanitizes();

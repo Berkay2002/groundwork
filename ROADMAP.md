@@ -24,10 +24,16 @@ deliberately being left for later.
 - See lighting, fog, day/night, water surfaces, smoother terrain shading, basic
   audio, item pickup, generated or embedded voxel/UI art, and the first authored
   blocky character asset loaded from `assets/`.
-- Encounter a first simple living entity in normal worlds and in a
-  save-isolated demo. It has health, deterministic movement, movement-facing,
-  terrain collision, damage/death, and a drop, but no persistence or real AI
-  yet.
+- Encounter hostile zombies in normal worlds and in a save-isolated demo. They
+  wander, chase a visible player, and bite; the player can fight back with a
+  3.5-block melee swing, knockback works both ways, and kills drop rotten
+  flesh. Creatures persist across quitting and chunk streaming; each chunk
+  ambient-spawns its creature exactly once per world.
+- Survive with 20 HP of health: a hearts bar above the hotbar, brief
+  invulnerability after a hit, slow passive regeneration, and death that
+  respawns at world spawn. A keep-inventory setting (default on) decides
+  whether death keeps items or spills them at the death point. Creative mode
+  is invulnerable and ignored by hostiles.
 - Run benchmark and screenshot checks for performance and visual regressions,
   plus headless world tests for core game logic.
 
@@ -57,18 +63,18 @@ deliberately being left for later.
 - The `MCEN` entity-file format is typed so future world entities can share
   the same persistence layer.
 
-### Add simple creatures (basic pass done)
+### Add simple creatures (combat pass done)
 
-- Done: small living-entity foundation with health, damage, deterministic
-  normal-world ambient spawning, movement-facing, simple deterministic
-  movement, terrain collision, model id, rendered GLB character, and a basic
-  drop.
-- Living creatures are runtime-only for now. They are not written to `MCEN`
-  files; unloading a chunk removes them, and deterministic spawn rules may
-  recreate ambient creatures when the chunk becomes active again.
-- Next: decide when creatures need persistence, richer AI, more drops, or more
-  species. Keep behavior modest until the game clearly needs pathfinding or
-  deeper combat.
+- Done: living-entity foundation (health, damage, deterministic ambient
+  spawning, movement-facing, terrain collision, model id, rendered GLB
+  character), creature persistence in `MCEN` files with a once-per-world
+  ambient-spawn marker, hostile chase/attack AI with line of sight, player
+  health/death/respawn with a keep-inventory toggle, two-way melee with
+  knockback, and a rotten-flesh drop.
+- Killed creatures stay dead and the world slowly depopulates; there is no
+  respawn or difficulty system yet, and that is a deliberate open question.
+- Next: more species, drop tables, creature spawn/respawn pacing, or real
+  pathfinding. Keep behavior modest until the game clearly needs more.
 
 ### Expand crafting and recipes
 

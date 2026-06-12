@@ -53,6 +53,7 @@ enum class ItemId : uint16_t {
     CraftingTableBlock = 31,
     FurnaceBlock = 32,
     DiamondOreBlock = 33,
+    RottenFlesh = 34,
     Count
 };
 

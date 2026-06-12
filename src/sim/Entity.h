@@ -44,8 +44,14 @@ struct LivingEntity {
     bool ambient = false;
     ChunkKey homeChunk{0, 0};
     bool dead = false;
+    // Runtime-only combat state (not persisted; rederived next session).
+    uint32_t attackCooldownTicks = 0;
+    uint32_t hurtTicks = 0; // knockback window: AI does not steer while > 0
     glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, body.pos, alpha); }
 };
+
+struct SavedEntityChunk;
+class Player;
 
 // Entity manager. Main thread only, like the chunk map: workers never see
 // entities. Items in unloaded chunks freeze (no physics, no aging) — the
@@ -63,11 +69,23 @@ public:
 
     LivingEntityId spawnLiving(const glm::vec3& pos, const std::string& modelId);
     void spawnAmbientLivingForChunk(const World& world, ChunkKey key);
-    bool damageLiving(LivingEntityId id, int amount);
+    // Damage with an optional knockback impulse (horizontal direction of the
+    // hit; vertical pop is added internally).
+    bool damageLiving(LivingEntityId id, int amount,
+                      const glm::vec3& knockDir = glm::vec3(0.0f));
+    // First living entity hit by the ray, or null. Used for melee picking;
+    // a block between origin and the body still counts as a hit (the block
+    // raycast decides which is closer at the call site).
+    LivingEntity* raycastLiving(const glm::vec3& origin, const glm::vec3& dir,
+                                float maxDist, float* outDist = nullptr) const;
 
     // One simulation tick: physics, magnetized pickup into `inv` (skipped
     // when inv is null), despawn, then rebuild the per-chunk buckets.
-    void tick(const World& world, const glm::vec3& playerPos, Inventory* inv, float dt);
+    // `targetPlayer` non-null enables hostile AI: creatures chase a live
+    // player within sight and melee when adjacent (pass null for creative
+    // mode, demos, and tests that want pure wandering).
+    void tick(const World& world, const glm::vec3& playerPos, Inventory* inv,
+              float dt, Player* targetPlayer = nullptr);
 
     void loadChunkEntities(const std::string& saveDir, ChunkKey key);
     bool saveLoadedChunkEntities(const std::string& saveDir, ChunkKey key,
@@ -92,12 +110,18 @@ private:
     std::unordered_map<ChunkKey, std::vector<ItemEntity*>, ChunkKeyHash> buckets_;
     std::vector<std::unique_ptr<LivingEntity>> living_;
     std::unordered_map<ChunkKey, std::vector<LivingEntity*>, ChunkKeyHash> livingBuckets_;
+    // Chunks where the ambient rule already ran this session (suppresses
+    // re-running it on repeated load events while the chunk stays active).
     std::unordered_set<ChunkKey, ChunkKeyHash> ambientLivingChunks_;
+    // Chunks whose ambient spawn actually produced a creature, ever. Persisted
+    // as a marker record in the chunk's entity file so a chunk spawns its
+    // ambient creature exactly once per world.
+    std::unordered_set<ChunkKey, ChunkKeyHash> ambientConsumedChunks_;
     std::unordered_set<ChunkKey, ChunkKeyHash> loadedEntityChunks_;
     LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();
-    void unloadLivingForChunk(ChunkKey key);
+    SavedEntityChunk gatherChunk(ChunkKey key) const;
     void cleanupLiving();
     void rebuildBuckets();
 };

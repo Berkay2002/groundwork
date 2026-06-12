@@ -43,6 +43,9 @@ void drawArrow(Hud& hud, const Rect& r);        // gray arrow pointing right
 void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
                    float brightness = 1.0f);
 void drawHotbar(Hud& hud, const HotbarView& view, int screenW, int screenH);
+// Survival health row: one pixel-art heart per 2 HP, left-aligned above the
+// hotbar (Minecraft layout).
+void drawHearts(Hud& hud, int health, int maxHealth, int screenW, int screenH);
 void drawInventoryScreen(Hud& hud, const InventoryView& view, int screenW,
                          int screenH);
 

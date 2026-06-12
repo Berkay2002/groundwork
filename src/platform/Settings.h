@@ -26,6 +26,9 @@ struct Settings {
     // Survival mode is the default now. Explicit survival=0 in old settings
     // files keeps creative mode.
     bool survival = true;
+    // Survival death keeps the inventory by default; turning this off spills
+    // it as dropped items at the death point.
+    bool keepInventory = true;
     float volume = 0.8f; // master sound volume, 0..1
     // Rebindable keys (key_* entries, names per KeyBinds.h). Esc, the
     // hotbar digits, and the mouse buttons are fixed.
@@ -54,6 +57,7 @@ struct Settings {
                 else if (key == "vsync") s.vsync = std::stoi(val) != 0;
                 else if (key == "fps_max") s.fpsMax = std::stoi(val);
                 else if (key == "survival") s.survival = std::stoi(val) != 0;
+                else if (key == "keep_inventory") s.keepInventory = std::stoi(val) != 0;
                 else if (key == "volume") s.volume = std::stof(val);
                 else if (key.rfind("key_", 0) == 0) {
                     int* slot = s.bindFor(key.substr(4));
@@ -93,6 +97,8 @@ struct Settings {
           << "# frame cap when vsync is off; 0 = unlimited\n"
           << "fps_max=" << fpsMax << "\n"
           << "survival=" << (survival ? 1 : 0) << "\n"
+          << "# survival death: 1 keeps the inventory, 0 drops it at the death point\n"
+          << "keep_inventory=" << (keepInventory ? 1 : 0) << "\n"
           << "volume=" << volume << "\n"
           << "# key names: letters, digits, SPACE, TAB, LSHIFT, LCTRL, ...\n"
           << "key_forward=" << keys::toName(keyForward) << "\n"

@@ -43,6 +43,8 @@
 namespace {
 
 constexpr float REACH = 5.0f;           // block interaction distance
+constexpr float ATTACK_REACH = 3.5f;    // melee distance (shorter than REACH)
+constexpr int PLAYER_MELEE_DAMAGE = 3;  // ~4 hits per zombie
 constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
 constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
 constexpr uint32_t WORLD_SEED = 1337;
@@ -245,7 +247,20 @@ void survivalMiningTick(World& world) {
         return;
     }
 
+    // A creature in front of the crosshair blocks mining: holding the button
+    // is swinging at the mob, not the wall behind it.
+    float entityT = 0.0f;
     RaycastHit hit = world.raycast(app.player.eyePos(), app.player.lookDir(), REACH);
+    if (app.entities.raycastLiving(app.player.eyePos(), app.player.lookDir(),
+                                   ATTACK_REACH, &entityT) != nullptr) {
+        float blockT = hit.hit
+            ? glm::distance(app.player.eyePos(), glm::vec3(hit.block) + 0.5f) - 0.55f
+            : ATTACK_REACH + 1.0f;
+        if (entityT <= blockT) {
+            resetBreakProgress();
+            return;
+        }
+    }
     bool validTarget = hit.hit;
     Block targetBlock = validTarget ? world.getBlock(hit.block.x, hit.block.y, hit.block.z)
                                     : Block::Air;
@@ -572,6 +587,7 @@ void savePlayer() {
     s.flying = app.player.flying;
     s.hotbarSlot = uint8_t(app.hotbarSlot);
     s.inv = app.inv;
+    s.health = app.player.health > 0 ? app.player.health : Player::MAX_HEALTH;
     if (!ui::addTransientStacksForSave(s.inv, app.cursorStack, app.crafting.grid)) {
         std::fprintf(stderr, "warning: skipped player save; transient inventory stacks do not fit\n");
         return;
@@ -594,7 +610,37 @@ bool loadPlayer() {
     app.player.flying = s.flying;
     app.hotbarSlot = s.hotbarSlot < HOTBAR_SLOTS ? s.hotbarSlot : 0;
     app.inv = s.inv;
+    app.player.resetHealth();
+    app.player.health = s.health;
     return true;
+}
+
+// Survival death: optionally spill the inventory where the player died, then
+// respawn at world spawn with full health. Creative mode never reaches this.
+void handlePlayerDeath(World& world) {
+    if (!app.settings.keepInventory) {
+        glm::vec3 at = app.player.pos() + glm::vec3(0.0f, 0.9f, 0.0f);
+        int n = 0;
+        auto spill = [&](ItemStack& s) {
+            if (s.empty()) return;
+            float a = 2.39996f * float(n++); // golden-angle fan, no RNG needed
+            app.entities.spawnItem(at,
+                                   glm::vec3(std::cos(a) * 2.0f, 4.0f,
+                                             std::sin(a) * 2.0f),
+                                   s);
+            s = {};
+        };
+        for (ItemStack& s : app.inv.slots) spill(s);
+        spill(app.cursorStack);
+        for (ItemStack& s : app.crafting.grid.cells) spill(s);
+    }
+    // Respawn at world spawn; wait briefly so spawn() can see terrain.
+    app.player.pos() = glm::vec3(0.5f, float(CHUNK_HEIGHT), 0.5f);
+    app.player.prevPos = app.player.pos();
+    app.player.vel() = glm::vec3(0.0f);
+    world.waitUntilLoaded(app.player.pos(), 1, 2000);
+    app.player.spawn(world);
+    app.player.resetHealth();
 }
 
 // Wireframe unit cube (12 edges as line list).
@@ -1028,7 +1074,19 @@ int main(int argc, char** argv) {
                     app.audio.playFootstep();
                 }
             }
-            app.entities.tick(world, app.player.pos(), &app.inv, float(TickClock::TICK_DT));
+            // Hostile AI targets the player only in survival; creative mode
+            // and demo runs keep creatures wandering.
+            app.entities.tick(world, app.player.pos(), &app.inv,
+                              float(TickClock::TICK_DT),
+                              app.survival && !demoRun ? &app.player : nullptr);
+            if (app.survival) {
+                app.player.healthTick();
+                if (app.player.outOfWorld) app.player.health = 0;
+                if (app.player.health <= 0) handlePlayerDeath(world);
+            } else if (app.player.outOfWorld) {
+                app.player.spawn(world); // creative safety net, as before
+                app.player.resetHealth();
+            }
         }
         const float alpha = tickClock.alpha();
         benchMark(1);
@@ -1069,6 +1127,26 @@ int main(int argc, char** argv) {
         }
 
         RaycastHit hit = world.raycast(eye, dir, REACH);
+
+        // Melee: a living entity in front of the crosshair takes the click
+        // (in either mode). The block raycast has no exact distance, so the
+        // entity wins ties against the hit block's near face.
+        if (app.breakPressed && !app.invOpen && app.menu == Menu::None) {
+            float entityT = 0.0f;
+            LivingEntity* target =
+                app.entities.raycastLiving(eye, dir, ATTACK_REACH, &entityT);
+            if (target != nullptr) {
+                float blockT = hit.hit
+                    ? glm::distance(eye, glm::vec3(hit.block) + 0.5f) - 0.55f
+                    : ATTACK_REACH + 1.0f;
+                if (entityT <= blockT) {
+                    app.entities.damageLiving(target->id, PLAYER_MELEE_DAMAGE, dir);
+                    app.breakPressed = false; // the swing was the attack
+                    resetBreakProgress();
+                }
+            }
+        }
+
         if ((demoBreak || demoSurvival) && hit.hit) {
             app.breakProgress.active = true;
             app.breakProgress.target = hit.block;
@@ -1248,6 +1326,9 @@ int main(int argc, char** argv) {
             ui::HotbarView hv{app.hotbarSlot, app.survival, app.inv,
                               HOTBAR, HOTBAR_SLOTS, heldName};
             ui::drawHotbar(hud, hv, width, height);
+            if (app.survival)
+                ui::drawHearts(hud, app.player.health, Player::MAX_HEALTH,
+                               width, height);
         }
         if (app.invOpen) {
             // Flush the world-space HUD (hotbar, debug text) before the

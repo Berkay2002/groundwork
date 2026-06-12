@@ -42,6 +42,7 @@ inline TileId itemIconTile(ItemId item) {
         case ItemId::DiamondPickaxe: return TileId::ItemDiamondPickaxe;
         case ItemId::DiamondAxe: return TileId::ItemDiamondAxe;
         case ItemId::DiamondShovel: return TileId::ItemDiamondShovel;
+        case ItemId::RottenFlesh: return TileId::ItemRottenFlesh;
         default: return TileId::Error;
     }
 }

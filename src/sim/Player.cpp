@@ -80,8 +80,10 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
             isWater(world.getBlock(bx, (int)std::floor(pos().y), bz));
         float speed = in.sprint ? SPRINT_SPEED : WALK_SPEED;
         if (inWater) speed *= 0.6f;
-        vel().x = wish.x * speed;
-        vel().z = wish.z * speed;
+        vel().x = wish.x * speed + knockback_.x;
+        vel().z = wish.z * speed + knockback_.z;
+        knockback_.x *= 0.8f; // shove fades over ~half a second
+        knockback_.z *= 0.8f;
         vel().y += (inWater ? WATER_GRAVITY : GRAVITY) * dt;
         float terminal = inWater ? WATER_TERMINAL : TERMINAL;
         if (vel().y < terminal) vel().y = terminal;
@@ -105,8 +107,48 @@ void Player::update(World& world, const PlayerInput& in, float dt) {
 
     moveBody(world, body_, dt);
 
-    // Safety net: fell out of the world.
-    if (pos().y < -20.0f) spawn(world);
+    // Fell out of the world: flag it for the app layer, which decides
+    // between a creative-mode respawn and a survival death.
+    if (pos().y < -20.0f) outOfWorld = true;
+}
+
+bool Player::damage(int amount) {
+    if (amount <= 0 || health <= 0 || iframeTicks_ > 0) return false;
+    health -= amount;
+    if (health < 0) health = 0;
+    iframeTicks_ = HURT_IFRAME_TICKS;
+    ticksSinceDamage_ = 0;
+    regenCounter_ = 0;
+    return true;
+}
+
+void Player::healthTick() {
+    if (iframeTicks_ > 0) --iframeTicks_;
+    if (ticksSinceDamage_ < UINT32_MAX) ++ticksSinceDamage_;
+    if (health <= 0 || health >= MAX_HEALTH ||
+        ticksSinceDamage_ < REGEN_GRACE_TICKS) {
+        regenCounter_ = 0;
+        return;
+    }
+    if (++regenCounter_ >= REGEN_INTERVAL_TICKS) {
+        regenCounter_ = 0;
+        ++health;
+    }
+}
+
+void Player::resetHealth() {
+    health = MAX_HEALTH;
+    ticksSinceDamage_ = REGEN_GRACE_TICKS;
+    iframeTicks_ = 0;
+    regenCounter_ = 0;
+    knockback_ = glm::vec3(0.0f);
+    outOfWorld = false;
+}
+
+void Player::applyKnockback(const glm::vec3& push) {
+    knockback_.x += push.x;
+    knockback_.z += push.z;
+    if (push.y > vel().y) vel().y = push.y;
 }
 
 void Player::ensureNotStuck(World& world) {

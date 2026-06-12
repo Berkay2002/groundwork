@@ -1,5 +1,6 @@
 #pragma once
 #include "sim/Physics.h"
+#include <cstdint>
 #include <glm/glm.hpp>
 
 class World;
@@ -20,6 +21,28 @@ public:
     static constexpr float WIDTH = 0.6f;
     static constexpr float HEIGHT = 1.8f;
     static constexpr float EYE = 1.62f;
+
+    // Survival health: 20 HP = 10 hearts. Damage is blocked during the brief
+    // post-hit invulnerability window; health regenerates slowly once the
+    // player has gone REGEN_GRACE_TICKS without being hurt. The app layer
+    // owns death (respawn, inventory rules) — falling out of the world sets
+    // `outOfWorld` instead of teleporting so survival mode can treat it as
+    // a lethal hit.
+    static constexpr int MAX_HEALTH = 20;
+    static constexpr uint32_t HURT_IFRAME_TICKS = 10; // 0.5 s at 20 TPS
+    static constexpr uint32_t REGEN_GRACE_TICKS = 100;   // 5 s
+    static constexpr uint32_t REGEN_INTERVAL_TICKS = 60; // 1 HP / 3 s
+    int health = MAX_HEALTH;
+    bool outOfWorld = false;
+
+    // Returns true if the hit landed (not absorbed by i-frames / already 0).
+    bool damage(int amount);
+    // Per-simulation-tick health upkeep (i-frame countdown, passive regen).
+    void healthTick();
+    void resetHealth();
+    // Shove from a hit. Walking sets horizontal velocity directly each tick,
+    // so the push is accumulated separately and decays over a few ticks.
+    void applyKnockback(const glm::vec3& push);
 
     Body& body() { return body_; }
     const Body& body() const { return body_; }
@@ -51,5 +74,9 @@ public:
 
 private:
     Body body_{glm::vec3(0.5f, 50.0f, 0.5f), glm::vec3(0.0f), WIDTH * 0.5f, HEIGHT, false};
+    uint32_t ticksSinceDamage_ = REGEN_GRACE_TICKS;
+    uint32_t iframeTicks_ = 0;
+    uint32_t regenCounter_ = 0;
+    glm::vec3 knockback_{0.0f};
     bool collidesAt(World& world, const glm::vec3& p) const;
 };

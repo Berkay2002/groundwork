@@ -1,6 +1,7 @@
 # Status
 
-Last updated: 2026-06-12, after normal-world creature spawning.
+Last updated: 2026-06-13, after creature persistence, player health, and
+two-way melee combat.
 
 Groundwork is past MVP. The completed history is in `docs/goals/`; future work
 is organized by roadmap area in `ROADMAP.md`. Do not start roadmap work without
@@ -11,7 +12,8 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 - C++17/OpenGL 3.3 voxel game with streaming chunks, background generation and
   meshing, saves, lighting, water, caves, ores, survival progression, audio,
   menus, day/night, runtime character assets, deterministic ambient creature
-  spawning, Windows support, and demo flags.
+  spawning, persistent hostile creatures, player health with two-way melee
+  combat, Windows support, and demo flags.
 - Main thread owns the chunk map and all GL. Workers only build fresh chunks or
   CPU mesh data from immutable snapshots.
 - `World` remains the chunk/streaming/save/fluid/block-entity hub. `Entities`
@@ -34,10 +36,31 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 - Normal worlds spawn the first creature through deterministic ambient
   seed-and-chunk rules. Repeated load events for an active chunk do not duplicate
   ambient creatures.
-- Living entities are runtime-only and not persisted yet. Dropped-item entity
-  save files remain item-only. Unloading a chunk removes living creatures in
-  that chunk and ambient creatures whose home chunk is unloading; later reloads
-  may recreate ambient creatures from the deterministic rule.
+- Living creatures persist as MCEN record type 2; record type 3 is a per-chunk
+  "ambient spawn consumed" marker, so each chunk ambient-spawns exactly once
+  per world, ever — killed zombies stay dead. The MCEN version stays 1: the v1
+  loader reads-and-skips unknown record types, so old item-only files remain
+  loadable and new types stay append-only. A marker-only file is NOT deleted by
+  the empty-file cleanup. Creatures unload/save with the chunk they stand in
+  (the old home-chunk removal rule is gone; the marker prevents duplicates).
+  Combat state (attack cooldown, hurt/knockback ticks) is runtime-only.
+- Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
+  → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
+  Creative players, dead players, and demo runs are ignored (main passes a
+  null target). Knockback on the player goes through a decaying accumulator
+  (Player::applyKnockback) because walking overwrites horizontal velocity
+  every tick; knocked-back creatures skip AI steering during hurtTicks for the
+  same reason.
+- Player health: 20 HP, MCPL v5 (appended i32 health; v1-v4 load at full, out
+  of range clamps). Passive regen 1 HP/3 s after 5 s undamaged, 0.5 s
+  i-frames, hearts HUD above the hotbar (survival only). Death respawns at
+  world spawn; `keep_inventory` (settings.cfg + pause menu, default on) keeps
+  items — off spills them as dropped items at the death point. Falling out of
+  the world is death in survival (Player sets `outOfWorld`; the app decides).
+- Player melee: left click attacks the nearest living entity within 3.5 blocks
+  (ray-vs-AABB; the entity must be nearer than the targeted block), 3 HP +
+  knockback. A creature in front of the crosshair blocks mining progress.
+  Zombies drop Rotten Flesh (appended item id 34, procedural lump icon).
 - Water flow uses appended ids 24-31. Chunk integration seeds only flowing
   cells, not generated source water, so pristine lake chunks stay byte-stable.
 - Shore exit is sustained `SHORE_HOP = 5.5` while jump + wall + water applies.
@@ -47,15 +70,22 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 
 ## Verification
 
-Recent Windows/MSVC work built warning-free and `world_tests` passed. Added
-coverage includes asset manifest/model loading, external PNG texture loading,
-asset-manager caching, living spawn/tick/freeze/collision/damage/drop/query
-behavior, deterministic ambient creature spawning, stream-event duplicate
-prevention, runtime-only living unload behavior, movement-facing, MCEN
-persistence/corruption/isolation, entity unload/load and autosave, demo save
-isolation, water spread/drain/infinite/drop-seek/save/shore hop, and
-inventory/progression/furnace/UI migrations. Rendering changes were visually
-inspected with demo screenshots. Latest TSAN was not run.
+Recent Windows/MSVC work built warning-free and `world_tests` passed (run 3x
+after the combat batch). Added coverage includes asset manifest/model loading,
+external PNG texture loading, asset-manager caching, living
+spawn/tick/freeze/collision/damage/drop/query behavior, deterministic ambient
+creature spawning, stream-event duplicate prevention, movement-facing, MCEN
+persistence/corruption/isolation including living records and the ambient
+marker (roundtrip, kill + reload stays empty, fresh-session marker respect,
+marker-only files kept), entity unload/load and autosave, demo save isolation,
+player save v5 roundtrip + v4 full-health migration + clamping, player
+damage/i-frames/regen/grace, hostile chase/attack/dead-player-ignored, melee
+raycast hit/miss/range + knockback, water
+spread/drain/infinite/drop-seek/save/shore hop, and
+inventory/progression/furnace/UI migrations. Hearts HUD + creature visuals
+inspected via `--demo-creature --demo-survival --frames 300` screenshot.
+Latest TSAN was not run (no new threading surface: entities and saves remain
+main-thread-only).
 
 ## Pointers
 

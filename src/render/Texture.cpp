@@ -514,6 +514,9 @@ RGBA tilePixel(TileId tile, int x, int y) {
         case TileId::ItemDiamondPickaxe: return toolIconPixel(x, y, ToolClass::Pickaxe, ToolTier::Diamond);
         case TileId::ItemDiamondAxe: return toolIconPixel(x, y, ToolClass::Axe, ToolTier::Diamond);
         case TileId::ItemDiamondShovel: return toolIconPixel(x, y, ToolClass::Shovel, ToolTier::Diamond);
+        case TileId::ItemRottenFlesh:
+            return itemLumpPixel(x, y, {152, 74, 58}, {196, 118, 86},
+                                 {108, 46, 40}, {58, 26, 22}, 37);
         case TileId::Error:
         case TileId::Count: break;
     }
