@@ -41,6 +41,11 @@ struct WorldStats {
     float meshMs = 0;     // moving average per-chunk mesh build time
 };
 
+struct ChunkStreamEvents {
+    std::vector<ChunkKey> loaded;
+    std::vector<ChunkKey> unloaded;
+};
+
 // Chunk lifecycle: missing -> pendingGen (worker generates/loads) ->
 // loaded+dirty -> meshInFlight (worker builds vertices) -> uploaded.
 // Edits set dirty again; unload saves modified chunks.
@@ -63,6 +68,7 @@ public:
     // Streaming: integrate finished generation jobs, request missing chunks
     // around the player, unload distant ones.
     void update(const glm::vec3& playerPos, int renderDistance);
+    ChunkStreamEvents consumeStreamEvents();
 
     // Mesh pipeline: upload finished meshes (GL!) within a per-frame time
     // budget — in-frustum and near chunks first, the rest carry over to the
@@ -147,6 +153,7 @@ private:
     std::string saveDir_;
     std::unordered_map<ChunkKey, std::unique_ptr<Chunk>, ChunkKeyHash> chunks_;
     BlockEntityStore blockEntities_;
+    ChunkStreamEvents streamEvents_;
 
     // Pending fluid cells (queue + dedupe set of packed positions).
     std::vector<glm::ivec3> fluidQueue_;

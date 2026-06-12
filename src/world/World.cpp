@@ -224,6 +224,7 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
         LightingAccess light(*this);
         lighting::onChunkAdded(light, key.x, key.z); // exchange light with neighbors
         seedFluidsFromChunk(key.x, key.z); // resume interrupted flows
+        streamEvents_.loaded.push_back(key);
     }
 
     int pcx = floorDiv((int)std::floor(playerPos.x), CHUNK_SIZE);
@@ -272,12 +273,20 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
             int dx = std::abs(it->first.x - pcx), dz = std::abs(it->first.z - pcz);
             if (std::max(dx, dz) > renderDistance + 2) {
                 if (it->second->modified) saveChunk(*it->second);
+                streamEvents_.unloaded.push_back(it->first);
                 it = chunks_.erase(it);
             } else {
                 ++it;
             }
         }
     }
+}
+
+ChunkStreamEvents World::consumeStreamEvents() {
+    ChunkStreamEvents out;
+    out.loaded.swap(streamEvents_.loaded);
+    out.unloaded.swap(streamEvents_.unloaded);
+    return out;
 }
 
 ChunkSnapshot World::snapshot(const Chunk& c) const {

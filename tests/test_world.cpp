@@ -554,6 +554,31 @@ static void testUnloadSaves() {
     std::filesystem::remove_all(dir);
 }
 
+static bool containsChunkKey(const std::vector<ChunkKey>& keys, ChunkKey needle) {
+    return std::find(keys.begin(), keys.end(), needle) != keys.end();
+}
+
+static void testWorldStreamEvents() {
+    const char* dir = "test_world_stream_events";
+    std::filesystem::remove_all(dir);
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+
+    ChunkStreamEvents first = w.consumeStreamEvents();
+    CHECK(containsChunkKey(first.loaded, {0, 0}));
+    CHECK(first.unloaded.empty());
+
+    ChunkStreamEvents second = w.consumeStreamEvents();
+    CHECK(second.loaded.empty());
+    CHECK(second.unloaded.empty());
+
+    w.update(glm::vec3(1000.0f, 40.0f, 1000.0f), 2);
+    ChunkStreamEvents moved = w.consumeStreamEvents();
+    CHECK(containsChunkKey(moved.unloaded, {0, 0}));
+
+    std::filesystem::remove_all(dir);
+}
+
 static void testRaycast() {
     const char* dir = "test_saves_tmp2";
     std::filesystem::remove_all(dir);
@@ -3173,6 +3198,7 @@ int main() {
     testEntityChunkCorruptionDoesNotTouchBlockChunk();
     testAtomicSaveOverwritesExisting();
     testUnloadSaves();
+    testWorldStreamEvents();
     testRaycast();
     testTorchRaycastTargetsPost();
     testBodyPhysics();
