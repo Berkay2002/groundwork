@@ -1700,7 +1700,7 @@ static void testItemEntityStackIngress() {
     CHECK(ents.items()[2]->stack.count == 2);
 }
 
-static void testPlayerSaveV3Roundtrip() {
+static void testPlayerSaveV4Roundtrip() {
     std::filesystem::create_directories("test_psave");
     PlayerState a;
     a.pos = glm::vec3(12.5f, 34.0f, -8.25f);
@@ -1713,6 +1713,10 @@ static void testPlayerSaveV3Roundtrip() {
     a.inv.slots[4] = makeToolStack(ItemId::IronPickaxe);
     a.inv.slots[4].durability = 123;
     a.inv.add(ItemId::Coal, 9);
+    // Also populate some slots in the 9th column (col 8) and later rows to
+    // exercise the full 36-slot range unique to v4.
+    a.inv.slots[8]  = makeItemStack(ItemId::StoneBlock, 7);   // col 8, row 0
+    a.inv.slots[17] = makeItemStack(ItemId::Coal, 3);          // col 8, row 1
     CHECK(savePlayerFile("test_psave/player.bin", a));
     PlayerState b;
     CHECK(loadPlayerFile("test_psave/player.bin", b));
@@ -1724,6 +1728,77 @@ static void testPlayerSaveV3Roundtrip() {
         CHECK(b.inv.slots[i].durability == a.inv.slots[i].durability);
     }
     std::filesystem::remove_all("test_psave");
+}
+
+static void testPlayerSaveV3ToV4Migration() {
+    // Hand-craft a v3 file with exactly 32 slots (8-column layout).
+    // Slot layout: put distinctive content including a durable item with wear.
+    // After migration each old slot r*8+c must land at new slot r*9+c;
+    // column 8 of every new row must be empty.
+    std::filesystem::create_directories("test_psave_v3mig");
+    {
+        std::ofstream f("test_psave_v3mig/player.bin", std::ios::binary);
+        f.write("MCPL", 4);
+        uint32_t v = 3;
+        f.write(reinterpret_cast<const char*>(&v), 4);
+        glm::vec3 pos(7.0f, 50.0f, 3.0f);
+        float yaw = 45.0f, pitch = -15.0f;
+        f.write(reinterpret_cast<const char*>(&pos), sizeof(pos));
+        f.write(reinterpret_cast<const char*>(&yaw), 4);
+        f.write(reinterpret_cast<const char*>(&pitch), 4);
+        uint8_t flying = 1, slot = 2;
+        f.write(reinterpret_cast<const char*>(&flying), 1);
+        f.write(reinterpret_cast<const char*>(&slot), 1);
+        // v3 format: exactly 32 item stacks (literal count, not Inventory::SLOTS).
+        // Old slot  0 (r=0,c=0): Coal x10
+        // Old slot  1 (r=0,c=1): IronPickaxe x1, durability=77
+        // Old slot  7 (r=0,c=7): DirtBlock x5   (last col of row 0)
+        // Old slot  8 (r=1,c=0): StoneBlock x3
+        // Old slot 15 (r=1,c=7): TorchBlock x2
+        // All others: empty
+        for (int i = 0; i < 32; ++i) {
+            uint16_t id = 0;
+            uint8_t count = 0;
+            uint16_t dur = 0;
+            if (i == 0)  { id = uint16_t(ItemId::Coal); count = 10; }
+            if (i == 1)  { id = uint16_t(ItemId::IronPickaxe); count = 1;
+                           dur = 77; }
+            if (i == 7)  { id = uint16_t(ItemId::DirtBlock); count = 5; }
+            if (i == 8)  { id = uint16_t(ItemId::StoneBlock); count = 3; }
+            if (i == 15) { id = uint16_t(ItemId::TorchBlock); count = 2; }
+            f.write(reinterpret_cast<const char*>(&id), 2);
+            f.write(reinterpret_cast<const char*>(&count), 1);
+            f.write(reinterpret_cast<const char*>(&dur), 2);
+        }
+    }
+    PlayerState s;
+    CHECK(loadPlayerFile("test_psave_v3mig/player.bin", s));
+    CHECK(s.pos == glm::vec3(7.0f, 50.0f, 3.0f));
+    CHECK(s.flying && s.hotbarSlot == 2);
+
+    // Old slot 0 (r=0,c=0) → new slot 0
+    CHECK(s.inv.slots[0].item == ItemId::Coal && s.inv.slots[0].count == 10);
+    // Old slot 1 (r=0,c=1) → new slot 1; durability preserved
+    CHECK(s.inv.slots[1].item == ItemId::IronPickaxe);
+    CHECK(s.inv.slots[1].count == 1);
+    CHECK(s.inv.slots[1].durability == 77);
+    // Old slot 7 (r=0,c=7) → new slot 0*9+7 = 7
+    CHECK(s.inv.slots[7].item == ItemId::DirtBlock && s.inv.slots[7].count == 5);
+    // Old slot 8 (r=1,c=0) → new slot 1*9+0 = 9
+    CHECK(s.inv.slots[9].item == ItemId::StoneBlock && s.inv.slots[9].count == 3);
+    // Old slot 15 (r=1,c=7) → new slot 1*9+7 = 16
+    CHECK(s.inv.slots[16].item == ItemId::TorchBlock && s.inv.slots[16].count == 2);
+
+    // Column 8 of every row must be empty.
+    for (int row = 0; row < 4; ++row)
+        CHECK(s.inv.slots[row * 9 + 8].empty());
+
+    // Slots that were empty in v3 remain empty after migration.
+    CHECK(s.inv.slots[2].empty());
+    CHECK(s.inv.slots[8].empty()); // col 8 row 0
+    CHECK(s.inv.slots[10].empty()); // r=1,c=1 was empty in v3
+
+    std::filesystem::remove_all("test_psave_v3mig");
 }
 
 static void testPlayerSaveV2BlockInventoryMigrates() {
@@ -1741,7 +1816,8 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
         uint8_t flying = 0, slot = 5;
         f.write(reinterpret_cast<const char*>(&flying), 1);
         f.write(reinterpret_cast<const char*>(&slot), 1);
-        for (int i = 0; i < Inventory::SLOTS; ++i) {
+        // v2 format: exactly 32 block-pairs (literal count, not Inventory::SLOTS).
+        for (int i = 0; i < 32; ++i) {
             uint8_t b = 0, c = 0;
             if (i == 0) { b = uint8_t(Block::Stone); c = 3; }
             if (i == 1) { b = uint8_t(Block::Dirt); c = 250; }
@@ -1755,14 +1831,21 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
     CHECK(loadPlayerFile("test_psave2/player.bin", s));
     CHECK(s.pos == glm::vec3(4.0f, 5.0f, 6.0f));
     CHECK(s.hotbarSlot == 5);
+    // Old slot 0 (r=0,c=0) → new slot 0*9+0 = 0
     CHECK(s.inv.slots[0].item == ItemId::CobblestoneBlock && s.inv.slots[0].count == 3);
+    // Old slot 1 (r=0,c=1) → new slot 0*9+1 = 1
     CHECK(s.inv.slots[1].item == ItemId::DirtBlock && s.inv.slots[1].count == 64);
+    // Old slot 2 (r=0,c=2) → new slot 0*9+2 = 2
     CHECK(s.inv.slots[2].item == ItemId::CoalOreBlock && s.inv.slots[2].count == 1);
+    // Old slot 3 (r=0,c=3) → new slot 0*9+3 = 3; bad block id → empty
     CHECK(s.inv.slots[3].empty());
+    // Column 8 of every row must be empty (no old col 8 to migrate from).
+    for (int row = 0; row < 4; ++row)
+        CHECK(s.inv.slots[row * 9 + 8].empty());
     std::filesystem::remove_all("test_psave2");
 }
 
-static void testPlayerSaveV3UnknownItemSanitizes() {
+static void testPlayerSaveV4UnknownItemSanitizes() {
     std::filesystem::create_directories("test_psave3");
     {
         std::ofstream f("test_psave3/player.bin", std::ios::binary);
@@ -2371,9 +2454,10 @@ int main() {
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();
-    testPlayerSaveV3Roundtrip();
+    testPlayerSaveV4Roundtrip();
+    testPlayerSaveV3ToV4Migration();
     testPlayerSaveV2BlockInventoryMigrates();
-    testPlayerSaveV3UnknownItemSanitizes();
+    testPlayerSaveV4UnknownItemSanitizes();
     testPlayerSaveV1Migrates();
     testKeyBinds();
     testSoundBank();
