@@ -12,9 +12,9 @@ deliberately being left for later.
   survival mode, tool tiers, durability, mining times, item counts, and item
   drops.
 - Save and resume player position, inventory, world seed, time of day, modified
-  chunks, and furnace contents. Save files use versioned headers and
-  temporary-file replacement so a crash during saving is less likely to damage
-  real player data.
+  chunks, furnace contents, and dropped item entities. Save files use versioned
+  headers and temporary-file replacement so a crash during saving is less
+  likely to damage real player data.
 - Change common settings through `settings.cfg` or the pause menu: render
   distance, field of view, sensitivity, volume, vsync, key bindings, and
   survival or creative mode.
@@ -41,11 +41,15 @@ deliberately being left for later.
 
 ## Next roadmap areas
 
-### Save dropped items
+### Save dropped items (done)
 
-- Dropped items should survive quitting, loading, and chunk streaming.
-- Add cleanup rules so old items do not grow forever or behave unpredictably.
-- Use this as the base rule set for future world entities.
+- Dropped items survive quitting, loading, and chunk streaming.
+- Item entities save in optional chunk-scoped files under
+  `saves/world1/entities/e_<cx>_<cz>.bin`.
+- Items tick only while their chunk is active, matching Minecraft-style chunk
+  ticking; despawn cleanup runs when those chunks are active again.
+- The `MCEN` entity-file format is typed so future world entities can share
+  the same persistence layer.
 
 ### Add simple creatures
 

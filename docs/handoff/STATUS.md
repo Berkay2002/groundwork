@@ -1,4 +1,37 @@
-# Status (last updated: 2026-06-12, after water physics + shore exit)
+# Status (last updated: 2026-06-12, after dropped item persistence)
+
+### Dropped item persistence (2026-06-12)
+
+User-approved: Minecraft-style dropped item saves using chunk-scoped entity
+files, not appended block chunks.
+
+- **Entity save format**: optional per-chunk files at
+  `saves/world1/entities/e_<cx>_<cz>.bin`, magic `MCEN`, version 1. The file is
+  a typed entity record container; v1 supports only `DroppedItem`. Each record
+  stores position, velocity, age ticks, spin seed, and the existing `ItemStack`
+  encoding (`u16 item`, `u8 count`, `u16 durability`). `MCCH` block chunk files
+  are unchanged.
+- **Load failure behavior**: missing entity file means no entities. Bad magic,
+  unsupported version, short reads, invalid payload sizes, or corrupt records
+  discard only that chunk's saved entities and warn; block chunk data is not
+  regenerated or invalidated.
+- **Runtime ownership**: `World` publishes one-shot `ChunkStreamEvents` when
+  chunks load or unload. `Entities` owns item disk I/O and runtime storage.
+  Loaded chunks call `loadChunkEntities`; unloaded chunks call
+  `saveAndUnloadChunkEntities`; autosave and clean shutdown call
+  `saveAllLoadedEntityChunks`.
+- **Minecraft-style ticking**: item age is now ticks, not float seconds
+  (`PICKUP_DELAY_TICKS = 8`, `DESPAWN_TICKS = 6000`). Items do not age, move,
+  merge, despawn, or stay in runtime memory while their chunk is unloaded.
+  Empty entity chunks delete their file on save.
+- **Demo isolation**: demo runs still may read existing save data, like chunk
+  files, but all entity save calls use `saveEnabled=false`, so demos do not
+  create, update, or delete `entities/` files.
+- **Tests added**: `MCEN` roundtrip and corrupt-file handling, unknown/invalid
+  record skipping, block chunk isolation, tick-age despawn, entity chunk
+  lifecycle APIs, stream events, quit/load, unload/load, no unloaded aging,
+  chunk-crossing ownership, autosave, old worlds with missing entity files, and
+  demo save isolation.
 
 ### Water physics + shore-exit fix (2026-06-12)
 
