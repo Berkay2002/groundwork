@@ -15,15 +15,18 @@ extraction, 9-column inventory, player save v4, and demo-flag save isolation:
   translucent dark fill + 1-px light highlight (top/left) + 1-px dark shadow
   (bottom/right), matching the Minecraft inventory look. All
   inventory/crafting/furnace screens use it.
-- **InventoryUi extraction**: `src/ui/InventoryUi.{h,cpp}` owns all panel
-  layout math, slot drawing, hit-testing, and `drawInventoryScreen(hud, view,
-  w, h)`. `main.cpp` reduced to calling `ui::drawInventoryScreen` and handling
-  the `InventoryView` dispatch; no raw rect/slot math in main.
+- **InventoryUi extraction**: `src/ui/InventoryUi.{h,cpp}` owns screen
+  composition and drawing (`drawInventoryScreen(hud, view, w, h)`,
+  `drawHotbar`, `drawItemStack`, panel/bevel/arrow style helpers). Layout
+  math and hit-testing remain pure functions in `src/ui/MenuUi.h`;
+  `main.cpp` builds the view structs and keeps input/click dispatch.
 - **Demo-flag save isolation (spec R6)**: any `--demo-*` flag sets `demoRun`,
-  suppressing all disk writes on the exit path, the 30 s autosave, and the
-  `World` destructor save (`World::setDemoMode()` is the single gate in
-  `World::saveAllModified()` and `~World()`). Verified: `saves/world1` file
-  list and all timestamps unchanged after three demo runs.
+  which skips the exit-path saves and the 30 s autosave and is passed into
+  the `World` constructor (`World(seed, dir, demoMode)`), suppressing every
+  world write: `saveChunk` (incl. chunk eviction), `saveAllModified`,
+  level.bin (incl. constructor-time creation on fresh machines), block
+  entities, and the destructor save. Verified: `saves/world1` file list and
+  all timestamps unchanged after three demo runs.
   - `--demo-craft`: survival mode, stocked inventory, opens the 3×3 crafting
     table screen at startup.
   - `--demo-furnace`: places a facing-correct furnace block 3 blocks ahead of

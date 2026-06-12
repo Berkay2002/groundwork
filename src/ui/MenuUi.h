@@ -216,6 +216,11 @@ inline std::string settingValueText(const Settings& s, SettingId setting) {
 // by the renderer), the 3x9 main grid (inventory rows 1-3), a gap, then the
 // 9-slot hotbar row (inventory row 0). `x0,y0` anchor the main grid so the
 // existing inventorySlotRect math is preserved.
+// Top edge of the player-preview / craft / furnace "top section".
+inline float topSectionY(const InventoryLayout& L) {
+    return L.panelY + L.margin + L.titleH;
+}
+
 inline InventoryLayout inventoryLayout(int w, int h) {
     InventoryLayout L;
     const float step = L.slot + L.pad;            // 60 px per slot cell
@@ -237,13 +242,8 @@ inline InventoryLayout inventoryLayout(int w, int h) {
     L.panelY = (h - L.panelH) * 0.5f;
 
     L.x0 = L.panelX + L.margin;
-    L.y0 = L.panelY + L.margin + L.titleH + L.topH + L.margin;
+    L.y0 = topSectionY(L) + L.topH + L.margin;
     return L;
-}
-
-// Top edge of the player-preview / craft / furnace "top section".
-inline float topSectionY(const InventoryLayout& L) {
-    return L.panelY + L.margin + L.titleH;
 }
 
 // Outer light-gray panel. craftSurface (2=inventory screen, 3=crafting table)
@@ -365,10 +365,9 @@ inline Rect arrowRect(const InventoryLayout& L, InventorySurface surface,
         float cy = out.y + L.slot * 0.5f;
         return {cx - aw * 0.5f, cy - ah * 0.5f, aw, ah};
     }
-    float gridW = craftSurface * L.slot + (craftSurface - 1) * L.pad;
-    float gx = craftGridLeft(L, craftSurface);
+    Rect lastCol = craftSlotRect(L, craftSurface, craftSurface - 1, 0);
     Rect out = craftOutputRect(L, craftSurface);
-    float cx = (gx + gridW + out.x) * 0.5f;
+    float cx = (lastCol.x + lastCol.w + out.x) * 0.5f;
     float cy = out.y + L.slot * 0.5f;
     return {cx - aw * 0.5f, cy - ah * 0.5f, aw, ah};
 }

@@ -48,7 +48,9 @@ struct WorldStats {
 // only see freshly created chunks or immutable snapshots.
 class World {
 public:
-    World(uint32_t seed, std::string saveDir);
+    // demoMode suppresses every disk write — including the constructor's
+    // save-dir/level.bin creation — so demo runs never touch real saves.
+    World(uint32_t seed, std::string saveDir, bool demoMode = false);
     ~World();
 
     Block getBlock(int wx, int wy, int wz) const;
@@ -86,9 +88,6 @@ public:
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
 
     void saveAllModified();
-    // When demo mode is active, saveAllModified() and the destructor skip all
-    // disk writes so demo runs never touch the real saves directory.
-    void setDemoMode() { demoMode_ = true; }
     WorldStats stats() const;
 
     FurnaceState& getOrCreateFurnace(glm::ivec3 pos);
@@ -112,7 +111,8 @@ public:
 
 private:
     class LightingAccess;
-    static uint32_t loadOrCreateSeed(const std::string& saveDir, uint32_t fallback);
+    static uint32_t loadOrCreateSeed(const std::string& saveDir,
+                                     uint32_t fallback, bool demoMode);
     void loadDayTime();
     void saveLevel() const;
     Chunk* getChunk(int cx, int cz) const;

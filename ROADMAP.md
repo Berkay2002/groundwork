@@ -177,14 +177,17 @@ diamond ore -> diamond tools.
   - Player save v4: 36-slot inventory; v3 migrates in place.
   - MC-style beveled panel rendering (drawPanel helper, dark/light border,
         translucent fill); all inventory/crafting/furnace screens use it.
-  - InventoryUi extraction: `src/ui/InventoryUi.{h,cpp}` owns layout,
-        drawing, and hit-testing for inventory/crafting/furnace panels;
-        `main.cpp` only calls `ui::drawInventoryScreen` and event dispatch.
+  - InventoryUi extraction: `src/ui/InventoryUi.{h,cpp}` owns screen
+        composition/drawing for inventory/crafting/furnace panels (layout
+        math and hit-testing stay pure in `src/ui/MenuUi.h`); `main.cpp`
+        builds the view structs and keeps input/click dispatch.
   - Demo-flag save isolation (spec R6): any `--demo-*` flag sets `demoRun`
-        which skips all save I/O on the exit path, the 30 s autosave, and
-        the `World` destructor save. `World::setDemoMode()` is the single
-        gate; `--demo-craft` opens the 3×3 crafting screen, `--demo-furnace`
-        places an active furnace and opens the furnace screen.
+        which skips the exit-path saves and the 30 s autosave, and is passed
+        into the `World` constructor so every world write — chunk saves
+        (incl. eviction), level.bin (incl. constructor-time creation),
+        block entities, destructor — is suppressed. `--demo-craft` opens the
+        3×3 crafting screen, `--demo-furnace` places an active furnace and
+        opens the furnace screen.
 
 ## Batch J — Entity Persistence & Item Cleanup
 

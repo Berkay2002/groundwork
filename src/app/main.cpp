@@ -739,9 +739,9 @@ int main(int argc, char** argv) {
     GLuint cubeVbo;
     GLuint cubeVao = makeCubeLines(cubeVbo);
 
-    World world(WORLD_SEED, SAVE_DIR);
+    // demoRun suppresses every world save, incl. constructor-time writes.
+    World world(WORLD_SEED, SAVE_DIR, demoRun);
     app.world = &world;
-    if (demoRun) world.setDemoMode(); // suppress all saves for demo runs
     if (startTime >= 0.0f) // --time: pin the day clock for screenshots
         world.setDayTime(startTime * DAY_LENGTH);
 
@@ -948,8 +948,8 @@ int main(int argc, char** argv) {
 
         // Periodic autosave so a crash loses at most ~30 s of edits (chunks
         // streaming out and clean exit already save on their own). Demo runs
-        // skip autosave entirely; world.setDemoMode() also covers
-        // saveAllModified and the World destructor.
+        // skip autosave entirely; the World's demo mode also suppresses
+        // saveChunk/saveAllModified and the destructor save.
         if (!demoRun) {
             autosaveTimer += frameDt;
             if (autosaveTimer >= AUTOSAVE_SECONDS) {

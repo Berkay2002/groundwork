@@ -1823,6 +1823,7 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
             if (i == 1) { b = uint8_t(Block::Dirt); c = 250; }
             if (i == 2) { b = uint8_t(Block::CoalOre); c = 1; }
             if (i == 3) { b = 250; c = 9; }
+            if (i == 12) { b = uint8_t(Block::Sand); c = 7; } // row 1, col 4
             f.write(reinterpret_cast<const char*>(&b), 1);
             f.write(reinterpret_cast<const char*>(&c), 1);
         }
@@ -1839,6 +1840,9 @@ static void testPlayerSaveV2BlockInventoryMigrates() {
     CHECK(s.inv.slots[2].item == ItemId::CoalOreBlock && s.inv.slots[2].count == 1);
     // Old slot 3 (r=0,c=3) → new slot 0*9+3 = 3; bad block id → empty
     CHECK(s.inv.slots[3].empty());
+    // Old slot 12 (r=1,c=4) → new slot 1*9+4 = 13: row offset remaps too.
+    CHECK(s.inv.slots[13].item == ItemId::SandBlock && s.inv.slots[13].count == 7);
+    CHECK(s.inv.slots[12].empty());
     // Column 8 of every row must be empty (no old col 8 to migrate from).
     for (int row = 0; row < 4; ++row)
         CHECK(s.inv.slots[row * 9 + 8].empty());
@@ -2332,6 +2336,7 @@ static void testMenuUiPanelLayout() {
         ui::Rect rpanel = ui::recipePanelRect(L);
         CHECK(rectInside(rpanel, screen));
         int rc = int(crafting::recipeCount());
+        std::vector<ui::Rect> rrects;
         for (int i = 0; i < rc; ++i) {
             ui::Rect rr = ui::recipeReferenceSlotRect(L, i);
             CHECK(rectInside(rr, rpanel));
@@ -2339,6 +2344,15 @@ static void testMenuUiPanelLayout() {
                                             rr.y + rr.h * 0.5f) == i);
             checkRoundTrip(L, ui::InventorySurface::Crafting, 2, rr,
                            ui::UiSlot::recipeReference(i));
+            rrects.push_back(rr);
+        }
+        // Recipe slots join the pairwise non-overlap sweep: disjoint among
+        // themselves and from every main-panel slot.
+        for (size_t i = 0; i < rrects.size(); ++i) {
+            for (size_t j = i + 1; j < rrects.size(); ++j)
+                CHECK(!rectsOverlap(rrects[i], rrects[j]));
+            for (const ui::Rect& r : rects)
+                CHECK(!rectsOverlap(rrects[i], r));
         }
     }
 

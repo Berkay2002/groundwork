@@ -62,9 +62,9 @@ private:
     World* write_;
 };
 
-World::World(uint32_t seed, std::string saveDir)
-    : seed_(loadOrCreateSeed(saveDir, seed)), terrain_(seed_),
-      saveDir_(std::move(saveDir)), pool_(workerCount()) {
+World::World(uint32_t seed, std::string saveDir, bool demoMode)
+    : demoMode_(demoMode), seed_(loadOrCreateSeed(saveDir, seed, demoMode)),
+      terrain_(seed_), saveDir_(std::move(saveDir)), pool_(workerCount()) {
     loadDayTime();
     loadBlockEntitiesFile(saveDir_ + "/block_entities.bin", blockEntities_);
 }
@@ -74,8 +74,9 @@ World::World(uint32_t seed, std::string saveDir)
 // Missing or corrupt file: adopt the fallback and (re)write it. Old versions
 // migrate — rewriting them with the fallback would silently swap the
 // terrain under an existing save.
-uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback) {
-    std::filesystem::create_directories(saveDir);
+uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback,
+                                 bool demoMode) {
+    if (!demoMode) std::filesystem::create_directories(saveDir);
     std::string path = saveDir + "/level.bin";
     bool existed = std::filesystem::exists(path);
     worldsave::LevelFile level = worldsave::loadLevelFile(path);
@@ -84,7 +85,8 @@ uint32_t World::loadOrCreateSeed(const std::string& saveDir, uint32_t fallback) 
         std::fprintf(stderr, "warning: bad level.bin, rewriting with seed %u\n",
                      fallback);
     }
-    if (!worldsave::saveLevelFile(path, fallback, 0.0f))
+    // Demo runs still adopt the fallback seed but never write it back.
+    if (!demoMode && !worldsave::saveLevelFile(path, fallback, 0.0f))
         std::fprintf(stderr, "warning: failed to write level.bin\n");
     return fallback;
 }
