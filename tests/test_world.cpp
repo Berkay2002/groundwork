@@ -7,6 +7,8 @@
 #include "sim/Item.h"
 #include "sim/Inventory.h"
 #include "sim/Entity.h"
+#include "sim/EntitySave.h"
+#include "sim/ItemSave.h"
 #include "sim/Mining.h"
 #include "sim/Crafting.h"
 #include "sim/PlayerSave.h"
@@ -28,6 +30,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <vector>
 
 static int failures = 0;
 #define CHECK(cond) do { \
@@ -292,6 +296,217 @@ static void testWorldSaveLevelFormat() {
         f << "BAD!";
     }
     CHECK(!worldsave::loadLevelFile(path).ok);
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntityChunkSaveFormatRoundtrip() {
+    const char* dir = "test_entity_chunk_format";
+    std::filesystem::remove_all(dir);
+    ChunkKey key{-2, 3};
+    std::string path = entityChunkPath(dir, key);
+
+    SavedDroppedItem a;
+    a.pos = {-31.25f, 72.5f, 49.75f};
+    a.vel = {1.5f, -2.25f, 0.75f};
+    a.ageTicks = 1234;
+    a.spinSeed = 0xA5A55A5Au;
+    a.stack = makeToolStack(ItemId::IronPickaxe);
+    a.stack.durability = 7;
+
+    CHECK(saveEntityChunkFile(path, {a}));
+    std::vector<SavedDroppedItem> loaded;
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(std::fabs(loaded[0].pos.x - a.pos.x) < 1e-6f);
+    CHECK(std::fabs(loaded[0].pos.y - a.pos.y) < 1e-6f);
+    CHECK(std::fabs(loaded[0].pos.z - a.pos.z) < 1e-6f);
+    CHECK(std::fabs(loaded[0].vel.x - a.vel.x) < 1e-6f);
+    CHECK(std::fabs(loaded[0].vel.y - a.vel.y) < 1e-6f);
+    CHECK(std::fabs(loaded[0].vel.z - a.vel.z) < 1e-6f);
+    CHECK(loaded[0].ageTicks == a.ageTicks);
+    CHECK(loaded[0].spinSeed == a.spinSeed);
+    CHECK(loaded[0].stack.item == ItemId::IronPickaxe);
+    CHECK(loaded[0].stack.count == 1);
+    CHECK(loaded[0].stack.durability == 7);
+
+    CHECK(saveEntityChunkFile(path, {}));
+    CHECK(!std::filesystem::exists(path));
+    loaded.push_back(a);
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Missing);
+    CHECK(loaded.empty());
+    std::filesystem::remove_all(dir);
+}
+
+static void writeRawU8(std::ostream& out, uint8_t v) {
+    out.write(reinterpret_cast<const char*>(&v), 1);
+}
+
+static void writeRawU16(std::ostream& out, uint16_t v) {
+    out.write(reinterpret_cast<const char*>(&v), 2);
+}
+
+static void writeRawU32(std::ostream& out, uint32_t v) {
+    out.write(reinterpret_cast<const char*>(&v), 4);
+}
+
+static void writeRawF32(std::ostream& out, float v) {
+    out.write(reinterpret_cast<const char*>(&v), 4);
+}
+
+static std::string droppedItemPayload(const SavedDroppedItem& item) {
+    std::ostringstream out(std::ios::binary);
+    writeRawF32(out, item.pos.x);
+    writeRawF32(out, item.pos.y);
+    writeRawF32(out, item.pos.z);
+    writeRawF32(out, item.vel.x);
+    writeRawF32(out, item.vel.y);
+    writeRawF32(out, item.vel.z);
+    writeRawU32(out, item.ageTicks);
+    writeRawU32(out, item.spinSeed);
+    writeItemStack(out, item.stack);
+    return out.str();
+}
+
+static std::string droppedItemPayloadRawStack(glm::vec3 pos, uint16_t rawItem,
+                                              uint8_t count, uint16_t durability) {
+    std::ostringstream out(std::ios::binary);
+    writeRawF32(out, pos.x);
+    writeRawF32(out, pos.y);
+    writeRawF32(out, pos.z);
+    writeRawF32(out, 0.0f);
+    writeRawF32(out, 0.0f);
+    writeRawF32(out, 0.0f);
+    writeRawU32(out, 1);
+    writeRawU32(out, 2);
+    writeRawU16(out, rawItem);
+    writeRawU8(out, count);
+    writeRawU16(out, durability);
+    return out.str();
+}
+
+static void writeManualEntityFile(const std::string& path,
+                                  const std::vector<std::pair<uint8_t, std::string>>& records,
+                                  uint32_t version = 1,
+                                  const std::string& magic = "MCEN",
+                                  const std::string& trailing = "") {
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f.write(magic.data(), 4);
+    writeRawU32(f, version);
+    writeRawU32(f, uint32_t(records.size()));
+    for (const auto& rec : records) {
+        writeRawU8(f, rec.first);
+        writeRawU32(f, uint32_t(rec.second.size()));
+        f.write(rec.second.data(), (std::streamsize)rec.second.size());
+    }
+    f.write(trailing.data(), (std::streamsize)trailing.size());
+}
+
+static void testEntityChunkSaveRejectsBadFiles() {
+    const char* dir = "test_entity_chunk_bad";
+    std::filesystem::remove_all(dir);
+    ChunkKey key{0, 0};
+    std::string path = entityChunkPath(dir, key);
+    std::vector<SavedDroppedItem> loaded;
+
+    writeManualEntityFile(path, {}, 1, "NOPE");
+    loaded.push_back({});
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    writeManualEntityFile(path, {}, 2);
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    {
+        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f.write("MCEN", 4);
+        writeRawU32(f, 1);
+        writeRawU32(f, 1);
+        writeRawU8(f, 1);
+        writeRawU32(f, 37);
+        f.write("short", 5);
+    }
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f.write("MCEN", 4);
+        writeRawU32(f, 1);
+        writeRawU32(f, 4097);
+    }
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f.write("MCEN", 4);
+        writeRawU32(f, 1);
+        writeRawU32(f, 1);
+        writeRawU8(f, 99);
+        writeRawU32(f, 65537);
+    }
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    writeManualEntityFile(path, {}, 1, "MCEN", "x");
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Rejected);
+    CHECK(loaded.empty());
+
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
+    const char* dir = "test_entity_chunk_validation";
+    std::filesystem::remove_all(dir);
+    ChunkKey key{0, 0};
+    std::string path = entityChunkPath(dir, key);
+
+    SavedDroppedItem valid;
+    valid.pos = {0.5f, 70.0f, 0.5f};
+    valid.vel = {0.0f, 1.0f, 0.0f};
+    valid.ageTicks = 10;
+    valid.spinSeed = 20;
+    valid.stack = makeItemStack(ItemId::Coal, 3);
+
+    writeManualEntityFile(path, {
+        {99, "abc"},
+        {1, droppedItemPayloadRawStack({1.5f, 70.0f, 1.5f}, 65000, 1, 0)},
+        {1, droppedItemPayloadRawStack({2.5f, 70.0f, 2.5f}, uint16_t(ItemId::Coal), 0, 0)},
+        {1, droppedItemPayloadRawStack({1000.5f, 70.0f, 0.5f}, uint16_t(ItemId::Coal), 1, 0)},
+        {1, droppedItemPayload(valid)},
+    });
+
+    std::vector<SavedDroppedItem> loaded;
+    CHECK(loadEntityChunkFile(path, key, loaded) == EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(loaded[0].stack.item == ItemId::Coal);
+    CHECK(loaded[0].stack.count == 3);
+    CHECK(loaded[0].ageTicks == 10);
+
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntityChunkCorruptionDoesNotTouchBlockChunk() {
+    const char* dir = "test_entity_chunk_isolation";
+    std::filesystem::remove_all(dir);
+    ChunkKey key{0, 0};
+    std::filesystem::create_directories(dir);
+    std::vector<uint8_t> blocks(Chunk::rawSize(), uint8_t(Block::Stone));
+    CHECK(worldsave::saveChunkFile(worldsave::chunkPath(dir, key.x, key.z),
+                                   blocks.data(), blocks.size()));
+
+    std::string entityPath = entityChunkPath(dir, key);
+    writeManualEntityFile(entityPath, {}, 2);
+    std::vector<SavedDroppedItem> ignored;
+    CHECK(loadEntityChunkFile(entityPath, key, ignored) == EntityChunkLoadStatus::Rejected);
+
+    std::vector<uint8_t> loaded(blocks.size(), 0);
+    CHECK(worldsave::loadChunkFile(worldsave::chunkPath(dir, key.x, key.z),
+                                   loaded.data(), loaded.size()));
+    CHECK(loaded == blocks);
     std::filesystem::remove_all(dir);
 }
 
@@ -2845,6 +3060,10 @@ int main() {
     testLevelSeed();
     testWorldSaveChunkFormat();
     testWorldSaveLevelFormat();
+    testEntityChunkSaveFormatRoundtrip();
+    testEntityChunkSaveRejectsBadFiles();
+    testEntityChunkSaveSkipsUnknownAndInvalidRecords();
+    testEntityChunkCorruptionDoesNotTouchBlockChunk();
     testAtomicSaveOverwritesExisting();
     testUnloadSaves();
     testRaycast();
