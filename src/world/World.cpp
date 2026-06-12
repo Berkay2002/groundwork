@@ -505,6 +505,7 @@ RaycastHit World::raycast(const glm::vec3& origin, const glm::vec3& dir, float m
 }
 
 void World::saveAllModified() {
+    if (demoMode_) return; // demo runs must not touch the real saves directory
     for (auto& [key, chunk] : chunks_) {
         if (chunk->modified) {
             saveChunk(*chunk);

@@ -86,6 +86,9 @@ public:
     RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
 
     void saveAllModified();
+    // When demo mode is active, saveAllModified() and the destructor skip all
+    // disk writes so demo runs never touch the real saves directory.
+    void setDemoMode() { demoMode_ = true; }
     WorldStats stats() const;
 
     FurnaceState& getOrCreateFurnace(glm::ivec3 pos);
@@ -122,6 +125,7 @@ private:
     void markDirty(Chunk& c);
     ChunkSnapshot snapshot(const Chunk& c) const;
 
+    bool demoMode_ = false; // if true, all save operations are suppressed
     uint32_t seed_;
     float dayTime_ = 0.0f; // seconds; 0 = morning
     Terrain terrain_;

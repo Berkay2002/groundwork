@@ -172,6 +172,19 @@ diamond ore -> diamond tools.
       right-click/shift-click stack behavior, and furnace input/fuel/output UI.
 - Furnace block entities persist input/fuel/output and smelt Raw Iron with Coal.
 - Procedural block/item/crack art; no asset files.
+- Inventory UI addenda (post-M5, same commit spine):
+  - 9-column inventory + 9th hotbar slot (was 8); hotbar cycling wraps correctly.
+  - Player save v4: 36-slot inventory; v3 migrates in place.
+  - MC-style beveled panel rendering (drawPanel helper, dark/light border,
+        translucent fill); all inventory/crafting/furnace screens use it.
+  - InventoryUi extraction: `src/ui/InventoryUi.{h,cpp}` owns layout,
+        drawing, and hit-testing for inventory/crafting/furnace panels;
+        `main.cpp` only calls `ui::drawInventoryScreen` and event dispatch.
+  - Demo-flag save isolation (spec R6): any `--demo-*` flag sets `demoRun`
+        which skips all save I/O on the exit path, the 30 s autosave, and
+        the `World` destructor save. `World::setDemoMode()` is the single
+        gate; `--demo-craft` opens the 3×3 crafting screen, `--demo-furnace`
+        places an active furnace and opens the furnace screen.
 
 ## Batch J — Entity Persistence & Item Cleanup
 

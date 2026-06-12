@@ -1,4 +1,38 @@
-# Status (last updated: 2026-06-12, after Batch I M5 visual polish)
+# Status (last updated: 2026-06-12, after Batch I inventory-UI addenda)
+
+### Batch I inventory-UI addenda (2026-06-12)
+
+Post-M5 `minecraft-inventory-ui` goal — panel restyle, InventoryUi module
+extraction, 9-column inventory, player save v4, and demo-flag save isolation:
+
+- **9-column inventory + hotbar**: inventory is now 4×9 (36 slots, row 0 =
+  hotbar). The 9th hotbar slot was previously unused. Hotbar cycling wraps
+  correctly at both ends. Existing save v3 files migrate in-place; new saves
+  use v4.
+- **Player save v4**: `MCPL` v4 = v3 fields + 4 extra slots (36 total). v3
+  migrated slot-for-slot with the extra slots empty.
+- **MC-style beveled panels**: `drawPanel(hud, x, y, w, h)` draws a
+  translucent dark fill + 1-px light highlight (top/left) + 1-px dark shadow
+  (bottom/right), matching the Minecraft inventory look. All
+  inventory/crafting/furnace screens use it.
+- **InventoryUi extraction**: `src/ui/InventoryUi.{h,cpp}` owns all panel
+  layout math, slot drawing, hit-testing, and `drawInventoryScreen(hud, view,
+  w, h)`. `main.cpp` reduced to calling `ui::drawInventoryScreen` and handling
+  the `InventoryView` dispatch; no raw rect/slot math in main.
+- **Demo-flag save isolation (spec R6)**: any `--demo-*` flag sets `demoRun`,
+  suppressing all disk writes on the exit path, the 30 s autosave, and the
+  `World` destructor save (`World::setDemoMode()` is the single gate in
+  `World::saveAllModified()` and `~World()`). Verified: `saves/world1` file
+  list and all timestamps unchanged after three demo runs.
+  - `--demo-craft`: survival mode, stocked inventory, opens the 3×3 crafting
+    table screen at startup.
+  - `--demo-furnace`: places a facing-correct furnace block 3 blocks ahead of
+    the player, creates its `FurnaceState` with raw iron input, coal fuel, and
+    `burnTicksRemaining = 1 << 20` (flame on, cook progress visible), then
+    opens the furnace screen targeting that exact block position.
+  - All existing demo flags (`--demo-inv`, `--demo-items`, `--demo-break`,
+    `--demo-survival`, `--demo-menu`, `--demo-settings`) also gained save
+    isolation retroactively.
 
 ### Batch I M5 addendum notes (2026-06-12)
 
