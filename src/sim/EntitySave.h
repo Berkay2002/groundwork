@@ -22,7 +22,12 @@ struct SavedLivingEntity {
     uint32_t ageTicks = 0;
     uint32_t movePhase = 0;
     float facingYaw = 0.0f;
-    bool ambient = false;
+    // Raw saved bytes for MobKind/SpawnReason (sim/Mob.h). Legacy living
+    // records (MCEN type 2) stored an ambient flag where `reason` now lives —
+    // its 0/1 values map exactly onto Staged/Ambient, and `kind` defaults to
+    // Zombie (0).
+    uint8_t kind = 0;
+    uint8_t reason = 0;
     ChunkKey homeChunk{0, 0};
     std::string modelId;
 };

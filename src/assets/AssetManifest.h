@@ -9,6 +9,10 @@ struct ModelManifestEntry {
     std::string path;
     std::string name;
     float scale = 1.0f;
+    // Yaw in degrees that rotates the authored model to face simulation
+    // forward (+X) when the entity's facingYaw is 0. glTF assets typically
+    // face +Z, which needs 90.
+    float forwardYawDeg = 0.0f;
 };
 
 struct AssetManifest {

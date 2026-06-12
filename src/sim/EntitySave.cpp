@@ -2,6 +2,7 @@
 
 #include "platform/SaveIO.h"
 #include "sim/ItemSave.h"
+#include "sim/Mob.h"
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -14,8 +15,12 @@ constexpr uint32_t ENTITY_VERSION = 1;
 // Record type tags are append-only, like block and item ids. The loader
 // skips unknown tags, so new entity kinds stay readable by older data.
 constexpr uint8_t ENTITY_DROPPED_ITEM = 1;
-constexpr uint8_t ENTITY_LIVING = 2;
+constexpr uint8_t ENTITY_LIVING = 2; // legacy: read-only, u8 = ambient flag
 constexpr uint8_t ENTITY_AMBIENT_SPAWN_MARKER = 3;
+// Living v2: the type-2 layout with the u8 reinterpreted as SpawnReason
+// (Staged/Ambient values match the old flag) plus a trailing MobKind byte
+// after the model id. The writer always emits v2; type 2 stays loadable.
+constexpr uint8_t ENTITY_LIVING_V2 = 4;
 constexpr uint32_t MAX_ENTITIES_PER_CHUNK = 4096;
 constexpr uint32_t MAX_ENTITY_PAYLOAD_BYTES = 65536;
 constexpr uint32_t DROPPED_ITEM_PAYLOAD_BYTES = 37;
@@ -89,26 +94,27 @@ std::string livingPayload(const SavedLivingEntity& e) {
     writeRaw(out, e.ageTicks);
     writeRaw(out, e.movePhase);
     writeRaw(out, e.facingYaw);
-    writeRaw(out, uint8_t(e.ambient ? 1 : 0));
+    writeRaw(out, e.reason);
     writeRaw(out, int32_t(e.homeChunk.x));
     writeRaw(out, int32_t(e.homeChunk.z));
     writeRaw(out, uint16_t(e.modelId.size()));
     out.write(e.modelId.data(), (std::streamsize)e.modelId.size());
+    writeRaw(out, e.kind);
     return out.str();
 }
 
 bool readLivingPayload(const std::string& payload, ChunkKey expectedKey,
-                       SavedLivingEntity& out) {
+                       bool v2, SavedLivingEntity& out) {
     std::istringstream in(payload, std::ios::binary);
     SavedLivingEntity e;
-    uint8_t ambient = 0;
+    uint8_t reason = 0;
     int32_t homeX = 0, homeZ = 0;
     uint16_t modelLen = 0;
     if (!readRaw(in, e.pos.x) || !readRaw(in, e.pos.y) || !readRaw(in, e.pos.z) ||
         !readRaw(in, e.vel.x) || !readRaw(in, e.vel.y) || !readRaw(in, e.vel.z) ||
         !readRaw(in, e.health) || !readRaw(in, e.ageTicks) ||
         !readRaw(in, e.movePhase) || !readRaw(in, e.facingYaw) ||
-        !readRaw(in, ambient) || !readRaw(in, homeX) || !readRaw(in, homeZ) ||
+        !readRaw(in, reason) || !readRaw(in, homeX) || !readRaw(in, homeZ) ||
         !readRaw(in, modelLen)) {
         return false;
     }
@@ -116,13 +122,19 @@ bool readLivingPayload(const std::string& payload, ChunkKey expectedKey,
     std::string modelId(modelLen, '\0');
     in.read(&modelId[0], modelLen);
     if (!in) return false;
+    uint8_t kind = 0;
+    if (v2 && !readRaw(in, kind)) return false;
     char trailing = 0;
     if (in.read(&trailing, 1)) return false; // payload size must match exactly
     if (!finiteVec(e.pos) || !finiteVec(e.vel) || !std::isfinite(e.facingYaw))
         return false;
     if (e.health <= 0 || e.health > MAX_SAVED_HEALTH) return false;
     if (!belongsToChunk(e.pos, expectedKey)) return false;
-    e.ambient = ambient != 0;
+    // The legacy u8 was an ambient flag; 0/1 map exactly onto Staged/Ambient.
+    if (!isValidSpawnReason(reason) || (!v2 && reason > 1)) return false;
+    if (!isValidMobKind(kind)) return false;
+    e.reason = reason;
+    e.kind = kind;
     e.homeChunk = ChunkKey{homeX, homeZ};
     e.modelId = std::move(modelId);
     out = std::move(e);
@@ -171,9 +183,10 @@ EntityChunkLoadStatus loadEntityChunkFile(const std::string& path,
             if (payloadSize != DROPPED_ITEM_PAYLOAD_BYTES) return reject();
             if (readDroppedPayload(payload, expectedKey, item))
                 out.items.push_back(item);
-        } else if (type == ENTITY_LIVING) {
+        } else if (type == ENTITY_LIVING || type == ENTITY_LIVING_V2) {
             SavedLivingEntity living;
-            if (readLivingPayload(payload, expectedKey, living))
+            if (readLivingPayload(payload, expectedKey, type == ENTITY_LIVING_V2,
+                                  living))
                 out.living.push_back(std::move(living));
         } else if (type == ENTITY_AMBIENT_SPAWN_MARKER) {
             if (payloadSize != 0) return reject();
@@ -208,6 +221,7 @@ bool saveEntityChunkFile(const std::string& path,
         if (e.modelId.empty() || e.modelId.size() > MAX_MODEL_ID_BYTES) continue;
         if (e.health <= 0 || e.health > MAX_SAVED_HEALTH) continue;
         if (!finiteVec(e.pos) || !finiteVec(e.vel)) continue;
+        if (!isValidMobKind(e.kind) || !isValidSpawnReason(e.reason)) continue;
         filtered.living.push_back(e);
     }
     if (filtered.empty()) return deleteEntityChunkFile(path);
@@ -231,7 +245,7 @@ bool saveEntityChunkFile(const std::string& path,
         for (const SavedDroppedItem& item : filtered.items)
             writeRecord(ENTITY_DROPPED_ITEM, droppedPayload(item));
         for (const SavedLivingEntity& e : filtered.living)
-            writeRecord(ENTITY_LIVING, livingPayload(e));
+            writeRecord(ENTITY_LIVING_V2, livingPayload(e));
         if (filtered.ambientSpawnConsumed)
             writeRecord(ENTITY_AMBIENT_SPAWN_MARKER, std::string());
     });

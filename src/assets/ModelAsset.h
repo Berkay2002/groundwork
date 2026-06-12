@@ -43,6 +43,7 @@ struct ModelAsset {
     std::string id;
     std::string name;
     float scale = 1.0f;
+    float forwardYaw = 0.0f; // radians; manifest forwardYawDeg converted once
     std::vector<ModelVertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<ModelPart> parts;

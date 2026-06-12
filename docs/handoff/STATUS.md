@@ -1,7 +1,7 @@
 # Status
 
-Last updated: 2026-06-13, after creature persistence, player health, and
-two-way melee combat.
+Last updated: 2026-06-13, after the mob foundation pass: facing fix, MobKind
+table, spawn reasons, natural night spawning, and the hurt flash.
 
 Groundwork is past MVP. The completed history is in `docs/goals/`; future work
 is organized by roadmap area in `ROADMAP.md`. Do not start roadmap work without
@@ -12,8 +12,8 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 - C++17/OpenGL 3.3 voxel game with streaming chunks, background generation and
   meshing, saves, lighting, water, caves, ores, survival progression, audio,
   menus, day/night, runtime character assets, deterministic ambient creature
-  spawning, persistent hostile creatures, player health with two-way melee
-  combat, Windows support, and demo flags.
+  spawning, persistent hostile creatures, natural mob respawn pacing, player
+  health with two-way melee combat, Windows support, and demo flags.
 - Main thread owns the chunk map and all GL. Workers only build fresh chunks or
   CPU mesh data from immutable snapshots.
 - `World` remains the chunk/streaming/save/fluid/block-entity hub. `Entities`
@@ -44,6 +44,30 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   the empty-file cleanup. Creatures unload/save with the chunk they stand in
   (the old home-chunk removal rule is gone; the marker prevents duplicates).
   Combat state (attack cooldown, hurt/knockback ticks) is runtime-only.
+- Mobs are table-driven, not subclassed: `sim/Mob.h` holds `MobKind` (saved
+  byte, append-only) and `MobDef` (model, max health, hostile, drop). Every
+  mob also carries a `SpawnReason` (saved byte, append-only): Staged (0,
+  demos/tests), Ambient (1), Natural (2). Living records save as MCEN type 4
+  ("living v2"): the type-2 layout with the old ambient u8 reinterpreted as
+  the reason (0/1 map exactly onto Staged/Ambient) plus a trailing kind byte
+  after the model id. Type 2 stays loadable (kind defaults to Zombie); the
+  writer always emits type 4.
+- Natural spawning lives in `sim/MobSpawn.{h,cpp}` (MobSpawnSystem), NOT in
+  Entities::tick. One attempt per tick, gated by main on survival + live
+  player + not a demo. Rules: ring 24-96 blocks from the player (3D min),
+  loaded chunk, cap 10 living within 128 blocks, solid non-water ground with
+  two clear blocks above, and for hostiles block light <= 3 AND (night via
+  dayFactor < 0.05, or sunlight <= 3 so caves spawn by day). Natural mobs
+  persist like everything else; the once-per-world ambient marker is separate.
+- Mob facing: `facingYaw = atan2(z, x)` in sim space, and the model rotation
+  is **minus** facingYaw (positive GL Y-rotation turns +X toward -Z — getting
+  this backwards mirrors facing and reads as walking sideways). Per-model
+  orientation comes from `forwardYawDeg` in assets/manifest.json (Kenney
+  characters face +Z, so 90). Chasing mobs face the player directly —
+  including during knockback and attacks — with a ~10 deg/tick turn cap;
+  wandering mobs face their velocity.
+- Mobs flash red while hurtTicks > 0 (uFlash uniform in ModelRenderer,
+  0.55 blend toward dark red).
 - Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
   → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
   Creative players, dead players, and demo runs are ignored (main passes a
@@ -82,10 +106,16 @@ player save v5 roundtrip + v4 full-health migration + clamping, player
 damage/i-frames/regen/grace, hostile chase/attack/dead-player-ignored, melee
 raycast hit/miss/range + knockback, water
 spread/drain/infinite/drop-seek/save/shore hop, and
-inventory/progression/furnace/UI migrations. Hearts HUD + creature visuals
-inspected via `--demo-creature --demo-survival --frames 300` screenshot.
-Latest TSAN was not run (no new threading surface: entities and saves remain
-main-thread-only).
+inventory/progression/furnace/UI migrations. New coverage: smoothed
+wander/chase facing (turn cap, knockback gaze), MCEN living v2 records +
+legacy type-2 mapping + bad kind/reason skipping, manifest forwardYawDeg
+parse/validation, and MobSpawnSystem rules (darkness unit checks incl. sealed
+pocket + torch, night spawn ring/footing/cap, zero day-surface spawns).
+Facing verified visually from two demo screenshots against the saved camera
+yaw (back at +Z walk, face at -X walk) and confirmed in user playtest. Hurt
+flash is shader-side; the uFlash=0 path screenshot-checked, the flash itself
+awaits playtest. Latest TSAN was not run (no new threading surface: entities,
+spawning, and saves remain main-thread-only).
 
 ## Pointers
 

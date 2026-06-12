@@ -16,8 +16,9 @@ public:
     ModelRenderer(const ModelRenderer&) = delete;
     ModelRenderer& operator=(const ModelRenderer&) = delete;
 
+    // `flash` (0..1) blends the lit color toward a hurt-red tint.
     void draw(const ModelAsset& model, const glm::mat4& viewProj,
-              const glm::mat4& transform, float light);
+              const glm::mat4& transform, float light, float flash = 0.0f);
 
 private:
     struct UploadedModel;
@@ -26,6 +27,7 @@ private:
     int locMVP_ = -1;
     int locModel_ = -1;
     int locLight_ = -1;
+    int locFlash_ = -1;
     std::unordered_map<std::string, std::unique_ptr<UploadedModel>> uploaded_;
     unsigned whiteTex_ = 0;
 

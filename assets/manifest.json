@@ -5,13 +5,15 @@
       "id": "creature.kenney_zombie_a",
       "name": "Kenney Blocky Zombie A",
       "path": "characters/kenney_blocky/character-o.glb",
-      "scale": 0.65
+      "scale": 0.65,
+      "forwardYawDeg": 90
     },
     {
       "id": "creature.kenney_zombie_b",
       "name": "Kenney Blocky Zombie B",
       "path": "characters/kenney_blocky/character-l.glb",
-      "scale": 0.65
+      "scale": 0.65,
+      "forwardYawDeg": 90
     }
   ]
 }

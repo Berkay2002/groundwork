@@ -31,11 +31,13 @@ in vec2 vUV;
 in float vShade;
 uniform sampler2D uTex;
 uniform float uLight;
+uniform float uFlash;
 out vec4 FragColor;
 void main() {
     vec4 c = texture(uTex, vUV);
     if (c.a < 0.1) discard;
-    FragColor = vec4(c.rgb * vShade * uLight, c.a);
+    vec3 lit = c.rgb * vShade * uLight;
+    FragColor = vec4(mix(lit, vec3(0.82, 0.16, 0.16), uFlash), c.a);
 }
 )";
 
@@ -92,6 +94,7 @@ ModelRenderer::ModelRenderer() : shader_(MODEL_VS, MODEL_FS) {
     locMVP_ = shader_.loc("uMVP");
     locModel_ = shader_.loc("uModel");
     locLight_ = shader_.loc("uLight");
+    locFlash_ = shader_.loc("uFlash");
     shader_.use();
     shader_.setInt("uTex", 0);
 
@@ -157,7 +160,7 @@ const ModelRenderer::UploadedModel& ModelRenderer::upload(const ModelAsset& mode
 }
 
 void ModelRenderer::draw(const ModelAsset& model, const glm::mat4& viewProj,
-                         const glm::mat4& transform, float light) {
+                         const glm::mat4& transform, float light, float flash) {
     const UploadedModel& uploaded = upload(model);
     if (uploaded.indexCount == 0) return;
 
@@ -166,6 +169,7 @@ void ModelRenderer::draw(const ModelAsset& model, const glm::mat4& viewProj,
     glUniformMatrix4fv(locMVP_, 1, GL_FALSE, glm::value_ptr(mvp));
     glUniformMatrix4fv(locModel_, 1, GL_FALSE, glm::value_ptr(transform));
     glUniform1f(locLight_, std::max(0.0f, light));
+    glUniform1f(locFlash_, std::min(1.0f, std::max(0.0f, flash)));
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(uploaded.vao);
     glDisable(GL_CULL_FACE);

@@ -1,6 +1,7 @@
 #pragma once
 #include "world/Block.h"
 #include "sim/Inventory.h"
+#include "sim/Mob.h"
 #include "sim/Physics.h"
 #include "world/World.h" // ChunkKey/ChunkKeyHash; World is GL-free until upload
 #include <glm/glm.hpp>
@@ -37,11 +38,12 @@ struct LivingEntity {
     Body body;
     glm::vec3 prevPos{0.0f};
     std::string modelId;
+    MobKind kind = MobKind::Zombie;
+    SpawnReason reason = SpawnReason::Staged;
     int health = LIVING_MAX_HEALTH;
     uint32_t ageTicks = 0;
     uint32_t movePhase = 0;
     float facingYaw = 0.0f; // radians; 0 faces +X in simulation space
-    bool ambient = false;
     ChunkKey homeChunk{0, 0};
     bool dead = false;
     // Runtime-only combat state (not persisted; rederived next session).
@@ -67,7 +69,11 @@ public:
     // Correct-harvest drop for old callers that only know the broken block.
     void spawnBlockDrop(const glm::ivec3& blockPos, Block broken);
 
+    // Staged spawn with an explicit model (demos/tests). Kind stays Zombie.
     LivingEntityId spawnLiving(const glm::vec3& pos, const std::string& modelId);
+    // Table-driven spawn: model, health, and behavior come from mobDef(kind).
+    LivingEntityId spawnLiving(const glm::vec3& pos, MobKind kind,
+                               SpawnReason reason);
     void spawnAmbientLivingForChunk(const World& world, ChunkKey key);
     // Damage with an optional knockback impulse (horizontal direction of the
     // hit; vertical pop is added internally).

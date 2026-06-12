@@ -307,6 +307,14 @@ bool loadAssetManifest(const std::filesystem::path& path,
             }
             entry.scale = float(scale->number);
         }
+        if (const Json* yaw = member(item, "forwardYawDeg")) {
+            if (yaw->type != Json::Type::Number || !std::isfinite(yaw->number) ||
+                std::fabs(yaw->number) > 360.0) {
+                setError(error, "model forwardYawDeg must be a number in [-360, 360]");
+                return false;
+            }
+            entry.forwardYawDeg = float(yaw->number);
+        }
         parsed.models.push_back(std::move(entry));
     }
 

@@ -49,6 +49,7 @@ add_executable(groundwork
   src/sim/Crafting.cpp
   src/sim/Entity.cpp
   src/sim/EntitySave.cpp
+  src/sim/MobSpawn.cpp
   src/render/BreakOverlay.cpp
   src/render/ItemRenderer.cpp
   src/render/ModelRenderer.cpp
@@ -111,6 +112,7 @@ add_executable(world_tests
   src/sim/Crafting.cpp
   src/sim/Entity.cpp
   src/sim/EntitySave.cpp
+  src/sim/MobSpawn.cpp
   src/render/GLCompat.cpp
 )
 target_link_libraries(world_tests PRIVATE OpenGL::GL Threads::Threads ${GROUNDWORK_GLM_TARGET})

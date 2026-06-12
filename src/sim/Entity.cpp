@@ -23,6 +23,7 @@ constexpr float LIVING_ATTACK_RANGE = 1.6f;
 constexpr int LIVING_ATTACK_DAMAGE = 2;       // one heart per bite
 constexpr uint32_t LIVING_ATTACK_COOLDOWN = 20; // 1 s at 20 TPS
 constexpr uint32_t LIVING_HURT_TICKS = 6;     // knockback steering pause
+constexpr float LIVING_TURN_SPEED = 0.1745f;  // ~10 deg/tick, Minecraft-ish body turn
 constexpr uint32_t AMBIENT_SPAWN_CHANCE = 72; // about 28% of eligible chunks
 
 ChunkKey chunkForPos(glm::vec3 pos) {
@@ -42,6 +43,14 @@ uint32_t hashAmbient(int32_t x, int32_t z, uint32_t seed) {
     h *= 0x27D4EB2Fu;
     h ^= h >> 15;
     return h;
+}
+
+// Rotate `current` toward `target` along the shortest arc, at most `maxStep`
+// radians per call.
+float turnToward(float current, float target, float maxStep) {
+    float diff = std::remainder(target - current, 6.2831853f);
+    diff = std::max(-maxStep, std::min(maxStep, diff));
+    return std::remainder(current + diff, 6.2831853f);
 }
 
 bool emptyForLiving(Block b) {
@@ -158,6 +167,20 @@ LivingEntityId Entities::spawnLiving(const glm::vec3& pos, const std::string& mo
     return id;
 }
 
+LivingEntityId Entities::spawnLiving(const glm::vec3& pos, MobKind kind,
+                                     SpawnReason reason) {
+    const MobDef& def = mobDef(kind);
+    LivingEntityId id = spawnLiving(pos, def.modelId);
+    for (auto& up : living_) {
+        if (up->id != id) continue;
+        up->kind = kind;
+        up->reason = reason;
+        up->health = def.maxHealth;
+        break;
+    }
+    return id;
+}
+
 void Entities::spawnAmbientLivingForChunk(const World& world, ChunkKey key) {
     if (ambientLivingChunks_.count(key)) return;
     if (ambientConsumedChunks_.count(key)) return; // already spawned, ever
@@ -167,10 +190,9 @@ void Entities::spawnAmbientLivingForChunk(const World& world, ChunkKey key) {
     ambientLivingChunks_.insert(key);
     glm::vec3 pos;
     if (!findAmbientLivingSpawn(world, key, pos)) return;
-    LivingEntityId id = spawnLiving(pos, DEFAULT_CREATURE_MODEL_ID);
+    LivingEntityId id = spawnLiving(pos, MobKind::Zombie, SpawnReason::Ambient);
     for (auto& up : living_) {
         if (up->id != id) continue;
-        up->ambient = true;
         up->homeChunk = key;
         break;
     }
@@ -185,9 +207,10 @@ bool Entities::damageLiving(LivingEntityId id, int amount,
         if (e.id != id || e.dead) continue;
         e.health -= amount;
         if (e.health <= 0) {
+            const MobDef& def = mobDef(e.kind);
             e.dead = true;
             spawnItem(e.body.pos + glm::vec3(0.0f, 0.4f, 0.0f),
-                      glm::vec3(0.0f, 2.5f, 0.0f), ItemId::RottenFlesh, 1);
+                      glm::vec3(0.0f, 2.5f, 0.0f), def.dropItem, def.dropCount);
             cleanupLiving();
             rebuildBuckets();
             return true;
@@ -303,7 +326,7 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         glm::vec3 toPlayer = playerPos - e.body.pos;
         float playerDist = glm::length(toPlayer);
         bool chasing = false;
-        if (playerAlive && playerDist < LIVING_CHASE_RADIUS) {
+        if (playerAlive && mobDef(e.kind).hostile && playerDist < LIVING_CHASE_RADIUS) {
             glm::vec3 eyeFrom = e.body.pos + glm::vec3(0.0f, e.body.height * 0.85f, 0.0f);
             glm::vec3 eyeTo = playerPos + glm::vec3(0.0f, 0.9f, 0.0f); // torso
             chasing = hasLineOfSight(world, eyeFrom, eyeTo);
@@ -334,9 +357,20 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             e.body.vel.x = std::cos(angle) * LIVING_WALK_SPEED;
             e.body.vel.z = std::sin(angle) * LIVING_WALK_SPEED;
         }
-        float horizontalSpeed2 = e.body.vel.x * e.body.vel.x + e.body.vel.z * e.body.vel.z;
-        if (horizontalSpeed2 > 0.0001f)
-            e.facingYaw = std::atan2(e.body.vel.z, e.body.vel.x);
+        // Face the player whenever the chase condition holds — including
+        // mid-knockback and at a standstill in attack range — otherwise face
+        // the way we are walking. Turning is rate-capped so it reads as a
+        // body turn, not a snap.
+        float desiredYaw = e.facingYaw;
+        if (chasing) {
+            desiredYaw = std::atan2(toPlayer.z, toPlayer.x);
+        } else {
+            float horizontalSpeed2 =
+                e.body.vel.x * e.body.vel.x + e.body.vel.z * e.body.vel.z;
+            if (horizontalSpeed2 > 0.0001f)
+                desiredYaw = std::atan2(e.body.vel.z, e.body.vel.x);
+        }
+        e.facingYaw = turnToward(e.facingYaw, desiredYaw, LIVING_TURN_SPEED);
         e.body.vel.y += LIVING_GRAVITY * dt;
         if (e.body.vel.y < LIVING_TERMINAL) e.body.vel.y = LIVING_TERMINAL;
         moveBody(world, e.body, dt);
@@ -368,7 +402,8 @@ SavedEntityChunk Entities::gatherChunk(ChunkKey key) const {
         s.ageTicks = e.ageTicks;
         s.movePhase = e.movePhase;
         s.facingYaw = e.facingYaw;
-        s.ambient = e.ambient;
+        s.kind = uint8_t(e.kind);
+        s.reason = uint8_t(e.reason);
         s.homeChunk = e.homeChunk;
         s.modelId = e.modelId;
         out.living.push_back(std::move(s));
@@ -423,7 +458,8 @@ void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
         e->ageTicks = s.ageTicks;
         e->movePhase = s.movePhase;
         e->facingYaw = s.facingYaw;
-        e->ambient = s.ambient;
+        e->kind = MobKind(s.kind);
+        e->reason = SpawnReason(s.reason);
         e->homeChunk = s.homeChunk;
         living_.push_back(std::move(e));
     }

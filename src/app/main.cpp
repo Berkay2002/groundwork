@@ -26,6 +26,7 @@
 #include "ui/InventoryUi.h"
 #include "sim/Inventory.h"
 #include "sim/Mining.h"
+#include "sim/MobSpawn.h"
 #include "render/BreakOverlay.h"
 #include "render/ItemRenderer.h"
 #include "render/ModelRenderer.h"
@@ -141,6 +142,7 @@ struct App {
     glm::ivec3 openFurnace{0};
     World* world = nullptr;
     Entities entities;
+    MobSpawnSystem mobSpawn;
     Settings settings;
     AssetManager assets;
     Audio audio;
@@ -180,8 +182,11 @@ glm::mat4 livingEntityTransform(const LivingEntity& entity, const ModelAsset& mo
     glm::vec3 center((model.boundsMin.x + model.boundsMax.x) * 0.5f,
                      modelFootingY(model),
                      (model.boundsMin.z + model.boundsMax.z) * 0.5f);
+    // facingYaw is atan2(z, x); a positive GL Y-rotation turns +X toward -Z,
+    // so the world rotation is -facingYaw. forwardYaw aligns the authored
+    // model's own front with simulation +X (per-model, from the manifest).
     return glm::translate(glm::mat4(1.0f), entity.renderPos(alpha)) *
-           glm::rotate(glm::mat4(1.0f), entity.facingYaw + glm::radians(90.0f),
+           glm::rotate(glm::mat4(1.0f), -entity.facingYaw + model.forwardYaw,
                        glm::vec3(0, 1, 0)) *
            glm::translate(glm::mat4(1.0f), -center);
 }
@@ -1079,6 +1084,9 @@ int main(int argc, char** argv) {
             app.entities.tick(world, app.player.pos(), &app.inv,
                               float(TickClock::TICK_DT),
                               app.survival && !demoRun ? &app.player : nullptr);
+            // Natural respawn pacing: survival only, live player, no demos.
+            if (app.survival && !demoRun && app.player.health > 0)
+                app.mobSpawn.tick(world, app.entities, app.player.pos());
             if (app.survival) {
                 app.player.healthTick();
                 if (app.player.outOfWorld) app.player.health = 0;
@@ -1248,8 +1256,9 @@ int main(int argc, char** argv) {
             float handLvl = std::max(0.0f, heldLight - glm::distance(p, eye));
             float handBr = std::pow(0.85f, 15.0f - handLvl);
             float light = std::max({sunBr * sunLevel, blkBr, handBr});
+            float flash = entity.hurtTicks > 0 ? 0.55f : 0.0f;
             modelRenderer.draw(*model, viewProj, livingEntityTransform(entity, *model, alpha),
-                               light);
+                               light, flash);
         }
 
         // Translucent water pass: after all opaque geometry, blended, with

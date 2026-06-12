@@ -25,10 +25,13 @@ deliberately being left for later.
   audio, item pickup, generated or embedded voxel/UI art, and the first authored
   blocky character asset loaded from `assets/`.
 - Encounter hostile zombies in normal worlds and in a save-isolated demo. They
-  wander, chase a visible player, and bite; the player can fight back with a
-  3.5-block melee swing, knockback works both ways, and kills drop rotten
-  flesh. Creatures persist across quitting and chunk streaming; each chunk
-  ambient-spawns its creature exactly once per world.
+  wander, chase a visible player while actually facing them (smooth
+  Minecraft-style body turns), flash red when hit, and bite; the player can
+  fight back with a 3.5-block melee swing, knockback works both ways, and
+  kills drop rotten flesh. Creatures persist across quitting and chunk
+  streaming; each chunk ambient-spawns its creature exactly once per world,
+  and new zombies keep appearing naturally at night or in dark places,
+  24-96 blocks away, under a population cap.
 - Survive with 20 HP of health: a hearts bar above the hotbar, brief
   invulnerability after a hit, slow passive regeneration, and death that
   respawns at world spawn. A keep-inventory setting (default on) decides
@@ -63,18 +66,20 @@ deliberately being left for later.
 - The `MCEN` entity-file format is typed so future world entities can share
   the same persistence layer.
 
-### Add simple creatures (combat pass done)
+### Add simple creatures (combat + spawning passes done)
 
 - Done: living-entity foundation (health, damage, deterministic ambient
-  spawning, movement-facing, terrain collision, model id, rendered GLB
-  character), creature persistence in `MCEN` files with a once-per-world
-  ambient-spawn marker, hostile chase/attack AI with line of sight, player
-  health/death/respawn with a keep-inventory toggle, two-way melee with
-  knockback, and a rotten-flesh drop.
-- Killed creatures stay dead and the world slowly depopulates; there is no
-  respawn or difficulty system yet, and that is a deliberate open question.
-- Next: more species, drop tables, creature spawn/respawn pacing, or real
-  pathfinding. Keep behavior modest until the game clearly needs more.
+  spawning, terrain collision, model id, rendered GLB character), creature
+  persistence in `MCEN` files with a once-per-world ambient-spawn marker,
+  hostile chase/attack AI with line of sight and correct target facing,
+  player health/death/respawn with a keep-inventory toggle, two-way melee
+  with knockback and a red hurt flash, a rotten-flesh drop, a data-driven
+  mob table (`MobKind`/`MobDef`) with per-mob spawn reasons, and a
+  Minecraft-style natural spawn system (night/darkness ring around the
+  player with a population cap) so the world no longer depopulates.
+- Next: more species and drop tables, despawn rules for far-away natural
+  mobs, difficulty settings, or real pathfinding. Keep behavior modest until
+  the game clearly needs more.
 
 ### Expand crafting and recipes
 

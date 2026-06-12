@@ -217,6 +217,7 @@ bool loadModelAsset(const std::filesystem::path& manifestDir,
     asset.id = entry.id;
     asset.name = entry.name.empty() ? entry.id : entry.name;
     asset.scale = entry.scale;
+    asset.forwardYaw = glm::radians(entry.forwardYawDeg);
 
     for (cgltf_size i = 0; i < data->materials_count; ++i) {
         const cgltf_material& material = data->materials[i];

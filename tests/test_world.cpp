@@ -10,6 +10,8 @@
 #include "sim/EntitySave.h"
 #include "sim/ItemSave.h"
 #include "sim/Mining.h"
+#include "sim/Mob.h"
+#include "sim/MobSpawn.h"
 #include "sim/Crafting.h"
 #include "sim/PlayerSave.h"
 #include "world/WorldSave.h"
@@ -44,6 +46,8 @@ static int failures = 0;
 
 static_assert(ITEM_TYPES == 35, "ItemId is saved data; append ids only");
 static_assert(BLOCK_TYPES == 32, "Block ids are saved data; append ids only");
+static_assert(MOB_KINDS == 1, "MobKind is saved data; append kinds only");
+static_assert(SPAWN_REASONS == 3, "SpawnReason is saved data; append reasons only");
 
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
@@ -324,7 +328,8 @@ static void testEntityChunkSaveFormatRoundtrip() {
     z.ageTicks = 4321;
     z.movePhase = 3;
     z.facingYaw = 1.25f;
-    z.ambient = true;
+    z.kind = 0;   // Zombie
+    z.reason = 1; // Ambient
     z.homeChunk = {-2, 3};
     z.modelId = "creature.kenney_zombie_a";
 
@@ -355,7 +360,8 @@ static void testEntityChunkSaveFormatRoundtrip() {
     CHECK(loaded.living[0].ageTicks == 4321);
     CHECK(loaded.living[0].movePhase == 3);
     CHECK(std::fabs(loaded.living[0].facingYaw - 1.25f) < 1e-6f);
-    CHECK(loaded.living[0].ambient);
+    CHECK(loaded.living[0].kind == 0);
+    CHECK(loaded.living[0].reason == 1);
     CHECK(loaded.living[0].homeChunk == key);
     CHECK(loaded.living[0].modelId == "creature.kenney_zombie_a");
     CHECK(loaded.ambientSpawnConsumed);
@@ -521,12 +527,19 @@ static std::string livingEntityPayload(const SavedLivingEntity& e) {
     writeRawU32(out, e.ageTicks);
     writeRawU32(out, e.movePhase);
     writeRawF32(out, e.facingYaw);
-    writeRawU8(out, e.ambient ? 1 : 0);
+    writeRawU8(out, e.reason); // the legacy type-2 ambient flag byte
     writeRawU32(out, uint32_t(e.homeChunk.x));
     writeRawU32(out, uint32_t(e.homeChunk.z));
     writeRawU16(out, uint16_t(e.modelId.size()));
     out.write(e.modelId.data(), (std::streamsize)e.modelId.size());
     return out.str();
+}
+
+// Living v2 (record type 4): the legacy layout plus a trailing MobKind byte.
+static std::string livingEntityPayloadV2(const SavedLivingEntity& e) {
+    std::string payload = livingEntityPayload(e);
+    payload.push_back(char(e.kind));
+    return payload;
 }
 
 static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
@@ -553,6 +566,13 @@ static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
     deadLiving.health = 0;
     SavedLivingEntity noModelLiving = validLiving;
     noModelLiving.modelId = "";
+    SavedLivingEntity badKindLiving = validLiving;
+    badKindLiving.kind = 7; // no such MobKind
+    SavedLivingEntity badReasonLegacy = validLiving;
+    badReasonLegacy.reason = 2; // Natural never appears in legacy records
+    SavedLivingEntity naturalV2 = validLiving;
+    naturalV2.pos = {5.5f, 70.0f, 5.5f};
+    naturalV2.reason = 2;
 
     writeManualEntityFile(path, {
         {99, "abc"},
@@ -564,7 +584,10 @@ static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
         {2, livingEntityPayload(wrongChunkLiving)},
         {2, livingEntityPayload(deadLiving)},
         {2, livingEntityPayload(noModelLiving)},
-        {2, livingEntityPayload(validLiving)},
+        {2, livingEntityPayload(badReasonLegacy)},
+        {2, livingEntityPayload(validLiving)}, // legacy record stays loadable
+        {4, livingEntityPayloadV2(badKindLiving)},
+        {4, livingEntityPayloadV2(naturalV2)},
     });
 
     SavedEntityChunk loaded;
@@ -573,9 +596,12 @@ static void testEntityChunkSaveSkipsUnknownAndInvalidRecords() {
     CHECK(loaded.items[0].stack.item == ItemId::Coal);
     CHECK(loaded.items[0].stack.count == 3);
     CHECK(loaded.items[0].ageTicks == 10);
-    CHECK(loaded.living.size() == 1);
+    CHECK(loaded.living.size() == 2);
     CHECK(loaded.living[0].health == 5);
     CHECK(glm::distance(loaded.living[0].pos, validLiving.pos) < 1e-5f);
+    CHECK(loaded.living[0].kind == 0);   // legacy records default to Zombie
+    CHECK(loaded.living[0].reason == 0); // ...and the old flag maps to Staged
+    CHECK(loaded.living[1].reason == 2); // v2 carries Natural
     CHECK(!loaded.ambientSpawnConsumed);
 
     std::filesystem::remove_all(dir);
@@ -2449,7 +2475,8 @@ static void testAmbientLivingStreamLifecycle() {
           EntityChunkLoadStatus::Loaded);
     CHECK(savedChunk.living.size() == 1);
     CHECK(savedChunk.living[0].health == 4);
-    CHECK(savedChunk.living[0].ambient);
+    CHECK(savedChunk.living[0].kind == 0);
+    CHECK(savedChunk.living[0].reason == 1); // Ambient
     CHECK(savedChunk.living[0].homeChunk == key);
     CHECK(savedChunk.ambientSpawnConsumed);
 
@@ -2490,7 +2517,13 @@ static void testLivingEntityFacingUpdates() {
     CHECK(id != 0);
     CHECK(std::fabs(ents.living()[0]->facingYaw) < 0.001f);
 
+    // The wander phase flips to +Z at tick 40; the body turn is rate-capped
+    // (~10 deg/tick), so after 41 ticks we are exactly two steps in...
     for (int i = 0; i < 41; ++i)
+        ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(std::fabs(ents.living()[0]->facingYaw - 2.0f * 0.1745f) < 0.01f);
+    // ...and fully turned to +Z a half second later.
+    for (int i = 0; i < 14; ++i)
         ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
     CHECK(std::fabs(ents.living()[0]->facingYaw - 1.5707963f) < 0.01f);
 
@@ -2556,6 +2589,120 @@ static void testLivingHostileChaseAndAttack() {
     CHECK(dead.health == 0 && creatureHp == ents.living()[0]->health);
 
     std::filesystem::remove_all("test_living_hostile");
+}
+
+static void testLivingChaseFacingTracksPlayer() {
+    std::filesystem::remove_all("test_living_chase_facing");
+    World w(1337, "test_living_chase_facing");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId id =
+        ents.spawnLiving(glm::vec3(0.5f, 71.0f, 0.5f), DEFAULT_CREATURE_MODEL_ID);
+    CHECK(id != 0);
+
+    // Player due +Z: a chasing creature must come to face +Z (yaw pi/2),
+    // not whatever its wander phase or velocity says.
+    Player target;
+    target.pos() = glm::vec3(0.5f, 71.0f, 4.0f);
+    for (int i = 0; i < 20; ++i)
+        ents.tick(w, target.pos(), nullptr, float(TickClock::TICK_DT), &target);
+    CHECK(std::fabs(ents.living()[0]->facingYaw - 1.5707963f) < 0.05f);
+
+    // The turn is rate-capped: from a forced bad yaw, one tick moves exactly
+    // one step toward the player, no snap.
+    ents.living()[0]->facingYaw = 3.0f;
+    ents.tick(w, target.pos(), nullptr, float(TickClock::TICK_DT), &target);
+    CHECK(std::fabs(ents.living()[0]->facingYaw - (3.0f - 0.1745f)) < 0.02f);
+
+    // Knockback does not flip the gaze: while hurtTicks bleed off the
+    // impulse, a chasing creature keeps facing the player.
+    for (int i = 0; i < 20; ++i)
+        ents.tick(w, target.pos(), nullptr, float(TickClock::TICK_DT), &target);
+    CHECK(ents.damageLiving(id, 1, glm::vec3(0.0f, 0.0f, -1.0f)));
+    CHECK(ents.living()[0]->hurtTicks > 0);
+    ents.tick(w, target.pos(), nullptr, float(TickClock::TICK_DT), &target);
+    CHECK(ents.living()[0]->hurtTicks > 0); // still in the knockback window
+    CHECK(std::fabs(ents.living()[0]->facingYaw - 1.5707963f) < 0.2f);
+
+    std::filesystem::remove_all("test_living_chase_facing");
+}
+
+static void testMobSpawnSystemRules() {
+    const char* dir = "test_mob_spawn";
+    std::filesystem::remove_all(dir);
+    World w(1337, dir);
+    glm::vec3 playerPos(0.5f, 71.0f, 0.5f);
+    w.waitUntilLoaded(playerPos, 1, 10000);
+    buildEntityTestPlatform(w);
+
+    // A sealed dark pocket inside the platform area (floor at y 71, interior
+    // air at y 72-73): sunlight never reaches it, so hostiles may spawn there
+    // even at noon.
+    for (int x = 8; x <= 12; ++x)
+        for (int y = 71; y <= 75; ++y)
+            for (int z = -2; z <= 2; ++z)
+                w.setBlock(x, y, z, Block::Stone);
+    w.setBlock(10, 72, 0, Block::Air);
+    w.setBlock(10, 73, 0, Block::Air);
+
+    // The darkness rule by itself: lit day surface no, sealed pocket yes,
+    // night surface yes, torch-lit pocket no.
+    w.setDayTime(0.2f * DAY_LENGTH); // midday
+    CHECK(!darkEnoughForHostile(w, {2, 71, 0}, 3));
+    CHECK(darkEnoughForHostile(w, {10, 72, 0}, 3));
+    w.setDayTime(0.7f * DAY_LENGTH); // night
+    CHECK(darkEnoughForHostile(w, {2, 71, 0}, 3));
+    w.setBlock(10, 73, 0, Block::Torch);
+    CHECK(!darkEnoughForHostile(w, {10, 72, 0}, 3));
+    w.setBlock(10, 73, 0, Block::Air);
+
+    // Natural spawning at night with a test-sized ring: every spawn obeys
+    // distance, footing, and table rules until the cap fills.
+    Entities ents;
+    MobSpawnRules rules;
+    rules.minRadius = 4.0f;
+    rules.maxRadius = 8.0f;
+    rules.capRadius = 32.0f;
+    rules.mobCap = 3;
+    MobSpawnSystem spawner(rules);
+    int spawned = 0;
+    for (int i = 0; i < 200000 && spawned < rules.mobCap; ++i) {
+        LivingEntityId id = spawner.tick(w, ents, playerPos);
+        if (id == 0) continue;
+        ++spawned;
+        const LivingEntity* e = nullptr;
+        for (const auto& up : ents.living())
+            if (up->id == id) e = up.get();
+        CHECK(e != nullptr);
+        if (!e) break;
+        float dist = glm::distance(e->body.pos, playerPos);
+        CHECK(dist >= rules.minRadius && dist <= rules.maxRadius);
+        CHECK(e->reason == SpawnReason::Natural);
+        CHECK(e->kind == MobKind::Zombie);
+        CHECK(e->health == mobDef(MobKind::Zombie).maxHealth);
+        glm::ivec3 feet(int(std::floor(e->body.pos.x)),
+                        int(std::floor(e->body.pos.y)),
+                        int(std::floor(e->body.pos.z)));
+        Block ground = w.getBlock(feet.x, feet.y - 1, feet.z);
+        CHECK(isSolid(ground) && !isWater(ground));
+    }
+    CHECK(spawned == rules.mobCap);
+
+    // At the cap, attempts produce nothing.
+    for (int i = 0; i < 3000; ++i)
+        CHECK(spawner.tick(w, ents, playerPos) == 0);
+
+    // By day the lit surface refuses hostiles, and nothing in this small
+    // ring is both dark and in range — zero spawns even with an empty world.
+    Entities fresh;
+    w.setDayTime(0.1f * DAY_LENGTH);
+    MobSpawnSystem daySpawner(rules);
+    for (int i = 0; i < 5000; ++i)
+        CHECK(daySpawner.tick(w, fresh, playerPos) == 0);
+
+    std::filesystem::remove_all(dir);
 }
 
 static void testLivingMeleeRaycastAndKnockback() {
@@ -3434,6 +3581,7 @@ static void testAssetManifestParsing() {
     if (entry) {
         CHECK(entry->path == "characters/kenney_blocky/character-o.glb");
         CHECK(entry->scale > 0.0f);
+        CHECK(std::fabs(entry->forwardYawDeg - 90.0f) < 0.001f);
     }
 
     std::filesystem::remove_all("test_assets_manifest");
@@ -3472,6 +3620,28 @@ static void testAssetManifestParsing() {
 
     writeTextFile("test_assets_manifest/malformed.json", "{\"version\":1,");
     CHECK(!loadAssetManifest("test_assets_manifest/malformed.json", manifest, &error));
+
+    // forwardYawDeg: optional (defaults to 0), but must be a sane number.
+    writeTextFile("test_assets_manifest/yaw-default.json",
+        "{\"version\":1,\"models\":[{\"id\":\"a\",\"path\":\"models/a.glb\"}]}");
+    CHECK(loadAssetManifest("test_assets_manifest/yaw-default.json", manifest, &error));
+    CHECK(std::fabs(manifest.models[0].forwardYawDeg) < 0.001f);
+
+    writeTextFile("test_assets_manifest/yaw-ok.json",
+        "{\"version\":1,\"models\":["
+        "{\"id\":\"a\",\"path\":\"models/a.glb\",\"forwardYawDeg\":-90}]}");
+    CHECK(loadAssetManifest("test_assets_manifest/yaw-ok.json", manifest, &error));
+    CHECK(std::fabs(manifest.models[0].forwardYawDeg + 90.0f) < 0.001f);
+
+    writeTextFile("test_assets_manifest/yaw-bad.json",
+        "{\"version\":1,\"models\":["
+        "{\"id\":\"a\",\"path\":\"models/a.glb\",\"forwardYawDeg\":\"east\"}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/yaw-bad.json", manifest, &error));
+
+    writeTextFile("test_assets_manifest/yaw-range.json",
+        "{\"version\":1,\"models\":["
+        "{\"id\":\"a\",\"path\":\"models/a.glb\",\"forwardYawDeg\":720}]}");
+    CHECK(!loadAssetManifest("test_assets_manifest/yaw-range.json", manifest, &error));
     std::filesystem::remove_all("test_assets_manifest");
 }
 
@@ -3502,6 +3672,7 @@ static void testModelAssetLoadAndExternalTexture() {
         CHECK(image.sourcePath.generic_string().find("Textures/texture-o.png") != std::string::npos);
     }
     CHECK(model.boundsMax.y > model.boundsMin.y);
+    CHECK(std::fabs(model.forwardYaw - glm::radians(90.0f)) < 0.001f);
 }
 
 static void testAssetManagerCacheAndMissingIds() {
@@ -4011,6 +4182,8 @@ int main() {
     testAmbientLivingStreamLifecycle();
     testLivingEntityFacingUpdates();
     testLivingHostileChaseAndAttack();
+    testLivingChaseFacingTracksPlayer();
+    testMobSpawnSystemRules();
     testLivingMeleeRaycastAndKnockback();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
