@@ -3,8 +3,8 @@
 ## Status
 
 - **Current phase:** Execute (Phase 5)
-- **Current milestone:** M2 (panel layout geometry)
-- **Last checkpoint:** M1 reviewed and approved
+- **Current milestone:** M3 (InventoryUi module + visuals)
+- **Last checkpoint:** M2 reviewed and approved
 
 ## Log
 
@@ -69,9 +69,30 @@
   v4 round-trip, no scope creep.
 - Stage 2 code quality (Opus 4.8): APPROVED; 2 Minor parked (below).
 
+### 2026-06-12 — M2/T3 DONE + M2 milestone review APPROVED
+
+- Panel layout geometry in MenuUi.h: centered panel, title band, top
+  section per surface (player box + 2×2 + arrow + output / centered 3×3 /
+  furnace stack), 3×9 grid, 0.45-slot hotbar gap, recipe panel attached
+  right. Contractual signatures unchanged; new panelRect/recipePanelRect/
+  playerBoxRect/arrowRect. `testMenuUiPanelLayout` added. Build warning-
+  free, `all tests passed`. Commit `a2233b2`.
+- Milestone review (Opus 4.8, combined single-task dispatch): Stage 1
+  spec compliance APPROVED (zero findings, fits at 1280×720 verified
+  numerically); Stage 2 quality APPROVED with 4 Minor parked (below).
+
 ## Parked Minor issues
 
 - Q1 (M1): remap math `(i/8)*9 + i%8` duplicated in v2 and v3 load loops —
   extract `remapSlot8to9(i)` helper in PlayerSave.h. (cleanup pass)
 - Q2 (M1): v2 migration test only populates row-0 source slots; add one
   row>0 fixture for symmetry with the v3 test. (cleanup pass)
+- Q1 (M2): recipe slot rects not included in the pairwise non-overlap
+  sweep on the inventory-screen test block. (cleanup pass)
+- Q2 (M2): `y0` and `topSectionY` share a re-derived prefix in MenuUi.h —
+  express y0 via topSectionY to remove drift risk. (cleanup pass)
+- Q3 (M2): furnaceSlotRect anchors to craftGridLeft (phantom player box)
+  on a screen with no player box — aesthetic offset, non-obvious coupling.
+  (cleanup pass)
+- Q4 (M2): arrowRect re-derives gridW/craftGridLeft instead of reading the
+  rects it already fetches. (cleanup pass)
