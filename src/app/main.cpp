@@ -46,7 +46,7 @@ const char* SAVE_DIR = "saves/world1";
 
 const Block HOTBAR[] = {Block::Grass, Block::Dirt, Block::Stone,
                         Block::Wood, Block::Leaves, Block::Sand, Block::Torch,
-                        Block::Water};
+                        Block::Water, Block::Planks};
 constexpr int HOTBAR_SLOTS = int(sizeof(HOTBAR) / sizeof(HOTBAR[0]));
 
 // Chunk vertices are packed integers (see ChunkVertex): chunk-local position

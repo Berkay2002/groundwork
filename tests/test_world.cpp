@@ -971,6 +971,10 @@ static void testPlayerLandsOnPlatform() {
 }
 
 static void testInventory() {
+    // Contract: 9 columns x 4 rows = 36 slots.
+    static_assert(Inventory::COLS == 9, "inventory must be 9 columns wide");
+    static_assert(Inventory::SLOTS == 36, "inventory must have 36 slots");
+
     Inventory inv;
     // Fills hotbar-first, stacks to 64, overflows into the next slot.
     CHECK(inv.add(ItemId::DirtBlock, 70) == 0);
@@ -2063,8 +2067,8 @@ static void testMenuUiInventoryHelpers() {
     const int w = 800, h = 600;
     ui::InventoryLayout L = ui::inventoryLayout(w, h);
     ui::Rect slot0 = ui::inventorySlotRect(L, 0);
-    ui::Rect slot8 = ui::inventorySlotRect(L, 8);
-    CHECK(slot0.y > slot8.y); // hotbar row is drawn below the grid
+    ui::Rect slot9 = ui::inventorySlotRect(L, 9);
+    CHECK(slot0.y > slot9.y); // hotbar row (0) is drawn below the grid rows (1+)
     CHECK(ui::inventorySlotAt(w, h, slot0.x + 4.0f, slot0.y + 4.0f) == 0);
     CHECK(ui::inventorySlotAt(w, h, L.x0 - 1.0f, L.y0 - 1.0f) == -1);
 

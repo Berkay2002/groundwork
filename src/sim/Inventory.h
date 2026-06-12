@@ -2,14 +2,14 @@
 #include "sim/Item.h"
 #include <algorithm>
 
-// 4 rows x 8 columns of stacks; row 0 (slots 0..7) is the hotbar, matching
-// the 8 hotbar keys. Pure logic, GL-free, saved in player.bin.
+// 4 rows x 9 columns of stacks; row 0 (slots 0..8) is the hotbar, matching
+// the 9 hotbar keys. Pure logic, GL-free, saved in player.bin.
 class Inventory {
 public:
-    static constexpr int COLS = 8, ROWS = 4, SLOTS = COLS * ROWS;
+    static constexpr int COLS = 9, ROWS = 4, SLOTS = COLS * ROWS;
     static constexpr int STACK_MAX = 64;
 
-    ItemStack slots[SLOTS]; // slot 0..7 = hotbar, then the grid rows
+    ItemStack slots[SLOTS]; // slot 0..8 = hotbar, then the grid rows
 
     // Add n of an item: top up existing stacks first (hotbar first), then fill
     // empty slots. Returns how many didn't fit. Durable items occupy one slot
