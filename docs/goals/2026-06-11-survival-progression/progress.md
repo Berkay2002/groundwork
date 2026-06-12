@@ -2,7 +2,7 @@
 
 ## STATUS
 
-- Current: Complete
+- Current: Reopened for M5 (visual polish + held item, user request 2026-06-12)
 - Last verified: Final validation passed (`cmake --build build -j` exit 0,
   warning-free/no work; `.\build\world_tests.exe` -> `all tests passed`;
   `.\build\groundwork.exe --demo-survival --frames 300` screenshot inspected,

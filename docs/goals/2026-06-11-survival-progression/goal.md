@@ -61,6 +61,30 @@ rendered and inspected showing the survival UI and block breaking feedback, and
   gold/netherite tiers, silk touch, charcoal, and data-file recipe loading.
 - Full creative inventory and world selection/home-screen UX.
 
+## M5 Addendum: Visual Polish and Held Item (2026-06-12)
+
+User-requested follow-up in the same goal/batch: the Batch I procedural art
+(tool/item icons, crafting table, furnace) reads as crude geometric
+placeholders, the break-crack overlay lacks the Minecraft feel, and tools
+never render in the player's hand (no first-person held-item pass exists).
+
+**Objective:** Redesign the Batch I procedural art to read as Minecraft-like
+pixel art (sprite-based item/tool icons with transparent backgrounds,
+crafting-table and furnace faces, furnace front actually shown on the block,
+crack stages), and add a first-person held-item render pass with a simple
+swing so the selected tool/block is visible in hand.
+
+**Stopping condition (addendum):** Committed implementation where
+`cmake --build build -j` exits 0 warning-free, `world_tests` prints
+`all tests passed`, and inspected `--frames` screenshots show: (a) the new
+item/tool icons in the hotbar/inventory UI, (b) the crafting table and
+furnace (with visible front) in the world, (c) the redesigned crack overlay
+on a mined block, and (d) the selected tool rendered in the player's hand.
+Golden reference regenerated only after visual inspection. Docs updated.
+
+Same validation commands and constraints as above (no asset files, ids
+append-only, main-thread GL ownership).
+
 ## Checkpoints
 
 Progress is logged to `progress.md` after every task and milestone.

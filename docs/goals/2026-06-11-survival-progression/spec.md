@@ -450,3 +450,92 @@ Documentation:
   recipes.
 - Entity persistence and item cleanup beyond merging, because Batch J owns
   durable item entities.
+
+## 14. M5 Addendum: Visual Polish and Held Item (2026-06-12)
+
+Reopened per user request, same goal/batch. Replaces the placeholder-quality
+procedural art from Task 10 and adds first-person held-item rendering.
+
+### 14.1 Item and tool icon art
+
+- Replace the geometric icon functions in `src/render/Texture.cpp` with
+  explicit 16x16 ASCII sprite maps (one string row per pixel row, palette
+  char -> RGB) for: stick, coal, raw iron, iron ingot, diamond, and one
+  sprite per tool class (pickaxe/axe/shovel) with a per-tier material
+  palette (wood/stone/iron/diamond). Minecraft-like reading: diagonal
+  handle to bottom-left, head at top-right, 1px dark outline, subtle
+  per-pixel noise shading.
+- Sprites are authored top-down (row 0 = visual top) and flipped at lookup:
+  tile-space y=0 is the visual bottom (HUD flips v; mesher maps v=1 to the
+  face top). Document this convention once in Texture.cpp.
+- Item icons get transparent backgrounds. The HUD strip atlas and the block
+  texture array become RGBA8 (blocks fully opaque); the HUD textured mode
+  multiplies by texture alpha; the item-entity shader discards alpha < 0.5
+  so dropped tools render as cut-out sprites instead of dark squares.
+- The torch tile background becomes transparent in the same way (the 3D
+  torch post samples only the central strip; the hotbar/dropped icon wins).
+- Fix the dropped-item V orientation: `buildCube`/`buildBillboard` in
+  ItemRenderer currently sample v=1 (visual top row) at the bottom vertices,
+  rendering art upside down. Top vertices must sample v=1.
+
+### 14.2 Workstation and block faces
+
+- Crafting table top: lighter worktop planks, dark border frame, dark 3x3
+  grid lines. Side: planks with a dark top band and simple dark tool
+  silhouettes (saw + hammer reading). Bottom stays Planks.
+- Furnace: side/top become smooth gray stone slabs visually distinct from
+  cobblestone; front = side art with a dark recessed mouth near the bottom.
+  `BLOCK_DEFS` shows `FurnaceFront` on all four side faces (top/bottom use
+  the side tile). No facing metadata — accepted simplification, documented
+  in code. Block save bytes unchanged (TileId mapping is renderer-only).
+- Cobblestone becomes irregular staggered stones (per-stone brightness,
+  darker mortar) instead of a flat aligned grid.
+- Ore tiles keep their mineral colors but gain subtle blob edge shading.
+
+### 14.3 Break-crack overlay redesign
+
+- Crack stages become pixelated Minecraft-style damage: hard-edged ~1px
+  cracks that lengthen/branch per stage plus crumble speckles whose density
+  grows with stage, clustered near the cracks. No soft anti-aliased halo;
+  alpha quantized to a small set of levels.
+- `BREAK_CRACK_STAGES`, `breakStageForProgress`, and the BreakOverlay API
+  are unchanged; only `crackAlphaPixel` art changes.
+
+### 14.4 First-person held item
+
+- New render pass after the water/crack passes and before the HUD: the
+  selected stack renders bottom-right as a viewmodel. Survival shows the
+  selected inventory stack; creative shows the held palette block; empty
+  hand renders the arm cuboid.
+- Block items render as a mini cube with per-face tiles; non-block items
+  render as the flat icon sprite (alpha cut-out, two-sided). An empty hand
+  renders a simple first-person arm cuboid with a procedural skin tile
+  (user reference image, 2026-06-12).
+- Own projection (fixed FOV, screen aspect); depth cleared or disabled for
+  the pass so the item never clips into world geometry.
+- Lit like item entities: world sun/block light at the player eye cell,
+  sun channel scaled by the day/night level.
+- Simple swing animation while mining (survival, break held) and a brief
+  swing pulse on place/click; implemented as a pure phase->transform curve
+  helper testable headless where practical.
+
+### 14.5 Verification
+
+- Warning-free build; `world_tests` all pass.
+- Inspected screenshots: `--demo-survival` (new hotbar icons, held tool,
+  staged crafting table/furnace, cracks), `--demo-inv` (icons in the grid),
+  `--demo-items` (dropped sprite cut-outs, right side up), and a default
+  creative run (held block, golden-view impact).
+- Golden reference regenerated only after visual inspection (hotbar torch
+  and water icons change it by construction).
+- `ROADMAP.md`/`README.md` notes where relevant and
+  `docs/handoff/STATUS.md` updated.
+
+### 14.6 Out of scope (M5)
+
+- Furnace facing metadata or block state.
+- Walk-bob synchronization and MC-style sprite extrusion (3D thickness)
+  for held/dropped items. (The arm cuboid for an empty hand moved INTO
+  scope on 2026-06-12 user reference images; spec/plan review skipped at
+  the user's explicit instruction.)
+- Any asset files.

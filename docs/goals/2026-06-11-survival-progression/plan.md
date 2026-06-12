@@ -285,3 +285,69 @@ Before reporting completion:
 - Walk the spec requirement by requirement with evidence.
 - Confirm no asset files were introduced.
 - Confirm `ROADMAP.md`, `README.md`, and `docs/handoff/STATUS.md` are updated.
+
+## Milestone M5: Visual Polish and Held Item (2026-06-12 addendum)
+
+**Milestone validation:** `cmake --build build -j` warning-free,
+`world_tests` all pass, and the four spec 14.5 screenshots rendered from a
+temp dir and visually inspected.
+
+### Task 12: Sprite Icon Art, RGBA Atlas, and Alpha-Aware Item Rendering   [Milestone M5]
+
+**Files:** modify `src/render/Texture.cpp`, `src/ui/Hud.cpp`,
+`src/render/ItemRenderer.cpp`, `tests/test_world.cpp` (if icon helpers gain
+testable surface).
+
+**Behavior:** spec 14.1 — sprite-map icons for items and tools, RGBA
+atlas/texture array, HUD alpha multiply, item-shader alpha discard, torch
+icon background transparency, dropped-item V-orientation fix.
+
+**Tests that must pass:** existing icon-mapping and tile-range tests still
+pass; build stays warning-free.
+**Validation:** build + tests; `--demo-inv` and `--demo-items` screenshots
+inspected.
+
+### Task 13: Workstation, Cobblestone, Ore, and Furnace Face Art          [Milestone M5]
+
+**Files:** modify `src/render/Texture.cpp`, `src/world/Block.h`.
+
+**Behavior:** spec 14.2 — crafting table top/side, furnace side/front art,
+furnace front mapped onto the four side faces, staggered cobblestone, ore
+edge shading.
+
+**Tests that must pass:** block registry/tile tests still pass.
+**Validation:** build + tests; `--demo-survival` screenshot shows the
+crafting table and furnace front.
+
+### Task 14: Break-Crack Overlay Redesign          [Milestone M5]
+
+**Files:** modify `src/render/Texture.cpp` (crack stage art only).
+
+**Behavior:** spec 14.3 — pixelated crack + crumble stages, quantized alpha.
+**Tests that must pass:** crack-stage helper tests unchanged and passing.
+**Validation:** build + tests; `--demo-break` screenshot inspected.
+
+### Task 15: First-Person Held-Item Pass with Swing          [Milestone M5]
+
+**Files:** modify `src/render/ItemRenderer.h`, `src/render/ItemRenderer.cpp`,
+`src/app/main.cpp`; new pure swing-curve helper header if needed;
+`tests/test_world.cpp` for pure helpers.
+
+**Behavior:** spec 14.4 — viewmodel pass for the selected stack (cube for
+block items, sprite for tools/materials), own projection, depth-safe,
+world-lit, swing while mining and on click.
+
+**Tests that must pass:** swing/transform pure helpers (if extracted) are
+deterministic and bounded; existing tests pass.
+**Validation:** build + tests; `--demo-survival` screenshot shows the tool
+in hand.
+
+### Task 16: Golden Reference, Docs, and M5 Verification          [Milestone M5]
+
+**Files:** `tests/golden/reference.png` (regenerate), `docs/handoff/STATUS.md`,
+`README.md`/`ROADMAP.md` if user-facing behavior notes apply.
+
+**Behavior:** regenerate golden only after inspecting the new visuals;
+update docs; run the full spec 14.5 verification fresh.
+**Validation:** all goal.md validation commands fresh; `ctest --test-dir
+build` result reported.
