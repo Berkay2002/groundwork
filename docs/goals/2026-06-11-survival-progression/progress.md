@@ -2,9 +2,10 @@
 
 ## STATUS
 
-- Current: Final verification
-- Last verified: Final whole-implementation review approved
-  (`cmake --build build -j` and `.\build\world_tests.exe` passed in review,
+- Current: Complete
+- Last verified: Final validation passed (`cmake --build build -j` exit 0,
+  warning-free/no work; `.\build\world_tests.exe` -> `all tests passed`;
+  `.\build\groundwork.exe --demo-survival --frames 300` screenshot inspected,
   2026-06-11)
 - Blockers: none
 - Minor issues parked: 7
@@ -218,3 +219,11 @@
   accessor; restore prior GL blend function in `BreakOverlay::draw()`; split
   inventory/crafting/furnace drawing and interaction state out of `main.cpp`
   before adding more UI surfaces.
+- [2026-06-11] Final validation: PASSED. From committed head,
+  `cmake --build build -j` exited 0 with `ninja: no work to do`;
+  `.\build\world_tests.exe` exited 0 and printed `all tests passed`; isolated
+  temp-dir `.\build\groundwork.exe --demo-survival --frames 300` exited 0,
+  wrote `screenshot.ppm`, and the PNG was inspected showing survival hotbar
+  resources/tools/counts, staged Crafting Table and Furnace, targeted Diamond
+  Ore, and visible mining cracks. The temp render directory was deleted after
+  inspection.
