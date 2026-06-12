@@ -471,6 +471,28 @@ void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
     rebuildBuckets();
 }
 
+void Entities::autosaveTick(const std::string& saveDir, bool saveEnabled,
+                            float dt, float intervalSeconds) {
+    if (!saveEnabled || intervalSeconds <= 0.0f) return;
+    size_t total = loadedEntityChunks_.size();
+    if (total == 0) return;
+    // Pace so one full cycle of all loaded chunks takes ~intervalSeconds.
+    autosaveCredit_ += dt * float(total) / intervalSeconds;
+    int budget = int(autosaveCredit_);
+    if (budget <= 0) return;
+    autosaveCredit_ -= float(budget);
+    budget = std::min(budget, 8); // never burst, even after a frame stall
+    while (budget-- > 0) {
+        if (autosaveQueue_.empty())
+            autosaveQueue_.assign(loadedEntityChunks_.begin(),
+                                  loadedEntityChunks_.end());
+        ChunkKey key = autosaveQueue_.back();
+        autosaveQueue_.pop_back();
+        if (!loadedEntityChunks_.count(key)) continue; // unloaded since queued
+        saveLoadedChunkEntities(saveDir, key, saveEnabled);
+    }
+}
+
 bool Entities::saveLoadedChunkEntities(const std::string& saveDir, ChunkKey key,
                                        bool saveEnabled) {
     if (!loadedEntityChunks_.count(key)) return true;

@@ -99,6 +99,12 @@ public:
     void saveAndUnloadChunkEntities(const std::string& saveDir, ChunkKey key,
                                     bool saveEnabled);
     void saveAllLoadedEntityChunks(const std::string& saveDir, bool saveEnabled);
+    // Incremental autosave: cycles through all loaded entity chunks once per
+    // `intervalSeconds`, saving a few files per call instead of bursting
+    // hundreds in one frame. Call once per frame; exit/unload still use the
+    // full-save paths above.
+    void autosaveTick(const std::string& saveDir, bool saveEnabled, float dt,
+                      float intervalSeconds);
     void applyStreamEvents(const std::string& saveDir,
                            const ChunkStreamEvents& events,
                            bool saveEnabled,
@@ -124,6 +130,8 @@ private:
     // ambient creature exactly once per world.
     std::unordered_set<ChunkKey, ChunkKeyHash> ambientConsumedChunks_;
     std::unordered_set<ChunkKey, ChunkKeyHash> loadedEntityChunks_;
+    std::vector<ChunkKey> autosaveQueue_; // refilled snapshot of loaded chunks
+    float autosaveCredit_ = 0.0f;
     LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();

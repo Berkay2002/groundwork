@@ -47,6 +47,7 @@ constexpr float REACH = 5.0f;           // block interaction distance
 constexpr float ATTACK_REACH = 3.5f;    // melee distance (shorter than REACH)
 constexpr int PLAYER_MELEE_DAMAGE = 3;  // ~4 hits per zombie
 constexpr float AUTOSAVE_SECONDS = 30.0f; // periodic world+player save
+constexpr float MOB_RENDER_DISTANCE = 96.0f; // matches the spawn ring's far edge
 constexpr float UPLOAD_BUDGET_MS = 3.0f;  // main-thread mesh-upload cap/frame
 constexpr uint32_t WORLD_SEED = 1337;
 const char* SAVE_DIR = "saves/world1";
@@ -696,11 +697,13 @@ void drawDebugOverlay(Hud& hud, World& world, double fps, float frameMs,
         "pos %.1f %.1f %.1f\n"
         "chunk %d,%d  drawn %d/%d  day %.2f\n"
         "gen %.1fms q%d  mesh %.1fms q%d up%d\n"
+        "mobs %d  items %d\n"
         "target: %s%s%s",
         fps, frameMs,
         p.pos().x, p.pos().y, p.pos().z,
         pcx, pcz, st.drawn, st.loaded, dayFraction(world.dayTime()),
         st.genMs, st.genQueued, st.meshMs, st.meshQueued, st.uploads,
+        int(app.entities.living().size()), int(app.entities.items().size()),
         hit.hit ? blockName(world.getBlock(hit.block.x, hit.block.y, hit.block.z)) : "-",
         lightBuf, p.flying ? "\n[FLY]" : "");
     // Drop shadow then text, for readability over bright sky.
@@ -1028,10 +1031,10 @@ int main(int argc, char** argv) {
     if (benchSecs > 0.0) benchFrames.reserve(size_t(benchSecs * 2000.0));
     // Per-section frame breakdown (only accumulated while measuring): shows
     // where a frame's CPU time goes. "swap" also absorbs GPU sync time.
-    constexpr int BENCH_SECTIONS = 9;
+    constexpr int BENCH_SECTIONS = 10;
     const char* const benchSecName[BENCH_SECTIONS] = {
         "events", "tick", "stream", "mesh", "edit",
-        "opaque", "items", "water", "hud+swap"};
+        "opaque", "items", "mobs", "water", "hud+swap"};
     double benchSec[BENCH_SECTIONS] = {};
     double benchSecMark = 0.0;
     auto benchMark = [&](int i) {
@@ -1125,11 +1128,14 @@ int main(int argc, char** argv) {
         // skip autosave entirely; the World's demo mode also suppresses
         // saveChunk/saveAllModified and the destructor save.
         if (!demoRun) {
+            // Entity chunks trickle a few file writes per frame (full cycle
+            // ~AUTOSAVE_SECONDS) instead of bursting every loaded chunk at
+            // once — with mob persistence that burst was a visible stall.
+            app.entities.autosaveTick(SAVE_DIR, true, frameDt, AUTOSAVE_SECONDS);
             autosaveTimer += frameDt;
             if (autosaveTimer >= AUTOSAVE_SECONDS) {
                 autosaveTimer = 0.0;
                 world.saveAllModified();
-                app.entities.saveAllLoadedEntityChunks(SAVE_DIR, !demoRun);
                 savePlayer();
             }
         }
@@ -1244,10 +1250,16 @@ int main(int argc, char** argv) {
 
         for (const auto& up : app.entities.living()) {
             const LivingEntity& entity = *up;
+            glm::vec3 p = entity.renderPos(alpha);
+            // Persistent mobs accumulate world-wide; cull aggressively so the
+            // draw cost tracks what is actually on screen, not the population.
+            if (glm::distance(p, eye) > MOB_RENDER_DISTANCE) continue;
+            if (!frustum.intersectsAABB(p - glm::vec3(1.0f, 0.5f, 1.0f),
+                                        p + glm::vec3(1.0f, 2.5f, 1.0f)))
+                continue;
             std::string modelError;
             const ModelAsset* model = app.assets.model(entity.modelId, &modelError);
             if (!model) continue;
-            glm::vec3 p = entity.renderPos(alpha);
             int wx = int(std::floor(p.x));
             int wy = int(std::floor(p.y + entity.body.height * 0.5f));
             int wz = int(std::floor(p.z));
@@ -1260,6 +1272,7 @@ int main(int argc, char** argv) {
             modelRenderer.draw(*model, viewProj, livingEntityTransform(entity, *model, alpha),
                                light, flash);
         }
+        benchMark(7);
 
         // Translucent water pass: after all opaque geometry, blended, with
         // back faces kept so the surface is visible from underwater.
@@ -1271,7 +1284,7 @@ int main(int argc, char** argv) {
         world.drawWater(frustum, eye, originLoc);
         glEnable(GL_CULL_FACE);
         glDisable(GL_BLEND);
-        benchMark(7);
+        benchMark(8);
 
         if (hit.hit && app.survival && !app.invOpen && app.menu == Menu::None &&
             app.breakProgress.active && app.breakProgress.target == hit.block) {
@@ -1357,7 +1370,7 @@ int main(int argc, char** argv) {
         hud.end();
 
         glfwSwapBuffers(app.window);
-        benchMark(8);
+        benchMark(9);
 
         // Frame limiter: with vsync off, pace frames to fps_max (0 =
         // unlimited; vsync already paces when on). Sleep most of the wait,

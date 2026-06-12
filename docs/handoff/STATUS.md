@@ -68,6 +68,17 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   wandering mobs face their velocity.
 - Mobs flash red while hurtTicks > 0 (uFlash uniform in ModelRenderer,
   0.55 blend toward dark red).
+- Mob rendering is culled: skip beyond MOB_RENDER_DISTANCE (96, the spawn
+  ring's far edge) and outside the frustum. Persistent mobs accumulate
+  world-wide (~28% of explored chunks + natural spawns), so draw cost must
+  track what is on screen, not the population — uncull and a 16k-chunk world
+  pays ~11 ms/frame in mob draws.
+- Entity autosave trickles: Entities::autosaveTick saves a few chunk files
+  per frame (one full cycle per ~30 s, hard cap 8/frame) instead of the old
+  every-30-s burst of all loaded entity files, which stalled frames for
+  seconds on big worlds. Exit and chunk-unload still do full synchronous
+  saves. The F3 overlay shows live mob/item counts; --bench-secs has a
+  dedicated "mobs" section for the living draw pass.
 - Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
   → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
   Creative players, dead players, and demo runs are ignored (main passes a
@@ -114,8 +125,11 @@ pocket + torch, night spawn ring/footing/cap, zero day-surface spawns).
 Facing verified visually from two demo screenshots against the saved camera
 yaw (back at +Z walk, face at -X walk) and confirmed in user playtest. Hurt
 flash is shader-side; the uFlash=0 path screenshot-checked, the flash itself
-awaits playtest. Latest TSAN was not run (no new threading surface: entities,
-spawning, and saves remain main-thread-only).
+awaits playtest. Perf regression check ran in a scratch dir (`--bench-secs 10
+--time 0.7`, 16k chunks, ~4.5k persistent mobs): mob culling + trickle
+autosave took it from 33.5 avg fps / 6.5 s worst frame to 275 avg fps /
+9.5 ms worst frame. Latest TSAN was not run (no new threading surface:
+entities, spawning, and saves remain main-thread-only).
 
 ## Pointers
 
