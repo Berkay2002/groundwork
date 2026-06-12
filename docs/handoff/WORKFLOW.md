@@ -1,31 +1,24 @@
-# Working agreement with the user
+# Working Agreement
 
-The user supplied a full MVP + growth roadmap (Phases 1–6) at project start;
-`ROADMAP.md` is its distilled, living form.
+`ROADMAP.md` is the living product map. It is organized by playable state,
+promises, and future areas.
 
-## The batch loop
+## Work Loop
 
-1. Work is scoped as **batches** in `ROADMAP.md` (A–H done; I onward planned).
-2. The user **approves which batch to do** — ask before starting one, never
-   pick one up unsolicited. Within an approved batch, work autonomously;
-   don't ask permission for implementation details.
-3. A batch is finished when:
-   - the build is warning-free and `world_tests` passes,
-   - the feature is verified visually via a `--frames` screenshot run,
-   - `ROADMAP.md` is updated to mark the batch DONE and record what actually
-     landed,
-   - any per-batch plan/checklist is updated if one was created,
-   - `README.md` is updated (controls table, Settings, How-it-works),
-   - the user gets a screenshot via SendUserFile plus a summary that leads
-     with what was added and how it was verified.
-
-## Style and scope conventions
-
-- Game-first, not engine-first: build systems when this game needs them
-  (the user's "Practical Rule"). Resist speculative generality.
-- No new dependencies without strong reason; no asset files (everything
-  procedural/embedded); headless-testable logic stays GL-free.
-- Tests: extend `tests/test_world.cpp` with plain CHECK functions for logic
-  that can break silently (coordinate math, determinism, persistence,
-  meshing rules). No test framework.
-- Keep `docs/handoff/STATUS.md` current when finishing significant work.
+1. Start only user-approved work. The user may point at a roadmap area, a bug,
+   a goal doc, or a concrete feature request. Do not choose the next roadmap
+   area unsolicited.
+2. Before changing code, inspect the relevant files and decide the smallest
+   long-term-friendly scope that actually serves the requested feature.
+3. If the work is larger than a narrow fix, create or update a goal/plan under
+   `docs/goals/` and keep it current while working.
+4. Finish a work item by:
+   - making the build warning-free,
+   - passing `world_tests`,
+   - visually checking rendering changes with a `--frames` screenshot run,
+   - updating `ROADMAP.md` when the playable state or future roadmap changed,
+   - updating `README.md` when controls, settings, or user-facing behavior
+     changed,
+   - updating `docs/handoff/STATUS.md` when significant state or gotchas
+     changed,
+   - summarizing what changed and exactly what was verified.

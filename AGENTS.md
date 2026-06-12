@@ -4,11 +4,29 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Project
 
-Groundwork — a Minecraft-style voxel game in C++17/OpenGL 3.3, grown
-incrementally from an MVP. Work is organized in user-approved batches tracked
-in `ROADMAP.md`; session state, workflow, and hard-won gotchas live in
-`docs/handoff/`. Read
-`docs/handoff/STATUS.md` first when resuming work.
+Groundwork — a Minecraft-style voxel game in C++17/OpenGL 3.3, now past the
+MVP phase and growing toward a long-term game codebase. Work is organized in
+user-approved batches tracked in `ROADMAP.md`; session state, workflow, and
+hard-won gotchas live in `docs/handoff/`. Read `docs/handoff/STATUS.md` first
+when resuming work.
+
+## Product direction
+
+Do not optimize decisions for "early stage", "MVP", or throwaway demo code.
+When a feature is clearly part of the long-term game, make the first version
+the start of the real system. Keep changes reviewable and grounded in current
+gameplay needs, but do not hardcode one-off paths, special-case demos, or avoid
+the right foundation just because a smaller shortcut would pass today.
+
+Prefer scalable ownership boundaries for authored assets, living entities,
+structures, world selection, data-driven recipes, richer world generation, and
+future tools. This does not mean speculative engine work: build the foundation
+that the approved feature actually needs, document the tradeoff, and leave
+clean extension points where the next batch will naturally attach.
+
+If the right long-term path requires a dependency, runtime asset directory,
+manifest, loader, save-format extension, or data file, propose and implement it
+plainly rather than preserving an older constraint by forcing content into code.
 
 ## Commands
 
@@ -52,9 +70,26 @@ one test, comment out calls in its `main()` or just run the whole binary
 Linux dependencies are system packages only: `libglfw3-dev`, `libglm-dev`,
 OpenGL via Mesa (`GL_GLEXT_PROTOTYPES` + OpenGL::GL). Windows uses vcpkg
 packages `glfw3` and `glm`, MSVC, and the platform OpenGL library. There is no
-loader library dependency like GLAD/GLEW; `src/render/GLCompat.{h,cpp}` is the in-tree
-Windows OpenGL function loader. There are **zero asset files** — block textures
-and the HUD font are generated/embedded at startup. Keep that property.
+loader library dependency like GLAD/GLEW; `src/render/GLCompat.{h,cpp}` is the
+in-tree Windows OpenGL function loader.
+
+## Asset policy
+
+Voxel block textures, generated terrain materials, the HUD font, and core
+debug/test visuals are procedural or embedded by default. Keep that property
+for content that is naturally generated or table-driven.
+
+Authored content is allowed to use runtime asset files. Characters, mobs,
+player models, authored props, structure pieces, music, and future non-voxel
+art should use a real asset pipeline instead of being forced into procedural
+code. Prefer long-term-friendly, open formats; glTF/GLB is the default model
+direction for characters and animated assets unless a concrete reason overrides
+it. Keep licenses and source notes beside imported assets.
+
+Do not add hardcoded one-asset loaders or file paths when the feature is the
+beginning of a reusable asset system. Add the manifest, cache, loader, or
+renderer boundary the feature needs, then keep the implementation as small as
+that real boundary allows.
 
 ## Architecture
 
