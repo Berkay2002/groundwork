@@ -12,3 +12,6 @@ test_saves_tmp*/
 docs/goals/*
 !docs/goals/2026-06-11-survival-progression/
 !docs/goals/2026-06-11-survival-progression/**
+!docs/goals/2026-06-12-minecraft-inventory-ui/
+!docs/goals/2026-06-12-minecraft-inventory-ui/**
+tmp_shots
