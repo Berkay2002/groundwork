@@ -3,8 +3,8 @@
 ## Status
 
 - **Current phase:** Execute (Phase 5)
-- **Current milestone:** M1 (nine columns + save v4)
-- **Last checkpoint:** plan approved
+- **Current milestone:** M2 (panel layout geometry)
+- **Last checkpoint:** M1 reviewed and approved
 
 ## Log
 
@@ -48,6 +48,30 @@
   demo open-at-exact-position chain specified).
 - Re-review (Sonnet 4.6): APPROVED, all findings resolved, no regressions.
 
+### 2026-06-12 — M1/T1 DONE
+
+- 9-column inventory (`COLS` 9, `SLOTS` 36), `Block::Planks` 9th palette
+  entry, comments updated, tests updated (static_asserts + fill-all-36
+  overflow). Build warning-free, `all tests passed`. Commit `0307a56`.
+
+### 2026-06-12 — M1/T2 DONE
+
+- Player save v4 (36 slots), version acceptance {1,2,3,4}, v2/v3 read
+  paths pinned to literal 32 with r*8+c → r*9+c remap, fixtures pinned to
+  literal 32, v3→v4 + v4 round-trip + updated v2 tests. Build warning-free,
+  `all tests passed`. Commit `6245487`.
+
+### 2026-06-12 — M1 milestone review APPROVED
+
+- Fresh validation: build exit 0 warning-free, `all tests passed`.
+- Stage 1 spec compliance (Opus 4.8): APPROVED, zero findings; verified
+  literal-32 read paths/fixtures, r*9+c placement, col-8 coverage in the
+  v4 round-trip, no scope creep.
+- Stage 2 code quality (Opus 4.8): APPROVED; 2 Minor parked (below).
+
 ## Parked Minor issues
 
-- (none yet)
+- Q1 (M1): remap math `(i/8)*9 + i%8` duplicated in v2 and v3 load loops —
+  extract `remapSlot8to9(i)` helper in PlayerSave.h. (cleanup pass)
+- Q2 (M1): v2 migration test only populates row-0 source slots; add one
+  row>0 fixture for symmetry with the v3 test. (cleanup pass)
