@@ -35,6 +35,11 @@ struct HotbarView {
     const char* heldName = nullptr;  // label to show above the hotbar (null/"" = none)
 };
 
+// Classic-Minecraft panel style primitives. All operate on ui::Rect.
+void drawPanel(Hud& hud, const Rect& r);        // raised bevel, light-gray fill
+void drawBeveledSlot(Hud& hud, const Rect& r);  // inset bevel, medium-gray center
+void drawArrow(Hud& hud, const Rect& r);        // gray arrow pointing right
+
 void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
                    float brightness = 1.0f);
 void drawHotbar(Hud& hud, const HotbarView& view, int screenW, int screenH);

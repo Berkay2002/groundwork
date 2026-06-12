@@ -10,6 +10,59 @@
 
 namespace ui {
 
+// --- Classic-Minecraft panel style primitives -----------------------------
+
+// Raised bevel: outer dark border, near-white top+left highlight, dark-gray
+// bottom+right shadow, light-gray opaque fill.
+void drawPanel(Hud& hud, const Rect& r) {
+    const float b = 3.0f;   // bevel thickness
+    const float o = 1.0f;   // outer border thickness
+    // Outer dark border (reads against bright skies).
+    hud.drawRect(r.x, r.y, r.w, r.h, 0.13f, 0.13f, 0.13f, 1.0f);
+    float ix = r.x + o, iy = r.y + o, iw = r.w - 2 * o, ih = r.h - 2 * o;
+    // Light-gray fill.
+    hud.drawRect(ix, iy, iw, ih, 0.78f, 0.78f, 0.78f, 1.0f);
+    // Dark-gray bottom + right shadow.
+    hud.drawRect(ix, iy + ih - b, iw, b, 0.34f, 0.34f, 0.34f, 1.0f);
+    hud.drawRect(ix + iw - b, iy, b, ih, 0.34f, 0.34f, 0.34f, 1.0f);
+    // Near-white top + left highlight (drawn last so it owns the corner).
+    hud.drawRect(ix, iy, iw, b, 0.97f, 0.97f, 0.97f, 1.0f);
+    hud.drawRect(ix, iy, b, ih, 0.97f, 0.97f, 0.97f, 1.0f);
+}
+
+// Inset bevel: dark top+left, near-white bottom+right, medium-gray center.
+void drawBeveledSlot(Hud& hud, const Rect& r) {
+    const float b = 2.0f;
+    // Near-white bottom+right (full rect first).
+    hud.drawRect(r.x, r.y, r.w, r.h, 0.95f, 0.95f, 0.95f, 1.0f);
+    // Dark top+left.
+    hud.drawRect(r.x, r.y, r.w, b, 0.35f, 0.35f, 0.35f, 1.0f);
+    hud.drawRect(r.x, r.y, b, r.h, 0.35f, 0.35f, 0.35f, 1.0f);
+    // Medium-gray center.
+    hud.drawRect(r.x + b, r.y + b, r.w - 2 * b, r.h - 2 * b,
+                 0.55f, 0.55f, 0.55f, 1.0f);
+}
+
+// Medium-dark gray arrow pointing right: a shaft plus a stepped-rect head.
+void drawArrow(Hud& hud, const Rect& r) {
+    const float cr = 0.42f, cg = 0.42f, cb = 0.42f;
+    float headW = r.w * 0.45f;
+    float shaftW = r.w - headW;
+    float shaftH = r.h * 0.34f;
+    float sy = r.y + (r.h - shaftH) * 0.5f;
+    // Shaft.
+    hud.drawRect(r.x, sy, shaftW, shaftH, cr, cg, cb, 1.0f);
+    // Stepped head (3 rects narrowing toward the tip).
+    float hx = r.x + shaftW;
+    float step = headW / 3.0f;
+    for (int i = 0; i < 3; ++i) {
+        float frac = 1.0f - i / 3.0f;          // 1.0, 0.667, 0.333
+        float h = r.h * frac;
+        float y = r.y + (r.h - h) * 0.5f;
+        hud.drawRect(hx + i * step, y, step + 0.5f, h, cr, cg, cb, 1.0f);
+    }
+}
+
 void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
                    float brightness) {
     if (s.empty()) return;
@@ -27,7 +80,10 @@ void drawItemStack(Hud& hud, const ItemStack& s, float x, float y, float size,
         char cnt[4];
         std::snprintf(cnt, sizeof(cnt), "%d", s.count);
         float cw = std::strlen(cnt) * Hud::GLYPH * 1.5f;
-        hud.drawText(x + size - cw - 2.0f, y + size - 14.0f, 1.5f, cnt);
+        float tx = x + size - cw - 2.0f, ty = y + size - 14.0f;
+        // Subtle dark shadow keeps white count legible on light slot centers.
+        hud.drawText(tx + 1.0f, ty + 1.0f, 1.5f, cnt, 0.1f, 0.1f, 0.1f, 0.85f);
+        hud.drawText(tx, ty, 1.5f, cnt);
     }
 }
 
@@ -65,50 +121,82 @@ void drawInventoryScreen(Hud& hud, const InventoryView& view, int screenW,
                          int screenH) {
     hud.drawRect(0, 0, float(screenW), float(screenH), 0, 0, 0, 0.55f);
     ui::InventoryLayout L = ui::inventoryLayout(screenW, screenH);
-    hud.drawText(L.x0, L.y0 - 26.0f, 2.0f, "Inventory");
+    bool furnace = (view.screen == ScreenKind::Furnace);
+    ui::InventorySurface surf =
+        furnace ? ui::InventorySurface::Furnace : ui::InventorySurface::Crafting;
+    int craftSurface = furnace ? 0 : view.crafting.grid.width;
+
+    // Main panel.
+    drawPanel(hud, ui::panelRect(L, surf, craftSurface));
+    // Recipe-reference side panel (crafting surfaces only).
+    if (!furnace) drawPanel(hud, ui::recipePanelRect(L));
+
+    // Title text, top-left inside the panel, dark gray.
+    const char* title = furnace ? "Furnace"
+                       : (craftSurface >= 3 ? "Crafting" : "Inventory");
+    hud.drawText(L.panelX + L.margin, L.panelY + L.margin, 2.0f, title,
+                 0.25f, 0.25f, 0.25f, 1.0f);
+
+    // Main 3x9 inventory grid + hotbar row.
     for (int i = 0; i < Inventory::SLOTS; ++i) {
         ui::Rect r = ui::inventorySlotRect(L, i);
-        hud.drawRect(r.x, r.y, r.w, r.h, 0.15f, 0.15f, 0.15f, 0.9f);
+        drawBeveledSlot(hud, r);
         drawItemStack(hud, view.inv.slots[i], r.x + L.pad, r.y + L.pad,
                       L.slot - 2 * L.pad);
     }
-    if (view.screen == ScreenKind::Furnace) {
+
+    if (furnace) {
         FurnaceState* f = view.furnace;
         for (ui::FurnaceSlot slot : {ui::FurnaceSlot::Input, ui::FurnaceSlot::Fuel,
                                      ui::FurnaceSlot::Output}) {
             ui::Rect r = ui::furnaceSlotRect(L, slot);
-            hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
+            drawBeveledSlot(hud, r);
             if (f) drawItemStack(hud, ui::furnaceSlotRef(*f, slot),
                                  r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
         }
+        // Arrow from input toward the output slot.
+        drawArrow(hud, ui::arrowRect(L, surf, 0));
+        // Flame indicator beside the fuel slot.
         if (f && f->burnTicksRemaining > 0)
             hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).x + L.slot + 10.0f,
                          ui::furnaceSlotRect(L, ui::FurnaceSlot::Fuel).y + 8.0f,
-                         8.0f, 34.0f, 0.95f, 0.45f, 0.12f, 0.9f);
-        if (f && f->cookTicks > 0)
-            hud.drawRect(ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).x - 42.0f,
-                         ui::furnaceSlotRect(L, ui::FurnaceSlot::Output).y + 24.0f,
-                         34.0f * (float(f->cookTicks) / 200.0f), 8.0f,
-                         0.8f, 0.8f, 0.8f, 0.9f);
+                         8.0f, 34.0f, 0.95f, 0.45f, 0.12f, 1.0f);
+        // Cook-progress bar below the arrow.
+        if (f && f->cookTicks > 0) {
+            ui::Rect a = ui::arrowRect(L, surf, 0);
+            hud.drawRect(a.x, a.y + a.h + 4.0f,
+                         a.w * (float(f->cookTicks) / 200.0f), 6.0f,
+                         0.9f, 0.9f, 0.4f, 1.0f);
+        }
     } else {
-        int surface = view.crafting.grid.width;
+        int surface = craftSurface;
         for (int y = 0; y < surface; ++y)
             for (int x = 0; x < surface; ++x) {
                 ui::Rect r = ui::craftSlotRect(L, surface, x, y);
-                hud.drawRect(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.16f, 0.92f);
+                drawBeveledSlot(hud, r);
                 drawItemStack(hud, view.crafting.grid.at(x, y),
                               r.x + L.pad, r.y + L.pad, L.slot - 2 * L.pad);
             }
+        // Arrow from the craft grid toward the output slot.
+        drawArrow(hud, ui::arrowRect(L, surf, surface));
         ui::Rect out = ui::craftOutputRect(L, surface);
-        hud.drawRect(out.x, out.y, out.w, out.h, 0.22f, 0.22f, 0.16f, 0.92f);
+        drawBeveledSlot(hud, out);
         drawItemStack(hud, crafting::craftingOutput(view.crafting.grid),
                       out.x + L.pad, out.y + L.pad, L.slot - 2 * L.pad);
         std::vector<ItemStack> recipes = ui::recipeReferenceOutputs();
         for (size_t i = 0; i < recipes.size(); ++i) {
             ui::Rect r = ui::recipeReferenceSlotRect(L, int(i));
-            hud.drawRect(r.x, r.y, r.w, r.h, 0.12f, 0.12f, 0.12f, 0.75f);
+            drawBeveledSlot(hud, r);
             drawItemStack(hud, recipes[i], r.x + 3.0f, r.y + 3.0f, 24.0f, 0.9f);
         }
+    }
+
+    // Dark inset player-preview box (inventory screen only).
+    if (view.screen == ScreenKind::Inventory) {
+        ui::Rect box = ui::playerBoxRect(L);
+        drawBeveledSlot(hud, box);  // bevel frame
+        hud.drawRect(box.x + 2.0f, box.y + 2.0f, box.w - 4.0f, box.h - 4.0f,
+                     0.05f, 0.05f, 0.05f, 1.0f);
     }
     if (!view.cursorStack.empty()) { // stack riding the mouse
         drawItemStack(hud, view.cursorStack, view.mouseX - 20, view.mouseY - 20, 40);
