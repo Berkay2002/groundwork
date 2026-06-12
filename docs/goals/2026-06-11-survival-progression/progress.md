@@ -2,12 +2,12 @@
 
 ## STATUS
 
-- Current: Final whole-implementation review
-- Last verified: M4 code-quality re-review approved after fixes
-  (`cmake --build build -j` exit 0, warning-free/no work;
-  `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: Final verification
+- Last verified: Final whole-implementation review approved
+  (`cmake --build build -j` and `.\build\world_tests.exe` passed in review,
+  2026-06-11)
 - Blockers: none
-- Minor issues parked: 8
+- Minor issues parked: 7
 
 ## Log
 
@@ -208,3 +208,13 @@
   M4-REV-001 resolved; no fix-induced regressions found. The reviewer also
   reran `git diff --check 82dd6ec..f9b7e61`, `.\build\world_tests.exe`, and
   `cmake --build build -j`; all passed. M4 milestone gate cleared.
+- [2026-06-11] Final whole-implementation review: APPROVED. No Critical or
+  Important findings. The reviewer walked every spec section and integration
+  area across the full Batch I diff and found the implementation satisfies the
+  spec. Parked minor issues for future cleanup: remove legacy `BlockDef::drop`
+  duplication; derive block-item reverse mapping from one canonical source;
+  centralize item entity stack splitting/normalization; make `recipeAt()`
+  expose out-of-range caller bugs; add a checked World-level furnace-open
+  accessor; restore prior GL blend function in `BreakOverlay::draw()`; split
+  inventory/crafting/furnace drawing and interaction state out of `main.cpp`
+  before adding more UI surfaces.
