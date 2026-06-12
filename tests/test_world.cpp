@@ -2240,6 +2240,106 @@ static void testEntitySaveDisabledDoesNotTouchDisk() {
     std::filesystem::remove_all(dir);
 }
 
+static void testEntityStreamQuitLoad() {
+    const char* dir = "test_ent_stream_quit_load";
+    std::filesystem::remove_all(dir);
+    {
+        World w(1337, dir);
+        Entities ents;
+        w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+        ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+        CHECK(ents.items().empty()); // old world with no entity files
+        ents.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                       makeItemStack(ItemId::Coal, 4));
+        ents.items()[0]->ageTicks = 77;
+        ents.saveAllLoadedEntityChunks(dir, true);
+    }
+    {
+        World w(1337, dir);
+        Entities ents;
+        w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+        ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+        CHECK(ents.items().size() == 1);
+        CHECK(ents.items()[0]->stack.item == ItemId::Coal);
+        CHECK(ents.items()[0]->stack.count == 4);
+        CHECK(ents.items()[0]->ageTicks == 77);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntityStreamUnloadLoadAndNoAging() {
+    const char* dir = "test_ent_stream_unload_load";
+    std::filesystem::remove_all(dir);
+    World w(1337, dir);
+    Entities ents;
+    glm::vec3 origin(0.5f, 50.0f, 0.5f);
+    glm::vec3 farPos(1000.0f, 40.0f, 1000.0f);
+
+    w.waitUntilLoaded(origin, 1, 10000);
+    ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+    ents.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::DirtBlock, 1));
+    ents.items()[0]->ageTicks = DESPAWN_TICKS - 2;
+
+    w.update(farPos, 2);
+    ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+    CHECK(ents.items().empty());
+    ChunkKey originChunk{0, 0};
+    CHECK(std::filesystem::exists(entityChunkPath(dir, originChunk)));
+
+    for (int i = 0; i < 100; ++i)
+        ents.tick(w, farPos, nullptr, 0.05f);
+    CHECK(ents.items().empty());
+
+    w.waitUntilLoaded(origin, 1, 10000);
+    ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+    CHECK(ents.items().size() == 1);
+    CHECK(ents.items()[0]->ageTicks == DESPAWN_TICKS - 2);
+    ents.tick(w, farPos, nullptr, 0.05f);
+    CHECK(ents.items().size() == 1);
+    ents.tick(w, farPos, nullptr, 0.05f);
+    CHECK(ents.items().empty());
+
+    std::filesystem::remove_all(dir);
+}
+
+static void testEntityStreamCrossingAutosaveAndDemoIsolation() {
+    const char* dir = "test_ent_stream_crossing";
+    std::filesystem::remove_all(dir);
+    World w(1337, dir);
+    Entities ents;
+    w.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 2, 10000);
+    ents.applyStreamEvents(dir, w.consumeStreamEvents(), true);
+
+    ents.spawnItem(glm::vec3(17.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::Coal, 2));
+    ents.saveAllLoadedEntityChunks(dir, true);
+    CHECK(ents.items().size() == 1); // autosave does not unload runtime items
+    ChunkKey chunk0{0, 0}, chunk1{1, 0};
+    CHECK(!std::filesystem::exists(entityChunkPath(dir, chunk0)));
+    std::vector<SavedDroppedItem> loaded;
+    CHECK(loadEntityChunkFile(entityChunkPath(dir, chunk1), chunk1, loaded) ==
+          EntityChunkLoadStatus::Loaded);
+    CHECK(loaded.size() == 1);
+    CHECK(loaded[0].stack.item == ItemId::Coal && loaded[0].stack.count == 2);
+
+    const char* demoDir = "test_ent_stream_demo";
+    std::filesystem::remove_all(demoDir);
+    World demoWorld(1337, demoDir, true);
+    Entities demoEnts;
+    demoWorld.waitUntilLoaded(glm::vec3(0.5f, 50.0f, 0.5f), 1, 10000);
+    demoEnts.applyStreamEvents(demoDir, demoWorld.consumeStreamEvents(), false);
+    demoEnts.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                       makeItemStack(ItemId::Coal, 1));
+    demoWorld.update(glm::vec3(1000.0f, 40.0f, 1000.0f), 2);
+    demoEnts.applyStreamEvents(demoDir, demoWorld.consumeStreamEvents(), false);
+    CHECK(demoEnts.items().empty());
+    CHECK(!std::filesystem::exists(std::filesystem::path(demoDir) / "entities"));
+
+    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(demoDir);
+}
+
 static void testNonBlockItemIconMapping() {
     for (int i = 1; i < ITEM_TYPES; ++i) {
         ItemId id = ItemId(i);
@@ -3228,6 +3328,9 @@ int main() {
     testItemAgeTicksAndDespawn();
     testEntityChunkLifecycleApis();
     testEntitySaveDisabledDoesNotTouchDisk();
+    testEntityStreamQuitLoad();
+    testEntityStreamUnloadLoadAndNoAging();
+    testEntityStreamCrossingAutosaveAndDemoIsolation();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();

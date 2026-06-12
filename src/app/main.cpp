@@ -766,6 +766,7 @@ int main(int argc, char** argv) {
     world.waitUntilLoaded(app.player.pos(), 2, 10000);
     if (!restored) app.player.spawn(world);
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
+    app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun);
 
     if (demoItems) { // a small row of drops in front of the viewpoint
         glm::vec3 base = app.player.eyePos() + app.player.lookDir() * 3.0f;
@@ -958,6 +959,7 @@ int main(int argc, char** argv) {
         const float alpha = tickClock.alpha();
         benchMark(1);
         world.update(app.player.pos(), settings.renderDistance);
+        app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun);
         benchMark(2);
 
         // Camera for this frame, computed early: mesh uploads prioritize
@@ -985,6 +987,7 @@ int main(int argc, char** argv) {
             if (autosaveTimer >= AUTOSAVE_SECONDS) {
                 autosaveTimer = 0.0;
                 world.saveAllModified();
+                app.entities.saveAllLoadedEntityChunks(SAVE_DIR, !demoRun);
                 savePlayer();
             }
         }
@@ -1250,6 +1253,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    app.entities.saveAllLoadedEntityChunks(SAVE_DIR, !demoRun);
     if (!demoRun) {
         world.saveAllModified();
         savePlayer();

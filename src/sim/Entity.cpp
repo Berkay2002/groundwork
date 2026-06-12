@@ -208,6 +208,15 @@ void Entities::saveAllLoadedEntityChunks(const std::string& saveDir,
         saveLoadedChunkEntities(saveDir, key, true);
 }
 
+void Entities::applyStreamEvents(const std::string& saveDir,
+                                 const ChunkStreamEvents& events,
+                                 bool saveEnabled) {
+    for (ChunkKey key : events.loaded)
+        loadChunkEntities(saveDir, key);
+    for (ChunkKey key : events.unloaded)
+        saveAndUnloadChunkEntities(saveDir, key, saveEnabled);
+}
+
 std::vector<ItemEntity*> Entities::itemsNear(const glm::vec3& pos, float radius) const {
     std::vector<ItemEntity*> out;
     int cx0 = World::floorDiv((int)std::floor(pos.x - radius), CHUNK_SIZE);

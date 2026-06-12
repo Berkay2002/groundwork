@@ -50,6 +50,9 @@ public:
     void saveAndUnloadChunkEntities(const std::string& saveDir, ChunkKey key,
                                     bool saveEnabled);
     void saveAllLoadedEntityChunks(const std::string& saveDir, bool saveEnabled);
+    void applyStreamEvents(const std::string& saveDir,
+                           const ChunkStreamEvents& events,
+                           bool saveEnabled);
 
     const std::vector<std::unique_ptr<ItemEntity>>& items() const { return items_; }
     // Bucket-accelerated proximity query (used by tests now, mobs later).
