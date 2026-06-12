@@ -15,14 +15,19 @@ User-requested reopen of `docs/goals/2026-06-11-survival-progression`
   was upside down and is fixed.
 - **Blocks**: crafting table uses the papercraft look (waffle top,
   strap+tools side). The furnace front (vent + firebox) now actually
-  renders — on all four side faces, since there is no facing metadata.
-  **`Block::FurnaceLit` (id 17, appended)** is the burning furnace:
-  emission 13, fire pixels in the firebox; `World::tickBlockEntities`
-  syncs lit/unlit to `burnTicksRemaining`, and the Furnace<->FurnaceLit
-  `setBlock` swap keeps the block entity (`isFurnaceBlock` guards all
-  furnace interaction/break sites). Cobblestone is staggered; ores have
-  blob edge shading; the crack overlay is quantized pixel cracks +
-  per-stage crumble speckles.
+  renders, **one-sided**: facing is baked into appended block ids
+  (`Furnace`=+Z front, `FurnacePX/NX/NZ`, plus lit variants
+  `FurnaceLit`/`FurnaceLitPX/NX/NZ`, ids 17-23, emission 13 when lit).
+  Placement picks the variant whose front faces the player
+  (`furnaceFacing`); `World::tickBlockEntities` syncs lit/unlit
+  preserving facing (`furnaceLitVariant`/`furnaceUnlitVariant`), and any
+  furnace<->furnace `setBlock` swap keeps the block entity
+  (`isFurnaceBlock` guards all furnace interaction/break sites).
+  Cobblestone is staggered; ores have blob edge shading; the crack
+  overlay is quantized pixel cracks + per-stage crumble speckles.
+- **Dropped items**: block cubes keep spinning, but flat sprite items
+  billboard toward the camera with a slight tilt (`ItemRenderer::draw`
+  takes the eye position) — a spinning flat quad vanishes edge-on.
 - **Held items**: `ItemRenderer::drawHeld` is a depth-cleared viewmodel
   pass after all world passes (main.cpp binds the block texture array
   first — the crack pass leaves its own array bound on unit 0). Block

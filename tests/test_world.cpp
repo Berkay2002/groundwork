@@ -35,7 +35,7 @@ static int failures = 0;
 } while (0)
 
 static_assert(ITEM_TYPES == 34, "ItemId is saved data; append ids only");
-static_assert(BLOCK_TYPES == 18, "Block ids are saved data; append ids only");
+static_assert(BLOCK_TYPES == 24, "Block ids are saved data; append ids only");
 
 static void testFloorDivMod() {
     CHECK(World::floorDiv(17, 16) == 1);
@@ -1416,9 +1416,22 @@ static void testWorldOwnsFurnaceState() {
 
 static void testFurnaceLitBlockSync() {
     CHECK(itemForBlock(Block::FurnaceLit) == ItemId::FurnaceBlock);
+    CHECK(itemForBlock(Block::FurnaceLitNX) == ItemId::FurnaceBlock);
     CHECK(blockDef(Block::FurnaceLit).emission == 13);
     CHECK(isFurnaceBlock(Block::Furnace) && isFurnaceBlock(Block::FurnaceLit));
+    CHECK(isFurnaceBlock(Block::FurnacePX) && isFurnaceBlock(Block::FurnaceLitNZ));
     CHECK(!isFurnaceBlock(Block::Stone));
+    // Lit/unlit maps preserve facing; facing picks the face toward the player.
+    CHECK(furnaceLitVariant(Block::FurnaceNX) == Block::FurnaceLitNX);
+    CHECK(furnaceUnlitVariant(Block::FurnaceLitNZ) == Block::FurnaceNZ);
+    CHECK(furnaceFacing(2.0f, 0.5f) == Block::FurnacePX);
+    CHECK(furnaceFacing(-2.0f, 0.5f) == Block::FurnaceNX);
+    CHECK(furnaceFacing(0.5f, 2.0f) == Block::Furnace);
+    CHECK(furnaceFacing(0.5f, -2.0f) == Block::FurnaceNZ);
+    // One-sided front: exactly one side face carries the front tile.
+    CHECK(tileFor(Block::FurnacePX, 0) == int(TileId::FurnaceFront));
+    CHECK(tileFor(Block::FurnacePX, 4) == int(TileId::FurnaceSide));
+    CHECK(tileFor(Block::FurnaceLitNZ, 5) == int(TileId::FurnaceFrontLit));
     CHECK(mining::miningDrop(Block::FurnaceLit,
                              mining::miningToolForStack(makeToolStack(ItemId::WoodPickaxe))).item
           == ItemId::FurnaceBlock);

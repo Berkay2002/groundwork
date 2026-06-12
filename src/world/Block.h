@@ -21,9 +21,18 @@ enum class Block : uint8_t {
     CraftingTable = 14,
     Furnace = 15,
     DiamondOre = 16,
-    FurnaceLit = 17, // burning furnace: same block entity, glows + fire front
+    // Furnace facing is baked into the block id (no metadata bytes in chunk
+    // saves): the base Furnace/FurnaceLit ids face +Z, the variants below
+    // cover the other three horizontal faces. Lit ids glow + show fire.
+    FurnaceLit = 17,
+    FurnacePX = 18,
+    FurnaceNX = 19,
+    FurnaceNZ = 20,
+    FurnaceLitPX = 21,
+    FurnaceLitNX = 22,
+    FurnaceLitNZ = 23,
 };
-constexpr int BLOCK_TYPES = 18;
+constexpr int BLOCK_TYPES = 24;
 
 // Texture tile identity. The numeric value is the texture-array layer and the
 // column in the HUD's horizontal strip atlas — a renderer/content ID with no
@@ -138,6 +147,18 @@ constexpr BlockDef sideTopBot(const char* name, bool solid, bool collid,
             tool, tier, dropItem, dropCount, wrongDropItem, wrongDropCount,
             {side, side, top, bot, side, side}};
 }
+// Furnace row: the front tile sits on exactly one horizontal face
+// (mesher face order: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z).
+constexpr BlockDef furnace(uint8_t em, TileId front, int frontFace) {
+    return {"Furnace", true, true, true, false, em, 3.5f, Block::Air,
+            SoundMat::Stone, ToolClass::Pickaxe, ToolTier::Wood,
+            ItemId::FurnaceBlock, 1, ItemId::None, 0,
+            {frontFace == 0 ? front : TileId::FurnaceSide,
+             frontFace == 1 ? front : TileId::FurnaceSide,
+             TileId::FurnaceSide, TileId::FurnaceSide,
+             frontFace == 4 ? front : TileId::FurnaceSide,
+             frontFace == 5 ? front : TileId::FurnaceSide}};
+}
 }
 
 // Indexed by enum value — rows are append-only, like the enum.
@@ -158,17 +179,52 @@ constexpr BlockDef BLOCK_DEFS[BLOCK_TYPES] = {
     /* 12 */ tiledef::same("Cobblestone",    true,  true,  true,  false, 0,  2.0f,        Block::Cobblestone, SoundMat::Stone, TileId::Cobblestone, ToolClass::Pickaxe, ToolTier::Wood, ItemId::CobblestoneBlock, 1),
     /* 13 */ tiledef::same("Planks",         true,  true,  true,  false, 0,  2.0f,        Block::Planks,      SoundMat::Wood,  TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::PlanksBlock, 1, ItemId::PlanksBlock, 1),
     /* 14 */ tiledef::sideTopBot("Crafting Table", true, true, true, false, 0, 2.5f,      Block::CraftingTable, SoundMat::Wood, TileId::CraftingTableSide, TileId::CraftingTableTop, TileId::Planks, ToolClass::Axe, ToolTier::Hand, ItemId::CraftingTableBlock, 1, ItemId::CraftingTableBlock, 1),
-    // The furnace has no facing metadata, so the front (mouth) shows on all
-    // four side faces; top/bottom use the plain side tile.
-    /* 15 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 0,  3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceFront, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
+    /* 15 */ tiledef::furnace(0,  TileId::FurnaceFront,    4),
     /* 16 */ tiledef::same("Diamond Ore",    true,  true,  true,  false, 0,  3.0f,        Block::Air,         SoundMat::Stone, TileId::DiamondOre, ToolClass::Pickaxe, ToolTier::Iron, ItemId::Diamond, 1),
-    /* 17 */ tiledef::sideTopBot("Furnace",  true,  true,  true,  false, 13, 3.5f,        Block::Air,         SoundMat::Stone, TileId::FurnaceFrontLit, TileId::FurnaceSide, TileId::FurnaceSide, ToolClass::Pickaxe, ToolTier::Wood, ItemId::FurnaceBlock, 1),
+    /* 17 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 4),
+    /* 18 */ tiledef::furnace(0,  TileId::FurnaceFront,    0),
+    /* 19 */ tiledef::furnace(0,  TileId::FurnaceFront,    1),
+    /* 20 */ tiledef::furnace(0,  TileId::FurnaceFront,    5),
+    /* 21 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 0),
+    /* 22 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 1),
+    /* 23 */ tiledef::furnace(13, TileId::FurnaceFrontLit, 5),
 };
 
-// Furnace lit/unlit are one logical block (shared block entity, same drops);
-// gameplay code that targets "a furnace" must accept both.
+// All furnace facings/lit states are one logical block (shared block
+// entity, same drops); gameplay code that targets "a furnace" must accept
+// every variant. The lit/unlit maps preserve facing.
 inline bool isFurnaceBlock(Block b) {
-    return b == Block::Furnace || b == Block::FurnaceLit;
+    switch (b) {
+        case Block::Furnace: case Block::FurnaceLit:
+        case Block::FurnacePX: case Block::FurnaceNX: case Block::FurnaceNZ:
+        case Block::FurnaceLitPX: case Block::FurnaceLitNX: case Block::FurnaceLitNZ:
+            return true;
+        default: return false;
+    }
+}
+inline Block furnaceLitVariant(Block b) {
+    switch (b) {
+        case Block::Furnace: return Block::FurnaceLit;
+        case Block::FurnacePX: return Block::FurnaceLitPX;
+        case Block::FurnaceNX: return Block::FurnaceLitNX;
+        case Block::FurnaceNZ: return Block::FurnaceLitNZ;
+        default: return b;
+    }
+}
+inline Block furnaceUnlitVariant(Block b) {
+    switch (b) {
+        case Block::FurnaceLit: return Block::Furnace;
+        case Block::FurnaceLitPX: return Block::FurnacePX;
+        case Block::FurnaceLitNX: return Block::FurnaceNX;
+        case Block::FurnaceLitNZ: return Block::FurnaceNZ;
+        default: return b;
+    }
+}
+// Facing variant whose front looks at the player standing at (dx, dz)
+// relative to the block center.
+inline Block furnaceFacing(float dx, float dz) {
+    if (dx * dx > dz * dz) return dx > 0 ? Block::FurnacePX : Block::FurnaceNX;
+    return dz > 0 ? Block::Furnace : Block::FurnaceNZ;
 }
 
 inline const BlockDef& blockDef(Block b) { return BLOCK_DEFS[uint8_t(b)]; }

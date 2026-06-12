@@ -257,3 +257,19 @@
   `all tests passed` (new testFurnaceLitBlockSync; BLOCK_TYPES tripwire
   bumped 17 -> 18 for the appended id); ctest 2/2 (golden skipped on
   Windows, regeneration parked for Linux); demo screenshots inspected.
+- [2026-06-12] M5 user-feedback iterations (interactive):
+  - Pickaxe sprite: handle now connects to the head (the gap read as
+    "disconnected" at viewmodel scale).
+  - Held pose: rolled 90 deg with the handle off the bottom-right corner;
+    yaw -65 deg so the sprite plane recedes (handle near the player, head
+    angled out into the world per the user's top-down sketch).
+  - Furnace is one-sided: facing baked into appended block ids 18-23
+    (PX/NX/NZ unlit + lit; base ids face +Z), placement faces the player,
+    lit/unlit sync preserves facing. BLOCK_TYPES tripwire 18 -> 24; new
+    facing/variant/tile assertions in testFurnaceLitBlockSync.
+  - Dropped flat items billboard toward the camera (no edge-on vanish);
+    block cubes still spin.
+  Validation: warning-free rebuild; `world_tests.exe` `all tests passed`;
+  `--demo-survival` and `--demo-items` screenshots re-inspected
+  (one-sided lit front, camera-facing drops). Screenshot evidence kept in
+  `tmp_shots/` at the user's request.

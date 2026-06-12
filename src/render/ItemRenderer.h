@@ -17,9 +17,12 @@ public:
     ItemRenderer(const ItemRenderer&) = delete;
     ItemRenderer& operator=(const ItemRenderer&) = delete;
 
-    // sunLevel: day/night scale applied to the sun light channel.
+    // sunLevel: day/night scale applied to the sun light channel. eye is
+    // the camera position: block-item cubes spin, but flat sprite items
+    // billboard toward the camera (an edge-on flat quad disappears).
     void draw(const World& world, const Entities& entities,
-              const glm::mat4& viewProj, float alpha, float time, float sunLevel);
+              const glm::mat4& viewProj, const glm::vec3& eye, float alpha,
+              float time, float sunLevel);
 
     // First-person viewmodel, drawn after all world passes and before the
     // HUD (it clears the depth buffer so the item never clips into walls).

@@ -118,8 +118,8 @@ ItemRenderer::~ItemRenderer() {
 }
 
 void ItemRenderer::draw(const World& world, const Entities& entities,
-                        const glm::mat4& viewProj, float alpha, float time,
-                        float sunLevel) {
+                        const glm::mat4& viewProj, const glm::vec3& eye,
+                        float alpha, float time, float sunLevel) {
     if (entities.items().empty()) return;
     shader_.use();
     glDisable(GL_CULL_FACE);
@@ -129,8 +129,16 @@ void ItemRenderer::draw(const World& world, const Entities& entities,
         float phase = float(e.spinSeed % 628u) * 0.01f;
         float bob = 0.06f + 0.05f * std::sin(time * 2.0f + phase);
         glm::mat4 m = glm::translate(glm::mat4(1.0f), p + glm::vec3(0, bob, 0));
-        m = glm::rotate(m, time * 1.5f + phase, glm::vec3(0, 1, 0));
         bool cube = itemUsesBlockCube(e.stack.item);
+        if (cube) {
+            m = glm::rotate(m, time * 1.5f + phase, glm::vec3(0, 1, 0));
+        } else {
+            // Flat sprites never spin edge-on: face the camera (Minecraft
+            // dropped-item feel), with a slight fixed tilt for depth.
+            m = glm::rotate(m, std::atan2(eye.x - p.x, eye.z - p.z),
+                            glm::vec3(0, 1, 0));
+            m = glm::rotate(m, glm::radians(-12.0f), glm::vec3(1, 0, 0));
+        }
         m = glm::scale(m, glm::vec3(cube ? 0.25f : 0.32f));
         glm::mat4 mvp = viewProj * m;
         glUniformMatrix4fv(locMVP_, 1, GL_FALSE, glm::value_ptr(mvp));

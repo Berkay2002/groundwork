@@ -547,7 +547,8 @@ void World::tickBlockEntities() {
     for (const auto& [pos, f] : blockEntities_.furnaces()) {
         Block cur = getBlock(pos.x, pos.y, pos.z);
         if (!isFurnaceBlock(cur)) continue;
-        Block want = f.burnTicksRemaining > 0 ? Block::FurnaceLit : Block::Furnace;
+        Block want = f.burnTicksRemaining > 0 ? furnaceLitVariant(cur)
+                                              : furnaceUnlitVariant(cur);
         if (cur != want) setBlock(pos.x, pos.y, pos.z, want);
     }
 }

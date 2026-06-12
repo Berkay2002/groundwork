@@ -885,7 +885,9 @@ int main(int argc, char** argv) {
         world.setBlock(target.x, target.y, target.z, Block::DiamondOre);
         if (demoSurvival) {
             world.setBlock(target.x - 2, target.y, target.z, Block::CraftingTable);
-            world.setBlock(target.x + 2, target.y, target.z, Block::Furnace);
+            world.setBlock(target.x + 2, target.y, target.z,
+                           furnaceFacing(app.player.pos().x - (float(target.x + 2) + 0.5f),
+                                         app.player.pos().z - (float(target.z) + 0.5f)));
             // Stage the furnace burning so the lit front/glow is visible.
             world.getOrCreateFurnace({target.x + 2, target.y, target.z})
                 .burnTicksRemaining = 1 << 20;
@@ -1052,6 +1054,9 @@ int main(int argc, char** argv) {
         if (app.placePressed && hit.hit) {
             glm::ivec3 p = hit.adjacent;
             Block held = heldBlock();
+            if (held == Block::Furnace) // front faces whoever placed it
+                held = furnaceFacing(app.player.pos().x - (float(p.x) + 0.5f),
+                                     app.player.pos().z - (float(p.z) + 0.5f));
             if (held != Block::Air &&
                 !isSolid(world.getBlock(p.x, p.y, p.z)) && !app.player.intersectsBlock(p)) {
                 if (!app.survival || app.inv.consumeOne(app.hotbarSlot)) {
@@ -1093,7 +1098,8 @@ int main(int argc, char** argv) {
         // Item entities: after opaque (normal depth test), before water so
         // submerged drops blend correctly under the surface.
         const double renderGameTime = gameTime + alpha * TickClock::TICK_DT;
-        itemRenderer.draw(world, app.entities, viewProj, alpha, float(renderGameTime), sunLevel);
+        itemRenderer.draw(world, app.entities, viewProj, eye, alpha,
+                          float(renderGameTime), sunLevel);
         benchMark(6);
 
         // Translucent water pass: after all opaque geometry, blended, with
