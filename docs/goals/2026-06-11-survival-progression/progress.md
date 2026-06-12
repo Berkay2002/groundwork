@@ -2,9 +2,10 @@
 
 ## STATUS
 
-- Current: M4 code-quality re-review
-- Last verified: M4 code-quality fix applied (`cmake --build build -j` exit 0,
-  warning-free; `.\build\world_tests.exe` -> `all tests passed`, 2026-06-11)
+- Current: M4 code-quality re-review round 3
+- Last verified: M4 code-quality fix round 2 applied (`cmake --build build -j`
+  exit 0, warning-free; `.\build\world_tests.exe` -> `all tests passed`,
+  2026-06-11)
 - Blockers: none
 - Minor issues parked: 8
 
@@ -194,3 +195,12 @@
   `BreakOverlay::draw()` does not restore the previous blend function; the
   inventory/crafting/furnace drawing in `main.cpp` should be decomposed before
   more UI screens are added.
+- [2026-06-11] M4 code-quality re-review round 2: REJECTED. M4-REV-001 was
+  only partially resolved because a full inventory plus transient cursor/grid
+  stack still wrote a lossy `player.bin` after printing a warning. Fixed by
+  making `savePlayer()` fail closed: if transient stacks cannot fit in the
+  save snapshot, it skips writing `player.bin` so the last non-lossy player
+  save remains intact. Added a regression test proving a failed transient
+  snapshot does not overwrite an existing player save. Validation rerun:
+  `cmake --build build -j` exit 0 warning-free; `.\build\world_tests.exe`
+  exit 0 and printed `all tests passed`.

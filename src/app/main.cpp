@@ -511,8 +511,10 @@ void savePlayer() {
     s.flying = app.player.flying;
     s.hotbarSlot = uint8_t(app.hotbarSlot);
     s.inv = app.inv;
-    if (!ui::addTransientStacksForSave(s.inv, app.cursorStack, app.crafting.grid))
-        std::fprintf(stderr, "warning: failed to fit transient inventory stacks in player save\n");
+    if (!ui::addTransientStacksForSave(s.inv, app.cursorStack, app.crafting.grid)) {
+        std::fprintf(stderr, "warning: skipped player save; transient inventory stacks do not fit\n");
+        return;
+    }
     if (!savePlayerFile(playerPath(), s))
         std::fprintf(stderr, "warning: failed to save player data\n");
 }

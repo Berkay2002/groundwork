@@ -2192,6 +2192,26 @@ static void testMenuUiTransientSaveSnapshot() {
     CHECK(!ui::addTransientStacksForSave(fullInv, makeItemStack(ItemId::Coal, 1), empty));
 }
 
+static void testPlayerSaveSkipsLossyTransientSnapshot() {
+    std::filesystem::create_directories("test_psave_lossless");
+    std::string path = "test_psave_lossless/player.bin";
+    PlayerState saved;
+    saved.inv.slots[0] = makeItemStack(ItemId::Coal, 7);
+    CHECK(savePlayerFile(path, saved));
+
+    PlayerState lossy;
+    for (int i = 0; i < Inventory::SLOTS; ++i)
+        lossy.inv.slots[i] = makeItemStack(ItemId::StoneBlock, 64);
+    crafting::CraftingGrid empty = grid(2);
+    bool canFit = ui::addTransientStacksForSave(lossy.inv, makeItemStack(ItemId::Coal, 1), empty);
+    if (canFit) CHECK(savePlayerFile(path, lossy));
+
+    PlayerState loaded;
+    CHECK(loadPlayerFile(path, loaded));
+    CHECK(loaded.inv.slots[0].item == ItemId::Coal && loaded.inv.slots[0].count == 7);
+    std::filesystem::remove_all("test_psave_lossless");
+}
+
 static void testMenuUiRecipeReferenceEnumeratesCraftingTable() {
     std::vector<ItemStack> outputs = ui::recipeReferenceOutputs();
     bool sawPick = false, sawFurnace = false, sawTorch = false;
@@ -2316,6 +2336,7 @@ int main() {
     testMenuUiSurfaceHitTesting();
     testMenuUiShiftClickDestinations();
     testMenuUiTransientSaveSnapshot();
+    testPlayerSaveSkipsLossyTransientSnapshot();
     testMenuUiRecipeReferenceEnumeratesCraftingTable();
     testTickClockRunsFixedTicksAndAlpha();
     testTickClockCapsStallsAndDropsRemainder();
