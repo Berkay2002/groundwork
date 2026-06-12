@@ -81,6 +81,33 @@
   spec compliance APPROVED (zero findings, fits at 1280×720 verified
   numerically); Stage 2 quality APPROVED with 4 Minor parked (below).
 
+### 2026-06-12 — M3 tasks T4–T6 + regression repair + user feedback fix
+
+- T4 DONE (`53c95d9`): InventoryUi.{h,cpp} extraction — ScreenKind,
+  InventoryView/HotbarView, drawItemStack/drawHotbar/drawInventoryScreen;
+  main.cpp slimmed; CMake updated; saves/ backed up + restored during
+  validation runs.
+- T5 DONE (`94c227a`): drawPanel/drawBeveledSlot/drawArrow style helpers,
+  Minecraft beveled-panel rendering for all three screens, count-text
+  shadow; build warning-free, tests green.
+- T6 reported DONE (`19cd690`) but **clobbered T4/T5's main.cpp** — the
+  implementer worked from a stale pre-T4 main.cpp (zero module references
+  at HEAD; controller caught it by inspecting the screenshots, which showed
+  the old flat style despite the agent's claimed visual inspection).
+  World.{h,cpp} setDemoMode, ROADMAP/STATUS updates from T6 were good.
+- Repair DONE (`babed1c`): restored 94c227a main.cpp, re-applied T6's
+  intended behavior (demoRun flag, autosave/exit-save gating, setDemoMode,
+  --demo-craft, --demo-furnace). All three screenshots inspected by both
+  the repair agent and the controller: new beveled style confirmed on
+  inventory/crafting/furnace screens. saves/world1 verified untouched.
+- User feedback mid-run: in-game HUD hotbar should not show brightly under
+  the open inventory (Minecraft reference: it sits dimmed under the
+  overlay). Root cause: Hud draws solids before tiles/text in one batch,
+  so the dim solid rendered under the hotbar icons. Fix (`b72c9ef`):
+  flush the HUD pass (end/begin) before drawing the overlay. Verified by
+  fresh --demo-inv screenshot: hotbar now dimmed. Tests green,
+  saves/world1 untouched.
+
 ## Parked Minor issues
 
 - Q1 (M1): remap math `(i/8)*9 + i%8` duplicated in v2 and v3 load loops —
