@@ -24,9 +24,10 @@ deliberately being left for later.
 - See lighting, fog, day/night, water surfaces, smoother terrain shading, basic
   audio, item pickup, generated or embedded voxel/UI art, and the first authored
   blocky character asset loaded from `assets/`.
-- Spawn and render a first simple living entity in a save-isolated demo. It has
-  health, deterministic movement, terrain collision, damage/death, and a drop,
-  but no persistence or real AI yet.
+- Encounter a first simple living entity in normal worlds and in a
+  save-isolated demo. It has health, deterministic movement, movement-facing,
+  terrain collision, damage/death, and a drop, but no persistence or real AI
+  yet.
 - Run benchmark and screenshot checks for performance and visual regressions,
   plus headless world tests for core game logic.
 
@@ -56,15 +57,18 @@ deliberately being left for later.
 - The `MCEN` entity-file format is typed so future world entities can share
   the same persistence layer.
 
-### Add simple creatures (foundation started)
+### Add simple creatures (basic pass done)
 
-- Done: small living-entity foundation with health, damage, spawning, simple
-  deterministic movement, terrain collision, model id, rendered GLB character,
-  and a basic drop.
-- Next: decide how creatures enter normal worlds, how they face/move, what they
-  drop, and whether they persist or respawn from deterministic spawn rules.
-- Keep behavior modest for now. Complex pathfinding should wait until the game
-  clearly needs it.
+- Done: small living-entity foundation with health, damage, deterministic
+  normal-world ambient spawning, movement-facing, simple deterministic
+  movement, terrain collision, model id, rendered GLB character, and a basic
+  drop.
+- Living creatures are runtime-only for now. They are not written to `MCEN`
+  files; unloading a chunk removes them, and deterministic spawn rules may
+  recreate ambient creatures when the chunk becomes active again.
+- Next: decide when creatures need persistence, richer AI, more drops, or more
+  species. Keep behavior modest until the game clearly needs pathfinding or
+  deeper combat.
 
 ### Expand crafting and recipes
 

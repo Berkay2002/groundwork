@@ -179,7 +179,8 @@ glm::mat4 livingEntityTransform(const LivingEntity& entity, const ModelAsset& mo
                      modelFootingY(model),
                      (model.boundsMin.z + model.boundsMax.z) * 0.5f);
     return glm::translate(glm::mat4(1.0f), entity.renderPos(alpha)) *
-           glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 1, 0)) *
+           glm::rotate(glm::mat4(1.0f), entity.facingYaw + glm::radians(90.0f),
+                       glm::vec3(0, 1, 0)) *
            glm::translate(glm::mat4(1.0f), -center);
 }
 
@@ -828,7 +829,8 @@ int main(int argc, char** argv) {
     world.waitUntilLoaded(app.player.pos(), 2, 10000);
     if (!restored) app.player.spawn(world);
     app.player.ensureNotStuck(world); // saved position may be inside newer terrain
-    app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun);
+    app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun,
+                                   demoRun ? nullptr : &world, !demoRun);
 
     if (demoItems) { // a small row of drops in front of the viewpoint
         glm::vec3 base = app.player.eyePos() + app.player.lookDir() * 3.0f;
@@ -1031,7 +1033,8 @@ int main(int argc, char** argv) {
         const float alpha = tickClock.alpha();
         benchMark(1);
         world.update(app.player.pos(), settings.renderDistance);
-        app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun);
+        app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun,
+                                       demoRun ? nullptr : &world, !demoRun);
         benchMark(2);
 
         // Camera for this frame, computed early: mesh uploads prioritize

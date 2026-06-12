@@ -120,27 +120,27 @@ notes, and verification follow-through here or in `docs/handoff/`.
 - [x] Flowing water.
 - [x] Shore-exit swimming fix.
 
+### Dropped items and simple creatures
+
+- [x] Choose the item-entity save format and versioning rules.
+- [x] Persist dropped item position, velocity, item id, count, age, spin seed,
+  and durability data.
+- [x] Load item entities when chunks become active.
+- [x] Save item entities when chunks unload and during autosave.
+- [x] Define cleanup or despawn rules so worlds do not grow unbounded.
+- [x] Test quit/load, chunk unload/load, corrupted data, old-version data,
+  autosave, and demo save isolation.
+- [x] Define the minimal living-entity data model.
+- [x] Add health and damage rules.
+- [x] Add simple spawning rules for normal worlds using deterministic ambient
+  chunk rules.
+- [x] Add basic movement, wandering behavior, and movement-facing.
+- [x] Add drops that reuse the item entity path.
+- [x] Add rendering through runtime authored GLB assets and manifest ids.
+- [x] Test ticking, damage, drops, chunk streaming, runtime-only save
+  interactions, and demo save isolation.
+
 ## Backlog
-
-### Save dropped items
-
-- [ ] Choose the item-entity save format and versioning rules.
-- [ ] Persist dropped item position, velocity if needed, item id, count, age,
-  and any future durability data.
-- [ ] Load item entities when chunks become active.
-- [ ] Save item entities when chunks unload and during autosave.
-- [ ] Define cleanup or despawn rules so worlds do not grow unbounded.
-- [ ] Test quit/load, chunk unload/load, corrupted data, and old-version data.
-
-### Add simple creatures
-
-- [ ] Define the minimal living-entity data model.
-- [ ] Add health and damage rules.
-- [ ] Add simple spawning rules.
-- [ ] Add basic movement or wandering behavior.
-- [ ] Add drops that reuse the item entity path.
-- [ ] Add rendering that fits the current no-asset-file constraint.
-- [ ] Test ticking, damage, drops, chunk streaming, and save interactions.
 
 ### Expand crafting and recipes
 

@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-06-12, after authored-asset and living-entity foundation.
+Last updated: 2026-06-12, after normal-world creature spawning.
 
 Groundwork is past MVP. The completed history is in `docs/goals/`; future work
 is organized by roadmap area in `ROADMAP.md`. Do not start roadmap work without
@@ -10,8 +10,8 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 
 - C++17/OpenGL 3.3 voxel game with streaming chunks, background generation and
   meshing, saves, lighting, water, caves, ores, survival progression, audio,
-  menus, day/night, runtime character assets, a first living entity, Windows
-  support, and demo flags.
+  menus, day/night, runtime character assets, deterministic ambient creature
+  spawning, Windows support, and demo flags.
 - Main thread owns the chunk map and all GL. Workers only build fresh chunks or
   CPU mesh data from immutable snapshots.
 - `World` remains the chunk/streaming/save/fluid/block-entity hub. `Entities`
@@ -30,9 +30,14 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 - Runtime asset files are allowed for authored content. Keep voxel block
   textures/HUD font procedural, but use `assets/manifest.json` plus
   source/license notes for characters and future authored assets. Current first
-  model id: `creature.kenney_wanderer`.
-- Living entities are not persisted yet. Dropped-item entity save files remain
-  item-only.
+  model ids: `creature.kenney_zombie_a` and `creature.kenney_zombie_b`.
+- Normal worlds spawn the first creature through deterministic ambient
+  seed-and-chunk rules. Repeated load events for an active chunk do not duplicate
+  ambient creatures.
+- Living entities are runtime-only and not persisted yet. Dropped-item entity
+  save files remain item-only. Unloading a chunk removes living creatures in
+  that chunk and ambient creatures whose home chunk is unloading; later reloads
+  may recreate ambient creatures from the deterministic rule.
 - Water flow uses appended ids 24-31. Chunk integration seeds only flowing
   cells, not generated source water, so pristine lake chunks stay byte-stable.
 - Shore exit is sustained `SHORE_HOP = 5.5` while jump + wall + water applies.
@@ -45,10 +50,12 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
 Recent Windows/MSVC work built warning-free and `world_tests` passed. Added
 coverage includes asset manifest/model loading, external PNG texture loading,
 asset-manager caching, living spawn/tick/freeze/collision/damage/drop/query
-behavior, MCEN persistence/corruption/isolation, entity unload/load and
-autosave, demo save isolation, water spread/drain/infinite/drop-seek/save/shore
-hop, and inventory/progression/furnace/UI migrations. Rendering changes were
-visually inspected with demo screenshots. Latest TSAN was not run.
+behavior, deterministic ambient creature spawning, stream-event duplicate
+prevention, runtime-only living unload behavior, movement-facing, MCEN
+persistence/corruption/isolation, entity unload/load and autosave, demo save
+isolation, water spread/drain/infinite/drop-seek/save/shore hop, and
+inventory/progression/furnace/UI migrations. Rendering changes were visually
+inspected with demo screenshots. Latest TSAN was not run.
 
 ## Pointers
 

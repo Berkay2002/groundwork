@@ -2237,6 +2237,158 @@ static void testLivingEntityDamageDropsAndQueries() {
     std::filesystem::remove_all("test_living_damage");
 }
 
+static ChunkKey firstAmbientSpawnKey(uint32_t seed, int radius = 8) {
+    static bool haveCached = false;
+    static uint32_t cachedSeed = 0;
+    static ChunkKey cached{0, 0};
+    if (haveCached && cachedSeed == seed) return cached;
+    for (int cz = -radius; cz <= radius; ++cz)
+        for (int cx = -radius; cx <= radius; ++cx) {
+            const char* dir = "test_living_spawn_scan";
+            std::filesystem::remove_all(dir);
+            World w(seed, dir);
+            ChunkKey key{cx, cz};
+            glm::vec3 center(float(cx * CHUNK_SIZE) + 0.5f, 50.0f,
+                             float(cz * CHUNK_SIZE) + 0.5f);
+            w.waitUntilLoaded(center, 0, 10000);
+            Entities ents;
+            ents.spawnAmbientLivingForChunk(w, key);
+            std::filesystem::remove_all(dir);
+            if (!ents.living().empty()) {
+                haveCached = true;
+                cachedSeed = seed;
+                cached = key;
+                return key;
+            }
+        }
+    CHECK(radius < 0);
+    return {0, 0};
+}
+
+static void testAmbientLivingSpawnRules() {
+    ChunkKey key = firstAmbientSpawnKey(1337);
+
+    std::filesystem::remove_all("test_living_spawn_a");
+    World a(1337, "test_living_spawn_a");
+    a.waitUntilLoaded(glm::vec3(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                                float(key.z * CHUNK_SIZE) + 0.5f),
+                      0, 10000);
+    Entities ea;
+    ea.spawnAmbientLivingForChunk(a, key);
+    CHECK(ea.living().size() == 1);
+    glm::vec3 firstPos = ea.living()[0]->body.pos;
+    CHECK(ea.living()[0]->modelId == "creature.kenney_zombie_a");
+    ea.spawnAmbientLivingForChunk(a, key);
+    CHECK(ea.living().size() == 1);
+
+    bool sawDifferentChunkDecision = false;
+    for (int dz = -4; dz <= 4 && !sawDifferentChunkDecision; ++dz)
+        for (int dx = -4; dx <= 4 && !sawDifferentChunkDecision; ++dx) {
+            ChunkKey other{key.x + dx, key.z + dz};
+            if (other == key) continue;
+            a.waitUntilLoaded(glm::vec3(float(other.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                                        float(other.z * CHUNK_SIZE) + 0.5f),
+                              0, 10000);
+            Entities otherEnts;
+            otherEnts.spawnAmbientLivingForChunk(a, other);
+            sawDifferentChunkDecision = otherEnts.living().empty();
+        }
+    CHECK(sawDifferentChunkDecision);
+
+    std::filesystem::remove_all("test_living_spawn_b");
+    World b(1337, "test_living_spawn_b");
+    b.waitUntilLoaded(glm::vec3(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                                float(key.z * CHUNK_SIZE) + 0.5f),
+                      0, 10000);
+    Entities eb;
+    eb.spawnAmbientLivingForChunk(b, key);
+    CHECK(eb.living().size() == 1);
+    CHECK(glm::distance(eb.living()[0]->body.pos, firstPos) < 0.001f);
+
+    std::filesystem::remove_all("test_living_spawn_blocked");
+    World blocked(1337, "test_living_spawn_blocked");
+    blocked.waitUntilLoaded(glm::vec3(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                                      float(key.z * CHUNK_SIZE) + 0.5f),
+                            0, 10000);
+    for (int z = key.z * CHUNK_SIZE; z < (key.z + 1) * CHUNK_SIZE; ++z)
+        for (int x = key.x * CHUNK_SIZE; x < (key.x + 1) * CHUNK_SIZE; ++x)
+            for (int y = 1; y < CHUNK_HEIGHT - 1; ++y)
+                blocked.setBlock(x, y, z, Block::Stone);
+    Entities blockedEnts;
+    blockedEnts.spawnAmbientLivingForChunk(blocked, key);
+    CHECK(blockedEnts.living().empty());
+
+    std::filesystem::remove_all("test_living_spawn_a");
+    std::filesystem::remove_all("test_living_spawn_b");
+    std::filesystem::remove_all("test_living_spawn_blocked");
+}
+
+static void testAmbientLivingStreamLifecycle() {
+    const char* dir = "test_living_stream";
+    std::filesystem::remove_all(dir);
+    ChunkKey key = firstAmbientSpawnKey(1337);
+    World w(1337, dir);
+    w.waitUntilLoaded(glm::vec3(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                                float(key.z * CHUNK_SIZE) + 0.5f),
+                      0, 10000);
+
+    Entities ents;
+    ChunkStreamEvents loaded;
+    loaded.loaded.push_back(key);
+    ents.applyStreamEvents(dir, loaded, true, &w, true);
+    CHECK(ents.living().size() == 1);
+    glm::vec3 firstPos = ents.living()[0]->body.pos;
+
+    ents.applyStreamEvents(dir, loaded, true, &w, true);
+    CHECK(ents.living().size() == 1);
+    CHECK(glm::distance(ents.living()[0]->body.pos, firstPos) < 0.001f);
+
+    ChunkStreamEvents unloaded;
+    unloaded.unloaded.push_back(key);
+    ents.applyStreamEvents(dir, unloaded, true, &w, true);
+    CHECK(ents.living().empty());
+
+    std::vector<SavedDroppedItem> savedItems;
+    EntityChunkLoadStatus status =
+        loadEntityChunkFile(entityChunkPath(dir, key), key, savedItems);
+    CHECK(status == EntityChunkLoadStatus::Missing || status == EntityChunkLoadStatus::Loaded);
+    CHECK(savedItems.empty());
+
+    ents.applyStreamEvents(dir, loaded, true, &w, true);
+    CHECK(ents.living().size() == 1);
+
+    std::filesystem::remove_all(dir);
+}
+
+static void testLivingEntityFacingUpdates() {
+    std::filesystem::remove_all("test_living_facing");
+    World w(1337, "test_living_facing");
+    w.waitUntilLoaded(glm::vec3(0.5f, 70.0f, 0.5f), 1, 10000);
+    buildEntityTestPlatform(w);
+
+    Entities ents;
+    LivingEntityId id =
+        ents.spawnLiving(glm::vec3(0.5f, 71.0f, 0.5f), DEFAULT_CREATURE_MODEL_ID);
+    CHECK(id != 0);
+    CHECK(std::fabs(ents.living()[0]->facingYaw) < 0.001f);
+
+    for (int i = 0; i < 41; ++i)
+        ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(std::fabs(ents.living()[0]->facingYaw - 1.5707963f) < 0.01f);
+
+    LivingEntityId farId =
+        ents.spawnLiving(glm::vec3(10000.5f, 80.0f, 10000.5f), DEFAULT_CREATURE_MODEL_ID);
+    LivingEntity* frozen = nullptr;
+    for (auto& up : ents.living())
+        if (up->id == farId) frozen = up.get();
+    CHECK(frozen != nullptr);
+    frozen->facingYaw = 0.75f;
+    ents.tick(w, glm::vec3(100.0f), nullptr, float(TickClock::TICK_DT));
+    CHECK(std::fabs(frozen->facingYaw - 0.75f) < 0.001f);
+
+    std::filesystem::remove_all("test_living_facing");
+}
+
 static void testItemAgeTicksAndDespawn() {
     std::filesystem::remove_all("test_ent_age_ticks");
     World w(1337, "test_ent_age_ticks");
@@ -3563,6 +3715,9 @@ int main() {
     testEntityStreamCrossingAutosaveAndDemoIsolation();
     testLivingEntitySpawnTickFreezeAndCollision();
     testLivingEntityDamageDropsAndQueries();
+    testAmbientLivingSpawnRules();
+    testAmbientLivingStreamLifecycle();
+    testLivingEntityFacingUpdates();
     testNonBlockItemIconMapping();
     testBreakOverlayHelpers();
     testItemEntityStackIngress();

@@ -15,6 +15,7 @@ constexpr float MERGE_RADIUS = 0.75f;
 constexpr float LIVING_GRAVITY = -22.0f;
 constexpr float LIVING_TERMINAL = -30.0f;
 constexpr float LIVING_WALK_SPEED = 0.75f;
+constexpr uint32_t AMBIENT_SPAWN_CHANCE = 72; // about 28% of eligible chunks
 
 ChunkKey chunkForPos(glm::vec3 pos) {
     return {World::floorDiv((int)std::floor(pos.x), CHUNK_SIZE),
@@ -23,6 +24,45 @@ ChunkKey chunkForPos(glm::vec3 pos) {
 
 bool sameChunk(glm::vec3 pos, ChunkKey key) {
     return chunkForPos(pos) == key;
+}
+
+uint32_t hashAmbient(int32_t x, int32_t z, uint32_t seed) {
+    uint32_t h = seed ^ 0xA53C9E7Du;
+    h ^= uint32_t(x) * 0x85EBCA6Bu;
+    h = (h << 13) | (h >> 19);
+    h ^= uint32_t(z) * 0xC2B2AE35u;
+    h *= 0x27D4EB2Fu;
+    h ^= h >> 15;
+    return h;
+}
+
+bool emptyForLiving(Block b) {
+    return !isSolid(b) && !isWater(b);
+}
+
+bool findAmbientLivingSpawn(const World& world, ChunkKey key, glm::vec3& out) {
+    glm::vec3 center(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                     float(key.z * CHUNK_SIZE) + 0.5f);
+    if (!world.isAreaReady(center, 0)) return false;
+
+    uint32_t h = hashAmbient(key.x, key.z, world.seed());
+    if ((h & 0xFFu) >= AMBIENT_SPAWN_CHANCE) return false;
+
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        uint32_t a = hashAmbient(key.x * 17 + attempt, key.z * 31 - attempt,
+                                 world.seed() ^ 0xC2EAD123u);
+        int wx = key.x * CHUNK_SIZE + 1 + int((a >> 8) % (CHUNK_SIZE - 2));
+        int wz = key.z * CHUNK_SIZE + 1 + int((a >> 18) % (CHUNK_SIZE - 2));
+        for (int y = CHUNK_HEIGHT - 3; y >= 1; --y) {
+            Block ground = world.getBlock(wx, y, wz);
+            if (!isSolid(ground) || isWater(ground)) continue;
+            if (!emptyForLiving(world.getBlock(wx, y + 1, wz))) continue;
+            if (!emptyForLiving(world.getBlock(wx, y + 2, wz))) continue;
+            out = glm::vec3(float(wx) + 0.5f, float(y) + 1.0f, float(wz) + 0.5f);
+            return true;
+        }
+    }
+    return false;
 }
 }
 
@@ -91,6 +131,23 @@ LivingEntityId Entities::spawnLiving(const glm::vec3& pos, const std::string& mo
     living_.push_back(std::move(e));
     rebuildBuckets();
     return id;
+}
+
+void Entities::spawnAmbientLivingForChunk(const World& world, ChunkKey key) {
+    if (ambientLivingChunks_.count(key)) return;
+    glm::vec3 center(float(key.x * CHUNK_SIZE) + 0.5f, 50.0f,
+                     float(key.z * CHUNK_SIZE) + 0.5f);
+    if (!world.isAreaReady(center, 0)) return;
+    ambientLivingChunks_.insert(key);
+    glm::vec3 pos;
+    if (!findAmbientLivingSpawn(world, key, pos)) return;
+    LivingEntityId id = spawnLiving(pos, DEFAULT_CREATURE_MODEL_ID);
+    for (auto& up : living_) {
+        if (up->id != id) continue;
+        up->ambient = true;
+        up->homeChunk = key;
+        break;
+    }
 }
 
 bool Entities::damageLiving(LivingEntityId id, int amount) {
@@ -172,6 +229,9 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         float angle = float(e.movePhase % 4u) * 1.5707963f;
         e.body.vel.x = std::cos(angle) * LIVING_WALK_SPEED;
         e.body.vel.z = std::sin(angle) * LIVING_WALK_SPEED;
+        float horizontalSpeed2 = e.body.vel.x * e.body.vel.x + e.body.vel.z * e.body.vel.z;
+        if (horizontalSpeed2 > 0.0001f)
+            e.facingYaw = std::atan2(e.body.vel.z, e.body.vel.x);
         e.body.vel.y += LIVING_GRAVITY * dt;
         if (e.body.vel.y < LIVING_TERMINAL) e.body.vel.y = LIVING_TERMINAL;
         moveBody(world, e.body, dt);
@@ -184,6 +244,17 @@ void Entities::cleanupLiving() {
     living_.erase(std::remove_if(living_.begin(), living_.end(),
                       [](const std::unique_ptr<LivingEntity>& e) { return e->dead; }),
                   living_.end());
+}
+
+void Entities::unloadLivingForChunk(ChunkKey key) {
+    living_.erase(std::remove_if(living_.begin(), living_.end(),
+                      [&](const std::unique_ptr<LivingEntity>& e) {
+                          return sameChunk(e->body.pos, key) ||
+                                 (e->ambient && e->homeChunk == key);
+                      }),
+                  living_.end());
+    ambientLivingChunks_.erase(key);
+    rebuildBuckets();
 }
 
 void Entities::rebuildBuckets() {
@@ -272,11 +343,18 @@ void Entities::saveAllLoadedEntityChunks(const std::string& saveDir,
 
 void Entities::applyStreamEvents(const std::string& saveDir,
                                  const ChunkStreamEvents& events,
-                                 bool saveEnabled) {
-    for (ChunkKey key : events.loaded)
+                                 bool saveEnabled,
+                                 const World* world,
+                                 bool spawnAmbientLiving) {
+    for (ChunkKey key : events.loaded) {
         loadChunkEntities(saveDir, key);
-    for (ChunkKey key : events.unloaded)
+        if (world != nullptr && spawnAmbientLiving)
+            spawnAmbientLivingForChunk(*world, key);
+    }
+    for (ChunkKey key : events.unloaded) {
         saveAndUnloadChunkEntities(saveDir, key, saveEnabled);
+        unloadLivingForChunk(key);
+    }
 }
 
 std::vector<ItemEntity*> Entities::itemsNear(const glm::vec3& pos, float radius) const {

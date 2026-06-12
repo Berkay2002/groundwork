@@ -15,6 +15,7 @@ constexpr uint32_t DESPAWN_TICKS = 6000;   // 5 min at 20 TPS
 constexpr int LIVING_MAX_HEALTH = 10;
 constexpr float LIVING_HALF_WIDTH = 0.3f;
 constexpr float LIVING_HEIGHT = 1.6f;
+constexpr const char* DEFAULT_CREATURE_MODEL_ID = "creature.kenney_zombie_a";
 
 using LivingEntityId = uint32_t;
 
@@ -39,6 +40,9 @@ struct LivingEntity {
     int health = LIVING_MAX_HEALTH;
     uint32_t ageTicks = 0;
     uint32_t movePhase = 0;
+    float facingYaw = 0.0f; // radians; 0 faces +X in simulation space
+    bool ambient = false;
+    ChunkKey homeChunk{0, 0};
     bool dead = false;
     glm::vec3 renderPos(float alpha) const { return glm::mix(prevPos, body.pos, alpha); }
 };
@@ -58,6 +62,7 @@ public:
     void spawnBlockDrop(const glm::ivec3& blockPos, Block broken);
 
     LivingEntityId spawnLiving(const glm::vec3& pos, const std::string& modelId);
+    void spawnAmbientLivingForChunk(const World& world, ChunkKey key);
     bool damageLiving(LivingEntityId id, int amount);
 
     // One simulation tick: physics, magnetized pickup into `inv` (skipped
@@ -72,7 +77,9 @@ public:
     void saveAllLoadedEntityChunks(const std::string& saveDir, bool saveEnabled);
     void applyStreamEvents(const std::string& saveDir,
                            const ChunkStreamEvents& events,
-                           bool saveEnabled);
+                           bool saveEnabled,
+                           const World* world = nullptr,
+                           bool spawnAmbientLiving = false);
 
     const std::vector<std::unique_ptr<ItemEntity>>& items() const { return items_; }
     const std::vector<std::unique_ptr<LivingEntity>>& living() const { return living_; }
@@ -85,10 +92,12 @@ private:
     std::unordered_map<ChunkKey, std::vector<ItemEntity*>, ChunkKeyHash> buckets_;
     std::vector<std::unique_ptr<LivingEntity>> living_;
     std::unordered_map<ChunkKey, std::vector<LivingEntity*>, ChunkKeyHash> livingBuckets_;
+    std::unordered_set<ChunkKey, ChunkKeyHash> ambientLivingChunks_;
     std::unordered_set<ChunkKey, ChunkKeyHash> loadedEntityChunks_;
     LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();
+    void unloadLivingForChunk(ChunkKey key);
     void cleanupLiving();
     void rebuildBuckets();
 };
