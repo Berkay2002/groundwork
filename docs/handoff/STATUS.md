@@ -1,7 +1,7 @@
 # Status
 
-Last updated: 2026-06-13, after the mob foundation pass: facing fix, MobKind
-table, spawn reasons, natural night spawning, and the hurt flash.
+Last updated: 2026-06-13, after the RD64 tail-latency pass: benchmark warmup,
+worst-frame section attribution, entity autosave pacing, and bucket reuse.
 
 Groundwork is past MVP. The completed history is in `docs/goals/`; future work
 is organized by roadmap area in `ROADMAP.md`. Do not start roadmap work without
@@ -74,12 +74,15 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   track what is on screen, not the population — uncull and a 16k-chunk world
   pays ~11 ms/frame in mob draws.
 - Entity autosave trickles dirty chunks only: Entities::autosaveTick paces a
-  full dirty-set cycle over ~30 s (hard cap 8/frame) instead of scanning every
-  loaded entity chunk. Item/living spawn, movement, merge, damage, death, bad
-  entity-file cleanup, and ambient-spawn markers dirty their chunk; explicit
-  save, exit, and chunk-unload still write current snapshots synchronously.
-  The F3 overlay shows live mob/item counts; --bench-secs has a dedicated
-  "mobs" section for the living draw pass.
+  full dirty-set cycle over ~30 s, saving at most one entity chunk file per
+  rendered frame instead of stacking filesystem writes. Item/living spawn,
+  movement, merge, damage, death, bad entity-file cleanup, and ambient-spawn
+  markers dirty their chunk; explicit save, exit, and chunk-unload still write
+  current snapshots synchronously. The F3 overlay shows live mob/item counts;
+  --bench-secs has dedicated "mobs" and worst-frame section output.
+- Entity chunk buckets are not rebuilt unconditionally every fixed tick.
+  Spawn/load/remove/chunk-crossing paths mark them dirty; ticks that only move
+  items/mobs within their current chunks reuse the existing buckets.
 - RD64 chunk rendering now avoids sorting opaque chunks, keeps a main-thread
   drawable-candidate list with cached chunk bounds/origins, and caches the
   visible chunk list while the eye/frustum and drawable chunk state are
@@ -90,7 +93,8 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   creative keeps ambient/persistent mobs renderable but prevents hostile
   attacks from turning the benchmark into a combat test. `--bench-spin D`
   rotates the camera by D degrees/second during the measured benchmark window
-  to test moving-frustum costs.
+  to test moving-frustum costs. `--bench-warmup-secs S` controls the
+  post-settled benchmark workload warmup before frame counting (default 2 s).
 - Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
   → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
   Creative players, dead players, and demo runs are ignored (main passes a
@@ -149,9 +153,14 @@ benchmark (`--bench-secs 5 --time 0.7 --bench-spin 90`, same scratch creative
 settings) improved the best final repeat over the moving baseline: avg fps
 326.0 -> 363.0, opaque 1.86 -> 1.66 ms/frame, edit/autosave 0.67 -> 0.52
 ms/frame, p99 7.19 -> 7.60 ms, max 8.98 -> 8.84 ms. A preceding final repeat
-had a bad 20.92 ms max frame, so tail spikes remain noisy and should be a
-future target. Latest TSAN was not run (no new threading surface: rendering
-candidate/cache changes and dirty entity autosave stay main-thread-only).
+had a bad 20.92 ms max frame. Latest tail-latency pass added post-settle bench
+warmup and worst-frame section attribution, capped dirty entity autosave to one
+file/frame, and skipped unchanged entity bucket rebuilds. Best repeated tail
+result after those changes: p99 ~6.37-6.48 ms and typical max ~7.46-7.88 ms
+in the same RD64 moving benchmark; one non-reproduced `hud+swap` outlier hit
+14.19 ms. Latest TSAN was not run (no new threading surface: rendering
+candidate/cache changes, dirty entity autosave, and entity bucket reuse stay
+main-thread-only).
 
 ## Pointers
 

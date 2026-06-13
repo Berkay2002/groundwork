@@ -142,6 +142,7 @@ void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack s
         e->stack = part;
         e->spinSeed = rng_;
         items_.push_back(std::move(e));
+        bucketsDirty_ = true;
         markDirtyForPos(pos);
         count -= take;
     }
@@ -277,6 +278,7 @@ LivingEntity* Entities::raycastLiving(const glm::vec3& origin, const glm::vec3& 
 void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* inv,
                     float dt, Player* targetPlayer) {
     const glm::vec3 target = playerPos + glm::vec3(0, 0.9f, 0); // player torso
+    bool bucketsDirty = bucketsDirty_;
     for (auto& up : items_) {
         ItemEntity& e = *up;
         if (!world.isAreaReady(e.body.pos, 0)) continue; // frozen in the void
@@ -303,6 +305,7 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             else e.stack.count = uint8_t(leftover); // inventory full: keep the remainder
         }
         if (e.ageTicks >= DESPAWN_TICKS) e.dead = true;
+        if (!(chunkForPos(e.body.pos) == oldKey) || e.dead) bucketsDirty = true;
         markDirty(oldKey);
         markDirtyForPos(e.body.pos);
     }
@@ -323,13 +326,18 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             b.stack.count = uint8_t(b.stack.count - moved);
             markDirtyForPos(a.body.pos);
             markDirtyForPos(b.body.pos);
-            if (b.stack.count == 0) b.dead = true;
+            if (b.stack.count == 0) {
+                b.dead = true;
+                bucketsDirty = true;
+            }
         }
     }
 
+    size_t itemCountBeforeCleanup = items_.size();
     items_.erase(std::remove_if(items_.begin(), items_.end(),
                      [](const std::unique_ptr<ItemEntity>& e) { return e->dead; }),
                  items_.end());
+    if (items_.size() != itemCountBeforeCleanup) bucketsDirty = true;
 
     const bool playerAlive = targetPlayer != nullptr && targetPlayer->health > 0;
     for (auto& up : living_) {
@@ -393,11 +401,14 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         e.body.vel.y += LIVING_GRAVITY * dt;
         if (e.body.vel.y < LIVING_TERMINAL) e.body.vel.y = LIVING_TERMINAL;
         moveBody(world, e.body, dt);
+        if (!(chunkForPos(e.body.pos) == oldKey)) bucketsDirty = true;
         markDirty(oldKey);
         markDirtyForPos(e.body.pos);
     }
+    size_t livingCountBeforeCleanup = living_.size();
     cleanupLiving();
-    rebuildBuckets();
+    if (living_.size() != livingCountBeforeCleanup) bucketsDirty = true;
+    if (bucketsDirty) rebuildBuckets();
 }
 
 void Entities::cleanupLiving() {
@@ -442,6 +453,7 @@ void Entities::rebuildBuckets() {
     for (auto& up : living_) {
         livingBuckets_[chunkForPos(up->body.pos)].push_back(up.get());
     }
+    bucketsDirty_ = false;
 }
 
 void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
@@ -504,7 +516,10 @@ void Entities::autosaveTick(const std::string& saveDir, bool saveEnabled,
     int budget = int(autosaveCredit_);
     if (budget <= 0) return;
     autosaveCredit_ -= float(budget);
-    budget = std::min(budget, 8); // never burst, even after a frame stall
+    // One entity file can take several milliseconds on some Windows systems
+    // once antivirus/filesystem latency is involved; do not stack multiple
+    // such writes onto the same rendered frame.
+    budget = std::min(budget, 1);
     while (budget-- > 0) {
         if (autosaveQueue_.empty())
             autosaveQueue_.assign(dirtyEntityChunks_.begin(),

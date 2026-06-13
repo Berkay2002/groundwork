@@ -133,6 +133,7 @@ private:
     std::unordered_set<ChunkKey, ChunkKeyHash> dirtyEntityChunks_;
     std::vector<ChunkKey> autosaveQueue_; // refilled snapshot of loaded chunks
     float autosaveCredit_ = 0.0f;
+    bool bucketsDirty_ = false;
     LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();

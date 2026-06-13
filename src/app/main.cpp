@@ -754,11 +754,14 @@ int main(int argc, char** argv) {
     // --bench-secs S : warm up until chunk streaming settles, then measure S
     //              seconds and print frame-time statistics (avg/1% low/0.1%
     //              low fps, percentiles) — the steady-state stutter check.
+    // --bench-warmup-secs S : after chunk queues settle, run S more seconds
+    //              of the benchmark workload before counting measured frames.
     // --bench-spin D : during the measured bench window, rotate the camera D
     //              degrees/second to exercise moving-frustum render cost.
     long maxFrames = -1;
     bool bench = false;
     double benchSecs = 0.0;
+    double benchWarmupSecs = 2.0;
     float benchSpinDegPerSec = 0.0f;
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
@@ -776,6 +779,8 @@ int main(int argc, char** argv) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
             if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
             if (std::strcmp(argv[i], "--bench-secs") == 0) { benchSecs = std::atof(argv[i + 1]); bench = true; }
+            if (std::strcmp(argv[i], "--bench-warmup-secs") == 0)
+                benchWarmupSecs = std::max(0.0, std::atof(argv[i + 1]));
             if (std::strcmp(argv[i], "--bench-spin") == 0) benchSpinDegPerSec = float(std::atof(argv[i + 1]));
             if (std::strcmp(argv[i], "--time") == 0) startTime = float(std::atof(argv[i + 1]));
         }
@@ -1028,8 +1033,11 @@ int main(int argc, char** argv) {
     double benchStart = glfwGetTime();
     long benchDrawn = 0, benchUploads = 0;
     // --bench-secs: settle streaming first so startup chunk loading doesn't
-    // pollute the steady-state numbers, then time frames swap-to-swap.
+    // pollute the steady-state numbers. Once queues are empty, keep running
+    // the benchmark workload for benchWarmupSecs before timing frames
+    // swap-to-swap.
     bool benchWarmup = benchSecs > 0.0;
+    double benchSettledAt = -1.0;
     double benchPrevSwap = -1.0;
     std::vector<float> benchFrames;
     if (benchSecs > 0.0) benchFrames.reserve(size_t(benchSecs * 2000.0));
@@ -1040,11 +1048,16 @@ int main(int argc, char** argv) {
         "events", "tick", "stream", "mesh", "edit",
         "opaque", "items", "mobs", "water", "hud+swap"};
     double benchSec[BENCH_SECTIONS] = {};
+    double benchSecFrame[BENCH_SECTIONS] = {};
+    double benchWorstSec[BENCH_SECTIONS] = {};
+    double benchWorstFrame = 0.0;
     double benchSecMark = 0.0;
     auto benchMark = [&](int i) {
         if (!bench || benchWarmup) return;
         double t = glfwGetTime();
-        benchSec[i] += t - benchSecMark;
+        double dt = t - benchSecMark;
+        benchSec[i] += dt;
+        benchSecFrame[i] += dt;
         benchSecMark = t;
     };
 
@@ -1109,7 +1122,10 @@ int main(int argc, char** argv) {
         app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun,
                                        demoRun ? nullptr : &world, !demoRun);
         benchMark(2);
-        if (bench && !benchWarmup && benchSpinDegPerSec != 0.0f)
+        const bool benchPostSettleWarmup =
+            benchSecs > 0.0 && benchWarmup && benchSettledAt >= 0.0;
+        if (bench && (!benchWarmup || benchPostSettleWarmup) &&
+            benchSpinDegPerSec != 0.0f)
             app.player.yaw += benchSpinDegPerSec * frameDt;
 
         // Camera for this frame, computed early: mesh uploads prioritize
@@ -1406,17 +1422,37 @@ int main(int argc, char** argv) {
                 // a huge-render-distance world still starts eventually.
                 bool settled = st.genQueued == 0 && st.meshQueued == 0 &&
                                st.uploadQueued == 0;
-                if ((settled && t - benchStart > 2.0) || t - benchStart > 120.0) {
+                if (settled) {
+                    if (benchSettledAt < 0.0) benchSettledAt = t;
+                } else {
+                    benchSettledAt = -1.0;
+                }
+                bool warmed = benchSettledAt >= 0.0 &&
+                              t - benchSettledAt >= benchWarmupSecs;
+                bool timedOut = t - benchStart > 120.0;
+                if (warmed || timedOut) {
                     benchWarmup = false;
-                    std::printf("bench: warmed up in %.1f s (%d chunks loaded), "
-                                "measuring %.0f s...\n",
-                                t - benchStart, st.loaded, benchSecs);
+                    double postSettle = benchSettledAt >= 0.0 ? t - benchSettledAt : 0.0;
+                    std::printf("bench: warmed up in %.1f s (%d chunks loaded, "
+                                "post-settle %.1f s), measuring %.0f s...\n",
+                                t - benchStart, st.loaded, postSettle, benchSecs);
                     benchStart = t;
                     benchPrevSwap = t;
                     benchDrawn = benchUploads = 0;
+                    std::fill(benchSec, benchSec + BENCH_SECTIONS, 0.0);
+                    std::fill(benchSecFrame, benchSecFrame + BENCH_SECTIONS, 0.0);
+                    std::fill(benchWorstSec, benchWorstSec + BENCH_SECTIONS, 0.0);
+                    benchWorstFrame = 0.0;
                 }
             } else {
-                benchFrames.push_back(float(t - benchPrevSwap));
+                double frameTime = t - benchPrevSwap;
+                benchFrames.push_back(float(frameTime));
+                if (frameTime > benchWorstFrame) {
+                    benchWorstFrame = frameTime;
+                    std::copy(benchSecFrame, benchSecFrame + BENCH_SECTIONS,
+                              benchWorstSec);
+                }
+                std::fill(benchSecFrame, benchSecFrame + BENCH_SECTIONS, 0.0);
                 benchPrevSwap = t;
                 if (t - benchStart >= benchSecs) {
                     printFrameStats(benchFrames, t - benchStart);
@@ -1424,6 +1460,11 @@ int main(int argc, char** argv) {
                     for (int i = 0; i < BENCH_SECTIONS; ++i)
                         std::printf(" %s %.2f", benchSecName[i],
                                     benchSec[i] * 1000.0 / double(benchFrames.size()));
+                    std::printf("\n");
+                    std::printf("worst-frame sections (ms):");
+                    for (int i = 0; i < BENCH_SECTIONS; ++i)
+                        std::printf(" %s %.2f", benchSecName[i],
+                                    benchWorstSec[i] * 1000.0);
                     std::printf("\n");
                     std::printf(
                         "chunks: %d loaded, %.1f drawn/frame avg, %ld mesh uploads\n"
