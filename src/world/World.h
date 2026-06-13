@@ -184,10 +184,15 @@ private:
     int lastPcx_ = INT_MIN, lastPcz_ = INT_MIN, lastRd_ = -1;
     bool streamScanClean_ = false;
 
-    // Frame-visible chunks, front-to-back: built by drawChunks, reused
-    // (reversed) by drawWater so the map is culled and sorted only once.
+    // Frame-visible chunks: built by drawChunks and reused by drawWater so
+    // the chunk map is culled only once. Water chunks are sorted separately
+    // back-to-front because the opaque pass does not need ordering.
     struct DrawItem { float dist2; Chunk* chunk; float ox, oz; };
     std::vector<DrawItem> visible_;
+    std::vector<DrawItem> waterVisible_;
+    bool visibleCacheValid_ = false;
+    glm::vec3 visibleCacheEye_{0.0f};
+    Frustum visibleCacheFrustum_{};
 
     // Perf counters (workers store, main thread reads).
     std::atomic<float> genMs_{0.0f}, meshMs_{0.0f};

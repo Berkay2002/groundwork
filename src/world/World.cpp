@@ -24,6 +24,17 @@ void ema(std::atomic<float>& avg, float sample) {
     float cur = avg.load(std::memory_order_relaxed);
     avg.store(cur == 0.0f ? sample : cur * 0.9f + sample * 0.1f, std::memory_order_relaxed);
 }
+
+bool sameFrustum(const Frustum& a, const Frustum& b) {
+    for (int i = 0; i < 6; ++i) {
+        glm::vec4 d = a.planes[i] - b.planes[i];
+        if (std::abs(d.x) > 1e-5f || std::abs(d.y) > 1e-5f ||
+            std::abs(d.z) > 1e-5f || std::abs(d.w) > 1e-3f) {
+            return false;
+        }
+    }
+    return true;
+}
 }
 
 class World::LightingAccess : public lighting::Accessor {
@@ -269,16 +280,19 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
     // 3. Unload far chunks (save modified ones first). The far set only
     //    changes when the player moves or a chunk arrives.
     if (moved || !done.empty()) {
+        bool unloaded = false;
         for (auto it = chunks_.begin(); it != chunks_.end();) {
             int dx = std::abs(it->first.x - pcx), dz = std::abs(it->first.z - pcz);
             if (std::max(dx, dz) > renderDistance + 2) {
                 if (it->second->modified) saveChunk(*it->second);
                 streamEvents_.unloaded.push_back(it->first);
                 it = chunks_.erase(it);
+                unloaded = true;
             } else {
                 ++it;
             }
         }
+        if (unloaded) visibleCacheValid_ = false;
     }
 }
 
@@ -397,6 +411,7 @@ void World::processMeshing(int enqueueBudget, const glm::vec3& playerPos,
         ++uploads_;
     }
     uploadQueue_.erase(uploadQueue_.begin(), uploadQueue_.begin() + did);
+    if (uploads_ > 0) visibleCacheValid_ = false;
 
     // 3. Enqueue dirty chunks for the workers, best priority first, so an
     //    edit or light change next to the player never waits behind far
@@ -456,24 +471,26 @@ void World::waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs) {
     }
 }
 
-// Cull + sort the chunk map once per frame: front-to-back for the opaque
-// pass (early-z rejects hidden fragments); drawWater walks the same list in
-// reverse for back-to-front blending. Chunks with nothing in either pass are
+// Cull the chunk map once per frame. Chunks with nothing in either pass are
 // dropped here so the draw loops never bind or set uniforms for them.
 void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
-    visible_.clear();
-    visible_.reserve(chunks_.size() / 4);
-    for (auto& [key, chunk] : chunks_) {
-        if (!chunk->hasOpaque() && !chunk->hasWater()) continue;
-        glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
-        glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
-        if (!frustum.intersectsAABB(mn, mx)) continue;
-        glm::vec2 center(mn.x + CHUNK_SIZE * 0.5f, mn.z + CHUNK_SIZE * 0.5f);
-        glm::vec2 d = center - glm::vec2(eye.x, eye.z);
-        visible_.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
+    bool sameEye = glm::dot(eye - visibleCacheEye_, eye - visibleCacheEye_) < 1e-6f;
+    if (!visibleCacheValid_ || !sameEye || !sameFrustum(frustum, visibleCacheFrustum_)) {
+        visible_.clear();
+        visible_.reserve(chunks_.size() / 4);
+        for (auto& [key, chunk] : chunks_) {
+            if (!chunk->hasOpaque() && !chunk->hasWater()) continue;
+            glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
+            glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
+            if (!frustum.intersectsAABB(mn, mx)) continue;
+            glm::vec2 center(mn.x + CHUNK_SIZE * 0.5f, mn.z + CHUNK_SIZE * 0.5f);
+            glm::vec2 d = center - glm::vec2(eye.x, eye.z);
+            visible_.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
+        }
+        visibleCacheEye_ = eye;
+        visibleCacheFrustum_ = frustum;
+        visibleCacheValid_ = true;
     }
-    std::sort(visible_.begin(), visible_.end(),
-              [](const DrawItem& a, const DrawItem& b) { return a.dist2 < b.dist2; });
 
     drawn_ = 0;
     for (const DrawItem& it : visible_) {
@@ -485,10 +502,16 @@ void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originL
 }
 
 void World::drawWater(const Frustum&, const glm::vec3&, int originLoc) {
-    for (auto it = visible_.rbegin(); it != visible_.rend(); ++it) {
-        if (!it->chunk->hasWater()) continue;
-        glUniform3f(originLoc, it->ox, 0.0f, it->oz);
-        it->chunk->drawWater();
+    waterVisible_.clear();
+    waterVisible_.reserve(visible_.size() / 8);
+    for (const DrawItem& it : visible_) {
+        if (it.chunk->hasWater()) waterVisible_.push_back(it);
+    }
+    std::sort(waterVisible_.begin(), waterVisible_.end(),
+              [](const DrawItem& a, const DrawItem& b) { return a.dist2 > b.dist2; });
+    for (const DrawItem& it : waterVisible_) {
+        glUniform3f(originLoc, it.ox, 0.0f, it.oz);
+        it.chunk->drawWater();
     }
 }
 

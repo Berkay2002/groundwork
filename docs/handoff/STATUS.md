@@ -79,6 +79,14 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   seconds on big worlds. Exit and chunk-unload still do full synchronous
   saves. The F3 overlay shows live mob/item counts; --bench-secs has a
   dedicated "mobs" section for the living draw pass.
+- RD64 chunk rendering now avoids sorting opaque chunks and caches the visible
+  chunk list while the eye/frustum and drawable chunk state are unchanged.
+  Water still sorts its visible subset back-to-front. For render-distance
+  benchmarks, do not use `--demo-menu`: the pause menu stops simulation and
+  produces fake frames. Use a scratch directory with `settings.cfg`
+  `render_distance=64`, `survival=0`, `vsync=1`, `fps_max=0`; creative keeps
+  ambient/persistent mobs renderable but prevents hostile attacks from turning
+  the benchmark into a combat test.
 - Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
   → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
   Creative players, dead players, and demo runs are ignored (main passes a
@@ -128,8 +136,12 @@ flash is shader-side; the uFlash=0 path screenshot-checked, the flash itself
 awaits playtest. Perf regression check ran in a scratch dir (`--bench-secs 10
 --time 0.7`, 16k chunks, ~4.5k persistent mobs): mob culling + trickle
 autosave took it from 33.5 avg fps / 6.5 s worst frame to 275 avg fps /
-9.5 ms worst frame. Latest TSAN was not run (no new threading surface:
-entities, spawning, and saves remain main-thread-only).
+9.5 ms worst frame. Latest RD64 render benchmark (`--bench-secs 5 --time 0.7`
+with the scratch creative settings above, 16,641 chunks loaded and 5,323 drawn
+per frame) improved the opaque chunk section from 2.26 ms/frame to 1.75
+ms/frame, avg fps from 275.0 to ~335, and p99 from 7.86 ms to ~7.6 ms after
+the opaque-sort removal + visible-cache changes. Latest TSAN was not run (no
+new threading surface: rendering cache changes stay main-thread-only).
 
 ## Pointers
 
