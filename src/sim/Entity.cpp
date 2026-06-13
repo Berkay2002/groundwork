@@ -100,6 +100,14 @@ bool findAmbientLivingSpawn(const World& world, ChunkKey key, glm::vec3& out) {
 }
 }
 
+void Entities::markDirty(ChunkKey key) {
+    dirtyEntityChunks_.insert(key);
+}
+
+void Entities::markDirtyForPos(glm::vec3 pos) {
+    markDirty(chunkForPos(pos));
+}
+
 float Entities::rand01() {
     rng_ = rng_ * 1664525u + 1013904223u;
     return float(rng_ >> 8) / float(1u << 24);
@@ -134,6 +142,7 @@ void Entities::spawnItem(const glm::vec3& pos, const glm::vec3& vel, ItemStack s
         e->stack = part;
         e->spinSeed = rng_;
         items_.push_back(std::move(e));
+        markDirtyForPos(pos);
         count -= take;
     }
 }
@@ -163,6 +172,7 @@ LivingEntityId Entities::spawnLiving(const glm::vec3& pos, const std::string& mo
     e->modelId = modelId;
     LivingEntityId id = e->id;
     living_.push_back(std::move(e));
+    markDirtyForPos(pos);
     rebuildBuckets();
     return id;
 }
@@ -197,6 +207,7 @@ void Entities::spawnAmbientLivingForChunk(const World& world, ChunkKey key) {
         break;
     }
     ambientConsumedChunks_.insert(key);
+    markDirty(key);
 }
 
 bool Entities::damageLiving(LivingEntityId id, int amount,
@@ -205,6 +216,8 @@ bool Entities::damageLiving(LivingEntityId id, int amount,
     for (auto& up : living_) {
         LivingEntity& e = *up;
         if (e.id != id || e.dead) continue;
+        ChunkKey key = chunkForPos(e.body.pos);
+        markDirty(key);
         e.health -= amount;
         if (e.health <= 0) {
             const MobDef& def = mobDef(e.kind);
@@ -266,8 +279,9 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
     const glm::vec3 target = playerPos + glm::vec3(0, 0.9f, 0); // player torso
     for (auto& up : items_) {
         ItemEntity& e = *up;
-        e.prevPos = e.body.pos;
         if (!world.isAreaReady(e.body.pos, 0)) continue; // frozen in the void
+        ChunkKey oldKey = chunkForPos(e.body.pos);
+        e.prevPos = e.body.pos;
         if (e.ageTicks < UINT32_MAX) ++e.ageTicks;
         glm::vec3 center = e.body.pos + glm::vec3(0, e.body.height * 0.5f, 0);
         bool canPick = e.ageTicks >= PICKUP_DELAY_TICKS && inv != nullptr;
@@ -289,6 +303,8 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             else e.stack.count = uint8_t(leftover); // inventory full: keep the remainder
         }
         if (e.ageTicks >= DESPAWN_TICKS) e.dead = true;
+        markDirty(oldKey);
+        markDirtyForPos(e.body.pos);
     }
 
     for (size_t i = 0; i < items_.size(); ++i) {
@@ -305,6 +321,8 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
             int moved = std::min(space, int(b.stack.count));
             a.stack.count = uint8_t(a.stack.count + moved);
             b.stack.count = uint8_t(b.stack.count - moved);
+            markDirtyForPos(a.body.pos);
+            markDirtyForPos(b.body.pos);
             if (b.stack.count == 0) b.dead = true;
         }
     }
@@ -318,6 +336,7 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         LivingEntity& e = *up;
         if (e.dead) continue;
         if (!world.isAreaReady(e.body.pos, 1)) continue;
+        ChunkKey oldKey = chunkForPos(e.body.pos);
         e.prevPos = e.body.pos;
         if (e.ageTicks < UINT32_MAX) ++e.ageTicks;
         if (e.attackCooldownTicks > 0) --e.attackCooldownTicks;
@@ -374,6 +393,8 @@ void Entities::tick(const World& world, const glm::vec3& playerPos, Inventory* i
         e.body.vel.y += LIVING_GRAVITY * dt;
         if (e.body.vel.y < LIVING_TERMINAL) e.body.vel.y = LIVING_TERMINAL;
         moveBody(world, e.body, dt);
+        markDirty(oldKey);
+        markDirtyForPos(e.body.pos);
     }
     cleanupLiving();
     rebuildBuckets();
@@ -432,6 +453,7 @@ void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
         std::fprintf(stderr,
                      "warning: entity chunk %d,%d has bad/old save format, discarding\n",
                      key.x, key.z);
+        markDirty(key);
     }
     for (const SavedDroppedItem& s : saved.items) {
         auto e = std::make_unique<ItemEntity>();
@@ -474,9 +496,10 @@ void Entities::loadChunkEntities(const std::string& saveDir, ChunkKey key) {
 void Entities::autosaveTick(const std::string& saveDir, bool saveEnabled,
                             float dt, float intervalSeconds) {
     if (!saveEnabled || intervalSeconds <= 0.0f) return;
-    size_t total = loadedEntityChunks_.size();
+    size_t total = dirtyEntityChunks_.size();
     if (total == 0) return;
-    // Pace so one full cycle of all loaded chunks takes ~intervalSeconds.
+    // Pace so one full cycle of dirty chunks takes ~intervalSeconds.
+    // Clean loaded chunks already match disk and should not cost frame time.
     autosaveCredit_ += dt * float(total) / intervalSeconds;
     int budget = int(autosaveCredit_);
     if (budget <= 0) return;
@@ -484,11 +507,12 @@ void Entities::autosaveTick(const std::string& saveDir, bool saveEnabled,
     budget = std::min(budget, 8); // never burst, even after a frame stall
     while (budget-- > 0) {
         if (autosaveQueue_.empty())
-            autosaveQueue_.assign(loadedEntityChunks_.begin(),
-                                  loadedEntityChunks_.end());
+            autosaveQueue_.assign(dirtyEntityChunks_.begin(),
+                                  dirtyEntityChunks_.end());
         ChunkKey key = autosaveQueue_.back();
         autosaveQueue_.pop_back();
         if (!loadedEntityChunks_.count(key)) continue; // unloaded since queued
+        if (!dirtyEntityChunks_.count(key)) continue;  // saved since queued
         saveLoadedChunkEntities(saveDir, key, saveEnabled);
     }
 }
@@ -501,6 +525,8 @@ bool Entities::saveLoadedChunkEntities(const std::string& saveDir, ChunkKey key,
     if (!ok)
         std::fprintf(stderr, "warning: failed to save entity chunk %d,%d\n",
                      key.x, key.z);
+    else
+        dirtyEntityChunks_.erase(key);
     return ok;
 }
 
@@ -522,6 +548,7 @@ void Entities::saveAndUnloadChunkEntities(const std::string& saveDir, ChunkKey k
                       }),
                   living_.end());
     loadedEntityChunks_.erase(key);
+    dirtyEntityChunks_.erase(key);
     ambientLivingChunks_.erase(key);
     ambientConsumedChunks_.erase(key);
     rebuildBuckets();

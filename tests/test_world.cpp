@@ -2928,9 +2928,9 @@ static void testEntityStreamCrossingAutosaveAndDemoIsolation() {
     CHECK(loaded.items.size() == 1);
     CHECK(loaded.items[0].stack.item == ItemId::Coal && loaded.items[0].stack.count == 2);
 
-    // The incremental autosave eventually covers every loaded chunk: a
-    // second item appears on disk after enough paced ticks, without ever
-    // bursting (budget is internal; we only assert coverage + pacing).
+    // The incremental autosave covers dirty chunks only: a clean loaded
+    // chunk is not rewritten, but newly dirtied chunks are picked up after
+    // enough paced ticks, without bursting (budget is internal).
     std::filesystem::remove(entityChunkPath(dir, chunk1));
     ents.spawnItem(glm::vec3(0.5f, 70.0f, 0.5f), glm::vec3(0.0f),
                    makeItemStack(ItemId::Coal, 1));
@@ -2939,6 +2939,12 @@ static void testEntityStreamCrossingAutosaveAndDemoIsolation() {
     for (int i = 0; i < 200; ++i)
         ents.autosaveTick(dir, true, 0.5f, 30.0f);
     CHECK(std::filesystem::exists(entityChunkPath(dir, chunk0)));
+    CHECK(!std::filesystem::exists(entityChunkPath(dir, chunk1)));
+
+    ents.spawnItem(glm::vec3(17.5f, 70.0f, 0.5f), glm::vec3(0.0f),
+                   makeItemStack(ItemId::DirtBlock, 1));
+    for (int i = 0; i < 200; ++i)
+        ents.autosaveTick(dir, true, 0.5f, 30.0f);
     CHECK(std::filesystem::exists(entityChunkPath(dir, chunk1)));
     // Disabled saving writes nothing.
     std::filesystem::remove(entityChunkPath(dir, chunk0));

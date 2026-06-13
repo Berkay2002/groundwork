@@ -130,12 +130,15 @@ private:
     // ambient creature exactly once per world.
     std::unordered_set<ChunkKey, ChunkKeyHash> ambientConsumedChunks_;
     std::unordered_set<ChunkKey, ChunkKeyHash> loadedEntityChunks_;
+    std::unordered_set<ChunkKey, ChunkKeyHash> dirtyEntityChunks_;
     std::vector<ChunkKey> autosaveQueue_; // refilled snapshot of loaded chunks
     float autosaveCredit_ = 0.0f;
     LivingEntityId nextLivingId_ = 1;
     uint32_t rng_ = 0x9E3779B9u;
     float rand01();
     SavedEntityChunk gatherChunk(ChunkKey key) const;
+    void markDirty(ChunkKey key);
+    void markDirtyForPos(glm::vec3 pos);
     void cleanupLiving();
     void rebuildBuckets();
 };

@@ -754,9 +754,12 @@ int main(int argc, char** argv) {
     // --bench-secs S : warm up until chunk streaming settles, then measure S
     //              seconds and print frame-time statistics (avg/1% low/0.1%
     //              low fps, percentiles) — the steady-state stutter check.
+    // --bench-spin D : during the measured bench window, rotate the camera D
+    //              degrees/second to exercise moving-frustum render cost.
     long maxFrames = -1;
     bool bench = false;
     double benchSecs = 0.0;
+    float benchSpinDegPerSec = 0.0f;
     bool demoItems = false; // spawn a few item entities for screenshot checks
     bool demoInv = false;   // survival + stocked inventory, opened, for screenshots
     bool demoBreak = false; // survival mining crack overlay for screenshots
@@ -773,6 +776,7 @@ int main(int argc, char** argv) {
             if (std::strcmp(argv[i], "--frames") == 0) maxFrames = std::atol(argv[i + 1]);
             if (std::strcmp(argv[i], "--bench") == 0) { maxFrames = std::atol(argv[i + 1]); bench = true; }
             if (std::strcmp(argv[i], "--bench-secs") == 0) { benchSecs = std::atof(argv[i + 1]); bench = true; }
+            if (std::strcmp(argv[i], "--bench-spin") == 0) benchSpinDegPerSec = float(std::atof(argv[i + 1]));
             if (std::strcmp(argv[i], "--time") == 0) startTime = float(std::atof(argv[i + 1]));
         }
         if (std::strcmp(argv[i], "--demo-items") == 0)    { demoItems    = true; demoRun = true; }
@@ -1105,6 +1109,8 @@ int main(int argc, char** argv) {
         app.entities.applyStreamEvents(SAVE_DIR, world.consumeStreamEvents(), !demoRun,
                                        demoRun ? nullptr : &world, !demoRun);
         benchMark(2);
+        if (bench && !benchWarmup && benchSpinDegPerSec != 0.0f)
+            app.player.yaw += benchSpinDegPerSec * frameDt;
 
         // Camera for this frame, computed early: mesh uploads prioritize
         // in-frustum chunks, so processMeshing wants the frustum too.

@@ -73,20 +73,24 @@ user approval; follow `docs/handoff/WORKFLOW.md`.
   world-wide (~28% of explored chunks + natural spawns), so draw cost must
   track what is on screen, not the population — uncull and a 16k-chunk world
   pays ~11 ms/frame in mob draws.
-- Entity autosave trickles: Entities::autosaveTick saves a few chunk files
-  per frame (one full cycle per ~30 s, hard cap 8/frame) instead of the old
-  every-30-s burst of all loaded entity files, which stalled frames for
-  seconds on big worlds. Exit and chunk-unload still do full synchronous
-  saves. The F3 overlay shows live mob/item counts; --bench-secs has a
-  dedicated "mobs" section for the living draw pass.
-- RD64 chunk rendering now avoids sorting opaque chunks and caches the visible
-  chunk list while the eye/frustum and drawable chunk state are unchanged.
-  Water still sorts its visible subset back-to-front. For render-distance
-  benchmarks, do not use `--demo-menu`: the pause menu stops simulation and
-  produces fake frames. Use a scratch directory with `settings.cfg`
-  `render_distance=64`, `survival=0`, `vsync=1`, `fps_max=0`; creative keeps
-  ambient/persistent mobs renderable but prevents hostile attacks from turning
-  the benchmark into a combat test.
+- Entity autosave trickles dirty chunks only: Entities::autosaveTick paces a
+  full dirty-set cycle over ~30 s (hard cap 8/frame) instead of scanning every
+  loaded entity chunk. Item/living spawn, movement, merge, damage, death, bad
+  entity-file cleanup, and ambient-spawn markers dirty their chunk; explicit
+  save, exit, and chunk-unload still write current snapshots synchronously.
+  The F3 overlay shows live mob/item counts; --bench-secs has a dedicated
+  "mobs" section for the living draw pass.
+- RD64 chunk rendering now avoids sorting opaque chunks, keeps a main-thread
+  drawable-candidate list with cached chunk bounds/origins, and caches the
+  visible chunk list while the eye/frustum and drawable chunk state are
+  unchanged. Water still sorts its visible subset back-to-front. For
+  render-distance benchmarks, do not use `--demo-menu`: the pause menu stops
+  simulation and produces fake frames. Use a scratch directory with
+  `settings.cfg` `render_distance=64`, `survival=0`, `vsync=1`, `fps_max=0`;
+  creative keeps ambient/persistent mobs renderable but prevents hostile
+  attacks from turning the benchmark into a combat test. `--bench-spin D`
+  rotates the camera by D degrees/second during the measured benchmark window
+  to test moving-frustum costs.
 - Zombies are hostile: wander → chase (12-block radius + voxel line of sight)
   → melee (2 HP, 1 s cooldown, knockback) against a live survival player.
   Creative players, dead players, and demo runs are ignored (main passes a
@@ -140,8 +144,14 @@ autosave took it from 33.5 avg fps / 6.5 s worst frame to 275 avg fps /
 with the scratch creative settings above, 16,641 chunks loaded and 5,323 drawn
 per frame) improved the opaque chunk section from 2.26 ms/frame to 1.75
 ms/frame, avg fps from 275.0 to ~335, and p99 from 7.86 ms to ~7.6 ms after
-the opaque-sort removal + visible-cache changes. Latest TSAN was not run (no
-new threading surface: rendering cache changes stay main-thread-only).
+the opaque-sort removal + visible-cache changes. Latest moving-camera RD64
+benchmark (`--bench-secs 5 --time 0.7 --bench-spin 90`, same scratch creative
+settings) improved the best final repeat over the moving baseline: avg fps
+326.0 -> 363.0, opaque 1.86 -> 1.66 ms/frame, edit/autosave 0.67 -> 0.52
+ms/frame, p99 7.19 -> 7.60 ms, max 8.98 -> 8.84 ms. A preceding final repeat
+had a bad 20.92 ms max frame, so tail spikes remain noisy and should be a
+future target. Latest TSAN was not run (no new threading surface: rendering
+candidate/cache changes and dirty entity autosave stay main-thread-only).
 
 ## Pointers
 

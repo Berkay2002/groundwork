@@ -286,6 +286,7 @@ void World::update(const glm::vec3& playerPos, int renderDistance) {
             if (std::max(dx, dz) > renderDistance + 2) {
                 if (it->second->modified) saveChunk(*it->second);
                 streamEvents_.unloaded.push_back(it->first);
+                removeDrawCandidate(it->first);
                 it = chunks_.erase(it);
                 unloaded = true;
             } else {
@@ -407,7 +408,10 @@ void World::processMeshing(int enqueueBudget, const glm::vec3& playerPos,
     size_t did = 0;
     for (; did < uploadQueue_.size(); ++did) {
         if (did > 0 && msSince(t0) > uploadBudgetMs) break;
-        chunks_.at(uploadQueue_[did].first)->uploadMesh(uploadQueue_[did].second);
+        const ChunkKey& key = uploadQueue_[did].first;
+        Chunk* chunk = chunks_.at(key).get();
+        chunk->uploadMesh(uploadQueue_[did].second);
+        refreshDrawCandidate(key, *chunk);
         ++uploads_;
     }
     uploadQueue_.erase(uploadQueue_.begin(), uploadQueue_.begin() + did);
@@ -471,21 +475,61 @@ void World::waitUntilLoaded(const glm::vec3& pos, int radius, int timeoutMs) {
     }
 }
 
-// Cull the chunk map once per frame. Chunks with nothing in either pass are
-// dropped here so the draw loops never bind or set uniforms for them.
+void World::refreshDrawCandidate(const ChunkKey& key, Chunk& chunk) {
+    if (!chunk.hasOpaque() && !chunk.hasWater()) {
+        removeDrawCandidate(key);
+        return;
+    }
+
+    auto fill = [&](DrawCandidate& item) {
+        const float ox = float(key.x * CHUNK_SIZE);
+        const float oz = float(key.z * CHUNK_SIZE);
+        item = {key, &chunk,
+                {ox, 0.0f, oz},
+                {ox + CHUNK_SIZE, float(CHUNK_HEIGHT), oz + CHUNK_SIZE},
+                ox, oz,
+                ox + CHUNK_SIZE * 0.5f, oz + CHUNK_SIZE * 0.5f};
+    };
+
+    auto it = drawCandidateIndex_.find(key);
+    if (it == drawCandidateIndex_.end()) {
+        DrawCandidate item{};
+        fill(item);
+        drawCandidateIndex_[key] = drawCandidates_.size();
+        drawCandidates_.push_back(item);
+    } else {
+        fill(drawCandidates_[it->second]);
+    }
+}
+
+void World::removeDrawCandidate(const ChunkKey& key) {
+    auto it = drawCandidateIndex_.find(key);
+    if (it == drawCandidateIndex_.end()) return;
+
+    size_t idx = it->second;
+    size_t last = drawCandidates_.size() - 1;
+    if (idx != last) {
+        drawCandidates_[idx] = drawCandidates_[last];
+        drawCandidateIndex_[drawCandidates_[idx].key] = idx;
+    }
+    drawCandidates_.pop_back();
+    drawCandidateIndex_.erase(it);
+    visibleCacheValid_ = false;
+}
+
+// Cull the drawable chunk list once per frame. Chunks with nothing in either
+// pass are kept out at mesh-upload time, so moving-camera rebuilds do not scan
+// the whole chunk map or reconstruct chunk bounds.
 void World::drawChunks(const Frustum& frustum, const glm::vec3& eye, int originLoc) {
     bool sameEye = glm::dot(eye - visibleCacheEye_, eye - visibleCacheEye_) < 1e-6f;
     if (!visibleCacheValid_ || !sameEye || !sameFrustum(frustum, visibleCacheFrustum_)) {
         visible_.clear();
-        visible_.reserve(chunks_.size() / 4);
-        for (auto& [key, chunk] : chunks_) {
-            if (!chunk->hasOpaque() && !chunk->hasWater()) continue;
-            glm::vec3 mn(float(key.x * CHUNK_SIZE), 0.0f, float(key.z * CHUNK_SIZE));
-            glm::vec3 mx = mn + glm::vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
-            if (!frustum.intersectsAABB(mn, mx)) continue;
-            glm::vec2 center(mn.x + CHUNK_SIZE * 0.5f, mn.z + CHUNK_SIZE * 0.5f);
-            glm::vec2 d = center - glm::vec2(eye.x, eye.z);
-            visible_.push_back({glm::dot(d, d), chunk.get(), mn.x, mn.z});
+        visible_.reserve(drawCandidates_.size() / 4);
+        for (const DrawCandidate& item : drawCandidates_) {
+            if (!frustum.intersectsAABB(item.mn, item.mx)) continue;
+            float dx = item.centerX - eye.x;
+            float dz = item.centerZ - eye.z;
+            visible_.push_back({dx * dx + dz * dz, item.chunk, item.ox, item.oz});
         }
         visibleCacheEye_ = eye;
         visibleCacheFrustum_ = frustum;

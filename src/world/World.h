@@ -5,6 +5,7 @@
 #include "world/Terrain.h"
 #include "world/BlockEntity.h"
 #include <atomic>
+#include <cstddef>
 #include <climits>
 #include <glm/glm.hpp>
 #include <memory>
@@ -187,7 +188,18 @@ private:
     // Frame-visible chunks: built by drawChunks and reused by drawWater so
     // the chunk map is culled only once. Water chunks are sorted separately
     // back-to-front because the opaque pass does not need ordering.
+    struct DrawCandidate {
+        ChunkKey key;
+        Chunk* chunk;
+        glm::vec3 mn, mx;
+        float ox, oz;
+        float centerX, centerZ;
+    };
     struct DrawItem { float dist2; Chunk* chunk; float ox, oz; };
+    void refreshDrawCandidate(const ChunkKey& key, Chunk& chunk);
+    void removeDrawCandidate(const ChunkKey& key);
+    std::vector<DrawCandidate> drawCandidates_;
+    std::unordered_map<ChunkKey, size_t, ChunkKeyHash> drawCandidateIndex_;
     std::vector<DrawItem> visible_;
     std::vector<DrawItem> waterVisible_;
     bool visibleCacheValid_ = false;
